@@ -2,11 +2,11 @@ name: Angry Cat typed turn completion test
 version: 1
 author: Angry Cat Pediatric Interviewer
 steps:
-  - wait-serial: 'SIM_INTEGRATION: READY'
-  - write-serial: 'i'
-  - wait-serial: 'SIM_MIC: interactive text mode enabled'
-  - write-serial: 's'
-  - wait-serial: 'SIM_MIC: awaiting answer'
-  - write-serial: 'a I would assess immediate safety and pain, keep the child with the caregiver, use tell-show-do and praise, complete a gentle examination, obtain indicated radiographs, and explain staged treatment and follow-up.'
-  - wait-serial: 'SIM_MIC: Worker accepted typed answer; client turn complete=true'
-  - wait-serial: 'Interviewer: Gemini turn complete; answer count=1'
+  - wait-serial: "SIM_INTEGRATION: READY"
+  - write-serial: "i"
+  - wait-serial: "SIM_MIC: interactive text mode enabled"
+  - write-serial: "s"
+  - wait-serial: "SIM_MIC: awaiting answer"
+  - write-serial: "a I would assess immediate safety and pain, keep the child with the caregiver, use tell-show-do and praise, complete a gentle examination, obtain indicated radiographs, and explain staged treatment and follow-up."
+  - wait-serial: "SIM_MIC: Worker accepted typed answer; client turn complete=true"
+  - wait-serial: "Interviewer: Gemini turn complete; answer count=1"

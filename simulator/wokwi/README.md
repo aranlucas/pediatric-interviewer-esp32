@@ -9,8 +9,8 @@ This profile runs the production Arduino sketch on Wokwi's ESP32-S3 model with
 - serial-injected touch routing to the first study topic;
 - the safe guard that prevents an interview without credentials; and
 - FreeRTOS queue delivery of an interviewer state event; and
-- a 40-second synthetic PCM burst through the 1 MiB PSRAM ring and its
-  high/low-water backpressure transitions.
+- a 40-second paced PCM stream through the 64 KiB PSRAM ring, including ring
+  wraparound and byte-for-byte playback validation.
 
 Simulator builds define `ANGRY_CAT_SIMULATOR`. That build never includes local
 interviewer credentials and cannot contact the production Worker.
@@ -63,10 +63,18 @@ other's objects.
 For the visual local flow, run `make compile-simulator-integration`, start the
 Wokwi extension, and type `s` into Wokwi Terminal. Success ends with
 `SIM_INTEGRATION: END_TO_END_PASSED`. This test contacts the deployed service
-and creates a real private interview report. It requires Wokwi's Private IoT
-Gateway. The Community license's Public Gateway can reach ordinary HTTPS but
-did not complete the ESP32-S3 WebSocket TLS handshake; the simulator refuses
-to fall back to plaintext or disable certificate validation.
+and creates a real private interview report.
+
+The live interview runs only under the VS Code extension, which bundles the
+Wokwi IoT Gateway and gives the simulated radio real network access. It is not
+a license tier: `wokwi-cli` implements no gateway at all, so it always routes
+through Wokwi's cloud gateway, which does not complete the ESP32-S3 WebSocket
+TLS handshake to the Worker. The firmware refuses to fall back to plaintext or
+disable certificate validation, so `make simulate-integration` and
+`make simulate-turn-complete` fail with `Could not connect to Cloudflare voice`
+regardless of `WOKWI_CLI_TOKEN`. Running `wokwigw` locally does not help: the
+CLI has no option to point at it. Use the VS Code flow for the live path, and
+`cd worker && npm run simulate:interview` for a headless end-to-end check.
 
 For a question-aware interactive interview, type `i` before `s`. Whenever the
 terminal prints `SIM_MIC: awaiting answer`, enter a new response as:
@@ -130,11 +138,10 @@ by the status chip: the ESP32 connects to Wokwi's `Wokwi-GUEST` virtual access
 point and retains the simulator's real TCP/TLS stack. The chip reflects that
 connection and its signal strength.
 
-Interviewer playback uses a 1 MiB PSRAM ring. When a burst reaches 256 KiB,
-the receive callback plays buffered PCM down to 128 KiB before accepting more
-socket data. This applies TCP backpressure while preserving every audio frame;
-the remaining capacity protects against unexpectedly large individual frames.
-Type `b` in Wokwi Terminal to run the deterministic buffer wrap and burst test.
+Interviewer playback uses a 64 KiB PSRAM ring with a 24 KiB startup prebuffer.
+The Worker sends each 4,800-byte PCM frame at its 100 ms playback duration, so
+the device no longer needs a blocking high/low-water backpressure loop. Type
+`b` in Wokwi Terminal to run the deterministic ring-wrap and playback test.
 
 Wokwi does not provide the board's AXS15231B QSPI display as a standard visual
 part. The custom display is therefore a pixel-accurate visual mirror rather

@@ -1,14 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { sanitizeLine } from "../src/lib";
-import {
-  DEVICE_GPIO_HEADER_PIN,
-  DEVICE_GPIO_PIN,
-  parseClientToolResult,
-} from "../src/device-tools";
-import { airQualityCategory, getCurrentWeather, weatherCondition } from "../src/weather-tools";
-import { NOVA_3_QUERY_MODEL, requestedTranscriptionModel } from "../src/voice-config";
-import { isRepeatRequest, PEDIATRIC_TOPICS, requestedTopic } from "../src/interview-content";
+import { PEDIATRIC_TOPICS } from "../src/interview-content";
 import {
   buildInterviewMarkdown,
   evaluateInterview,
@@ -18,9 +10,13 @@ import {
   storeInterviewReport,
   type StoredInterviewReport,
 } from "../src/interview-report";
+import { isResponseComplete, shouldEndTurn } from "../src/turn-completion";
 import {
   GEMINI_LIVE_MODEL,
   geminiLiveConfig,
+  geminiOpeningTurn,
+  geminiReplayForAudioTurn,
+  geminiReadinessTurn,
   geminiTextTurn,
   TURN_DISPOSITION_TOOL,
 } from "../src/gemini-live-protocol";
@@ -28,11 +24,9 @@ import { openingPresentationForDisplay, questionForDisplay } from "../src/interv
 import { parseInterviewerDeviceMessage } from "../src/interviewer-protocol";
 import { resamplePcm16 } from "../src/pcm-audio";
 
-const seattle = { name: "Seattle", latitude: 47.6062, longitude: -122.3321 };
-
 afterEach(() => vi.restoreAllMocks());
 
-describe("Angry Cat server-side tools", () => {
+describe("Interviewer device display", () => {
   it("fits the generated presentation on screen while preserving its question", () => {
     const presentation = openingPresentationForDisplay(
       `A seven-year-old presents after a playground injury. ${"Additional evolving clinical detail. ".repeat(20)}What findings determine your immediate management?`,
@@ -50,107 +44,26 @@ describe("Angry Cat server-side tools", () => {
       ),
     ).toBe("What treatment do you recommend?");
   });
-
-  it("accepts only a correlated, bounded client-tool result envelope", () => {
-    expect(DEVICE_GPIO_PIN).toBe(21);
-    expect(DEVICE_GPIO_HEADER_PIN).toBe(6);
-    expect(
-      parseClientToolResult(
-        JSON.stringify({
-          type: "client_tool_result",
-          id: "call-1",
-          tool: "set_gpio",
-          ok: true,
-          result: { pin: 21, state: "on", level: 1 },
-        }),
-      ),
-    ).toMatchObject({ id: "call-1", tool: "set_gpio", ok: true });
-    expect(parseClientToolResult("not-json")).toBeNull();
-    expect(
-      parseClientToolResult(
-        JSON.stringify({ type: "client_tool_result", tool: "set_gpio", ok: true }),
-      ),
-    ).toBeNull();
-  });
-
-  it("reads the C++ model query used by createTranscriber", () => {
-    expect(
-      requestedTranscriptionModel("wss://example.com/agents/angry-cat/esp32?model=nova-3"),
-    ).toBe(NOVA_3_QUERY_MODEL);
-    expect(requestedTranscriptionModel(null)).toBeNull();
-  });
-
-  it("maps weather codes into voice-friendly conditions", () => {
-    expect(weatherCondition(2)).toBe("Partly cloudy");
-    expect(weatherCondition(61)).toBe("Rain");
-  });
-
-  it("maps US AQI into the standard category", () => {
-    expect(airQualityCategory(48)).toBe("Good");
-    expect(airQualityCategory(75)).toBe("Moderate");
-    expect(airQualityCategory(175)).toBe("Unhealthy");
-  });
-
-  it("fetches and shapes current weather inside the Worker", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({
-        current: {
-          time: "2026-08-12T09:30",
-          temperature_2m: 63,
-          apparent_temperature: 63,
-          relative_humidity_2m: 68,
-          weather_code: 2,
-          wind_speed_10m: 4,
-          wind_gusts_10m: 9,
-          is_day: 1,
-        },
-        daily: {
-          temperature_2m_max: [74],
-          temperature_2m_min: [57],
-          precipitation_probability_max: [10],
-          uv_index_max: [5],
-          sunset: ["2026-08-12T20:22"],
-        },
-      }),
-    );
-
-    await expect(getCurrentWeather(seattle)).resolves.toMatchObject({
-      source: "Open-Meteo live server tool",
-      location: "Seattle",
-      condition: "Partly cloudy",
-      temperatureF: 63,
-      highF: 74,
-      lowF: 57,
-    });
-    const calledUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
-    expect(calledUrl.hostname).toBe("api.open-meteo.com");
-    expect(calledUrl.searchParams.get("latitude")).toBe("47.6062");
-  });
-
-  it("rejects an incomplete upstream result instead of inventing values", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ current: {} }));
-    await expect(getCurrentWeather(seattle)).rejects.toThrow("daily weather");
-  });
-
-  it("surfaces an upstream HTTP error", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("unavailable", { status: 503 }));
-    await expect(getCurrentWeather(seattle)).rejects.toThrow("HTTP 503");
-  });
-
-  it("normalizes and bounds model output for the LCD", () => {
-    const line = sanitizeLine(
-      "“Fine.  The clouds are doing their best, which is apparently not much today, so take a jacket anyway.”",
-    );
-    expect(line).not.toMatch(/[\r\n“”"]/);
-    expect(line.length).toBeLessThanOrEqual(88);
-  });
-
-  it("uses a deterministic empty-line response", () => {
-    expect(sanitizeLine("\n\t")).toBe("Even the clouds have nothing useful to say.");
-  });
 });
 
 describe("Pediatric oral-board interviewer", () => {
+  it("separates the case presentation from the readiness question", () => {
+    expect(geminiOpeningTurn()).toEqual({
+      turns:
+        'PRESENT_CASE. Say "Here is your case." Then present the opening vignette in at most 60 spoken words, without asking any question. End the response immediately after the vignette.',
+      turnComplete: true,
+    });
+    expect(geminiReadinessTurn()).toEqual({
+      turns: 'ASK_READINESS. Ask exactly, "Are you ready to begin?" Say nothing else.',
+      turnComplete: true,
+    });
+    expect(geminiReplayForAudioTurn("Here is your case. A child presents with pain.")).toEqual({
+      turns:
+        "REPLAY_FOR_AUDIO. Speak exactly the following text and nothing else: Here is your case. A child presents with pain.",
+      turnComplete: true,
+    });
+  });
+
   it("marks a typed candidate answer as a complete Gemini client turn", () => {
     expect(geminiTextTurn("I would assess the child first.")).toEqual({
       turns: "I would assess the child first.",
@@ -224,7 +137,12 @@ describe("Pediatric oral-board interviewer", () => {
               properties: {
                 disposition: {
                   type: "string",
-                  enum: ["advance_skillset", "probe_current_answer", "provide_case_information"],
+                  enum: [
+                    "begin_first_question",
+                    "advance_skillset",
+                    "probe_current_answer",
+                    "provide_case_information",
+                  ],
                 },
               },
               required: ["disposition"],
@@ -250,6 +168,7 @@ describe("Pediatric oral-board interviewer", () => {
     expect(instruction).toContain(
       "ask exactly one focused question with one primary decision target",
     );
+    expect(instruction).toContain('On ASK_READINESS, ask exactly, "Are you ready to begin?"');
     expect(instruction).toContain(
       "reassesses risk, adapts the plan, and explains what would change",
     );
@@ -257,12 +176,19 @@ describe("Pediatric oral-board interviewer", () => {
     expect(instruction).toContain(
       "Clarification and case-information turns remain within the current exchange",
     );
-    expect(instruction).toContain("Treat unrelated speech as ambient audio");
+    expect(instruction).toContain(
+      "If the candidate says they did not hear, missed, or were not given the opening case or question",
+    );
+    expect(instruction).toContain(
+      "A request to hear or repeat the case or question is not unrelated speech",
+    );
+    expect(instruction).toContain("Treat genuinely unrelated speech as ambient audio");
     expect(instruction).toContain("Never speak disclaimers");
     expect(instruction).toContain(
       "Never name, announce, restate, paraphrase, or introduce the selected topic",
     );
-    expect(instruction).toContain("Start the opening vignette with patient information");
+    expect(instruction).toContain('say exactly, "Here is your case."');
+    expect(instruction).toContain("Present the generated vignette without asking any question");
     expect(instruction).not.toContain("state the topic, present the generated vignette");
     expect(instruction).not.toContain("medical advice");
     expect(instruction).not.toContain("A healthy four-year-old");
@@ -289,19 +215,6 @@ describe("Pediatric oral-board interviewer", () => {
       expect(topic.competencies).toHaveLength(6);
       expect("starterQuestion" in topic).toBe(false);
     }
-  });
-
-  it("parses only a known topic-selection command", () => {
-    expect(requestedTopic("Start topic: pulp_therapy")?.label).toBe("Pulp Therapy");
-    expect(requestedTopic("Start topic: made_up")).toBeNull();
-    expect(requestedTopic("Tell me about pulp therapy")).toBeNull();
-  });
-
-  it("recognizes repeat requests without treating ordinary answers as repeats", () => {
-    expect(isRepeatRequest("Could you repeat the question? ")).toBe(true);
-    expect(isRepeatRequest("Please say that again.")).toBe(true);
-    expect(isRepeatRequest("I would repeat the radiograph in six months.")).toBe(false);
-    expect(isRepeatRequest("I would assess airway and oxygen saturation.")).toBe(false);
   });
 
   it("requires a six-exchange Oral Boards-compatible evaluation", () => {
@@ -463,3 +376,43 @@ function sampleReport(): StoredInterviewReport {
     },
   };
 }
+
+describe("Gemini Live turn boundaries", () => {
+  it("treats either completion signal as a response completion", () => {
+    expect(isResponseComplete({ generationComplete: true })).toBe(true);
+    expect(isResponseComplete({ turnComplete: true })).toBe(true);
+    expect(isResponseComplete({ generationComplete: false, turnComplete: true })).toBe(true);
+    expect(isResponseComplete({})).toBe(false);
+    expect(isResponseComplete({ generationComplete: false, turnComplete: false })).toBe(false);
+  });
+
+  it("ignores generationComplete during the opening handshake", () => {
+    // Gemini emits generationComplete before the turn's audio has finished
+    // arriving. Ending the turn there truncated the spoken case presentation
+    // and let one response advance the handshake twice.
+    expect(shouldEndTurn({ generationComplete: true }, true)).toBe(false);
+    expect(shouldEndTurn({ generationComplete: true, turnComplete: true }, true)).toBe(true);
+    expect(shouldEndTurn({ turnComplete: true }, true)).toBe(true);
+  });
+
+  it("accepts generationComplete once the interview is under way", () => {
+    expect(shouldEndTurn({ generationComplete: true }, false)).toBe(true);
+    expect(shouldEndTurn({ turnComplete: true }, false)).toBe(true);
+  });
+
+  it("never ends a turn without a completion signal", () => {
+    expect(shouldEndTurn({}, true)).toBe(false);
+    expect(shouldEndTurn({}, false)).toBe(false);
+  });
+
+  it("is self-deduplicating only during the opening handshake", () => {
+    const pair = [{ generationComplete: true }, { turnComplete: true }];
+    // During the handshake the predicate alone ends the turn exactly once, so
+    // a stage transition cannot be driven twice by a single response.
+    expect(pair.filter((signal) => shouldEndTurn(signal, true))).toHaveLength(1);
+    // Afterwards both signals qualify. Deduplication is the caller's job via
+    // responseCompletionHandled; anything that re-arms that flag mid-response
+    // reintroduces the double-advance this module exists to prevent.
+    expect(pair.filter((signal) => shouldEndTurn(signal, false))).toHaveLength(2);
+  });
+});

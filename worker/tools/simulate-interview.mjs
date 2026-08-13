@@ -15,9 +15,20 @@ import { interviewerSettings } from "./interviewer-settings.mjs";
 
 const execFileAsync = promisify(execFile);
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const sampleRate = 16_000;
-const pcmFrameBytes = 640;
+const sampleRate = 24_000;
+const pcmFrameBytes = 960;
 const frameDurationMs = 20;
+// The opening (vignette, readiness question, first clinical question) is many
+// seconds of speech. Anything materially below this means audio never played.
+const MINIMUM_OPENING_AUDIO_BYTES = 240_000; // ~5 s at 24 kHz mono 16-bit
+// Silent opening turns Gemini emits before it will speak the vignette.
+const MAX_SILENT_OPENING_TURNS = 2;
+
+/** Throws with machine-readable context so a failure explains itself. */
+function assert(condition, message, context) {
+  if (condition) return;
+  throw new Error(`${message} :: ${JSON.stringify(context)}`);
+}
 
 const defaultAnswers = [
   [
@@ -51,7 +62,7 @@ function usage() {
 
 Options:
   --topic <id>       Topic id sent to the examiner (default: behavior_guidance)
-  --turns <1-6>      Number of candidate answers to simulate (default: 6)
+  --turns <0-6>      Number of candidate answers to simulate; 0 tests readiness only (default: 6)
   --pause-ms <ms>    Thinking pause between answer halves (default: 2000)
   --commit-delay-ms <ms>  Silence after an answer before explicit commit (default: 500)
   --cafe-noise-percent <0-40>  Mix synthesized background chatter into input
@@ -94,8 +105,8 @@ function parseArguments(argv) {
     else throw new Error(`Unknown option: ${argument}`);
     index += 1;
   }
-  if (!Number.isInteger(options.turns) || options.turns < 1 || options.turns > 6) {
-    throw new Error("--turns must be an integer from 1 through 6");
+  if (!Number.isInteger(options.turns) || options.turns < 0 || options.turns > 6) {
+    throw new Error("--turns must be an integer from 0 through 6");
   }
   if (!Number.isFinite(options.pauseMs) || options.pauseMs < 0) {
     throw new Error("--pause-ms must be zero or greater");
@@ -170,6 +181,31 @@ async function synthesizeAnswers(options, temporaryDirectory) {
   return answers;
 }
 
+async function synthesizeReadiness(options, temporaryDirectory) {
+  const aiff = path.join(temporaryDirectory, "readiness.aiff");
+  const wav = path.join(temporaryDirectory, "readiness.wav");
+  await execFileAsync("say", [
+    "-v",
+    options.voice,
+    "-r",
+    String(options.rate),
+    "-o",
+    aiff,
+    "Yes, I am ready to begin.",
+  ]);
+  await execFileAsync("afconvert", [
+    "-f",
+    "WAVE",
+    "-d",
+    `LEI16@${sampleRate}`,
+    "-c",
+    "1",
+    aiff,
+    wav,
+  ]);
+  return wavPcm(fs.readFileSync(wav));
+}
+
 async function synthesizeCafeNoise(options, temporaryDirectory) {
   if (options.cafeNoisePercent === 0) return null;
   const aiff = path.join(temporaryDirectory, "cafe-chatter.aiff");
@@ -219,7 +255,7 @@ function wait(durationMs) {
   return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
-async function simulate(options, answers, settings, cafeNoise) {
+async function simulate(options, answers, readiness, settings, cafeNoise) {
   const startedAt = Date.now();
   const log = (event, details = {}) => {
     console.log(JSON.stringify({ elapsedMs: Date.now() - startedAt, event, ...details }));
@@ -238,10 +274,21 @@ async function simulate(options, answers, settings, cafeNoise) {
   let prematureStops = 0;
   let report = null;
   const candidateTranscripts = [];
+  const readinessTranscripts = [];
+  const turnCompletions = [];
+  let readinessSent = false;
+  let firstQuestionReceived = false;
+  let readinessOnlyComplete = false;
+  let readinessCompletionTarget = 0;
+  const openingTurns = [];
+  let firstQuestionTurn = null;
   let outputAudioFrames = 0;
   let outputAudioBytes = 0;
   let maximumOutputFrameBytes = 0;
   let oddOutputFrames = 0;
+  let turnOutputAudioBytes = 0;
+  let turnOutputAudioPeak = 0;
+  let turnOutputNonzeroSamples = 0;
   let resolveRun;
   let rejectRun;
   const run = new Promise((resolve, reject) => {
@@ -258,6 +305,10 @@ async function simulate(options, answers, settings, cafeNoise) {
       commitsSent,
       prematureStops,
       candidateTranscripts,
+      readinessTranscripts,
+      openingTurns,
+      firstQuestionTurn,
+      turnCompletions,
       report,
       outputAudio: {
         frames: outputAudioFrames,
@@ -309,6 +360,20 @@ async function simulate(options, answers, settings, cafeNoise) {
     candidateStreaming = false;
   };
 
+  const sendReadiness = async () => {
+    candidateStreaming = true;
+    stopCandidateAudio = false;
+    readinessSent = true;
+    log("candidate_readiness_started");
+    await sendPcm(readiness);
+    if (!stopCandidateAudio) await sendPcm(silence(options.commitDelayMs));
+    if (!stopCandidateAudio && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "commit_turn" }));
+      log("candidate_readiness_committed");
+    }
+    candidateStreaming = false;
+  };
+
   const maybeStartAnswer = () => {
     if (
       finished ||
@@ -325,6 +390,20 @@ async function simulate(options, answers, settings, cafeNoise) {
     const answerIndex = answersStarted;
     answersStarted += 1;
     void sendAnswer(answerIndex).catch(rejectRun);
+  };
+
+  const handleListening = () => {
+    if (!readinessSent) {
+      void sendReadiness().catch(rejectRun);
+      return;
+    }
+    if (!firstQuestionReceived) return;
+    if (options.turns === 0) {
+      readinessOnlyComplete = true;
+      readinessCompletionTarget = turnCompletions.length + 1;
+      return;
+    }
+    maybeStartAnswer();
   };
 
   const deadline = setTimeout(() => {
@@ -348,8 +427,14 @@ async function simulate(options, answers, settings, cafeNoise) {
     if (binary) {
       outputAudioFrames += 1;
       outputAudioBytes += data.length;
+      turnOutputAudioBytes += data.length;
       maximumOutputFrameBytes = Math.max(maximumOutputFrameBytes, data.length);
       if (data.length % 2 !== 0) oddOutputFrames += 1;
+      for (let offset = 0; offset + 1 < data.length; offset += 2) {
+        const sample = data.readInt16LE(offset);
+        if (sample !== 0) turnOutputNonzeroSamples += 1;
+        turnOutputAudioPeak = Math.max(turnOutputAudioPeak, Math.abs(sample));
+      }
       return;
     }
     let message;
@@ -368,7 +453,7 @@ async function simulate(options, answers, settings, cafeNoise) {
           reason: message.status,
         });
       }
-      if (message.status === "listening") maybeStartAnswer();
+      if (message.status === "listening") handleListening();
       if (message.status === "complete") {
         finish({ answersSimulated: answersStarted, phase: "complete" });
       }
@@ -379,12 +464,49 @@ async function simulate(options, answers, settings, cafeNoise) {
         phase,
         questionNumber,
         domain: message.domain,
+        question: message.question,
       });
     } else if (message.type === "transcript" && message.role === "user") {
-      candidateTranscripts.push(message.text);
-      log("candidate_transcript", { text: message.text });
+      if (/^yes\b/i.test(message.text.trim())) {
+        readinessTranscripts.push(message.text);
+        log("candidate_readiness_transcript", { text: message.text });
+      } else {
+        candidateTranscripts.push(message.text);
+        log("candidate_transcript", { text: message.text });
+      }
     } else if (message.type === "transcript_end" && message.role === "assistant") {
-      log("examiner_transcript", { text: message.text });
+      const audio = {
+        bytes: turnOutputAudioBytes,
+        peak: turnOutputAudioPeak,
+        nonzeroSamples: turnOutputNonzeroSamples,
+      };
+      if (!readinessSent) {
+        openingTurns.push({ text: message.text, audio });
+      } else if (!firstQuestionReceived) {
+        firstQuestionReceived = true;
+        firstQuestionTurn = { text: message.text, audio };
+      }
+      log("examiner_transcript", {
+        text: message.text,
+        audioBytes: turnOutputAudioBytes,
+        audioPeak: turnOutputAudioPeak,
+        nonzeroSamples: turnOutputNonzeroSamples,
+      });
+      turnOutputAudioBytes = 0;
+      turnOutputAudioPeak = 0;
+      turnOutputNonzeroSamples = 0;
+    } else if (message.type === "turn_complete") {
+      turnCompletions.push({
+        answerCount: message.answerCount,
+        questionNumber: message.questionNumber,
+      });
+      log("turn_complete", {
+        answerCount: message.answerCount,
+        questionNumber: message.questionNumber,
+      });
+      if (readinessOnlyComplete && turnCompletions.length >= readinessCompletionTarget) {
+        finish({ answersSimulated: 0, stoppedBeforeQuestion: questionNumber });
+      }
     } else if (message.type === "interview_report") {
       report = {
         reportId: message.reportId,
@@ -425,12 +547,109 @@ async function main() {
         voice: options.voice,
       }),
     );
-    const [answers, settings, cafeNoise] = await Promise.all([
+    const [answers, readiness, settings, cafeNoise] = await Promise.all([
       synthesizeAnswers(options, temporaryDirectory),
+      synthesizeReadiness(options, temporaryDirectory),
       interviewerSettings(),
       synthesizeCafeNoise(options, temporaryDirectory),
     ]);
-    await simulate(options, answers, settings, cafeNoise);
+    const result = await simulate(options, answers, readiness, settings, cafeNoise);
+    const openingSummary = result.openingTurns.map((turn, index) => ({
+      index,
+      audioBytes: turn.audio.bytes,
+      audioPeak: turn.audio.peak,
+      text: turn.text.slice(0, 90),
+    }));
+    console.log(
+      JSON.stringify({
+        event: "opening_summary",
+        turns: openingSummary,
+        firstQuestionAudioBytes: result.firstQuestionTurn?.audio.bytes ?? 0,
+        sessionAudio: result.outputAudio,
+        turnCompletions: result.turnCompletions.length,
+      }),
+    );
+
+    // Gemini answers the first opening prompt with a transcript and no audio;
+    // the worker re-prompts it to speak the same text. That silent turn is an
+    // expected artifact, so assert on what the candidate actually hears.
+    const audibleTurns = result.openingTurns.filter((turn) => turn.audio.bytes > 0);
+    const silentTurns = result.openingTurns.length - audibleTurns.length;
+    assert(
+      audibleTurns.length === 2,
+      "Opening must be exactly two audible turns: the case, then the readiness question. " +
+        "More than two means one Gemini response advanced the handshake more than once.",
+      { audible: audibleTurns.length, silent: silentTurns, turns: openingSummary },
+    );
+    assert(
+      silentTurns <= MAX_SILENT_OPENING_TURNS,
+      "Gemini needed more silent retries than expected to speak the opening. " +
+        "Above this the candidate waits noticeably before hearing the vignette.",
+      { silent: silentTurns, allowed: MAX_SILENT_OPENING_TURNS, turns: openingSummary },
+    );
+
+    const [caseTurn, readinessTurn] = audibleTurns;
+
+    assert(/here is your case/i.test(caseTurn.text), 'Opening turn 1 did not say "Here is your case."', {
+      text: caseTurn.text.slice(0, 200),
+    });
+    assert(!caseTurn.text.includes("?"), "Case presentation asked a question before readiness", {
+      tail: caseTurn.text.slice(-200),
+    });
+    assert(
+      /^are you ready to begin\?$/i.test(readinessTurn.text.trim()),
+      'Opening turn 2 was not exactly "Are you ready to begin?"',
+      { text: readinessTurn.text.slice(0, 200) },
+    );
+
+    // Gemini reports a turn complete before that turn's audio has finished
+    // streaming, so PCM consistently lands in a later bucket than the
+    // transcript it belongs to. Per-turn byte counts are therefore not a valid
+    // audibility signal; assert the opening was audible in aggregate instead.
+    const openingAudioBytes =
+      result.openingTurns.reduce((total, turn) => total + turn.audio.bytes, 0) +
+      (result.firstQuestionTurn?.audio.bytes ?? 0);
+    const openingAudioPeak = Math.max(
+      0,
+      ...result.openingTurns.map((turn) => turn.audio.peak),
+      result.firstQuestionTurn?.audio.peak ?? 0,
+    );
+    assert(
+      openingAudioBytes >= MINIMUM_OPENING_AUDIO_BYTES,
+      `Opening delivered less than ${(MINIMUM_OPENING_AUDIO_BYTES / (sampleRate * 2)).toFixed(1)}s ` +
+        "of PCM. The vignette was probably never spoken aloud.",
+      {
+        openingAudioBytes,
+        minimum: MINIMUM_OPENING_AUDIO_BYTES,
+        approxSeconds: +(openingAudioBytes / (sampleRate * 2)).toFixed(2),
+        perTurn: openingSummary.map(({ index, audioBytes }) => ({ index, audioBytes })),
+      },
+    );
+    assert(openingAudioPeak > 0, "Opening PCM was entirely silent", {
+      openingAudioPeak,
+      openingAudioBytes,
+    });
+
+    assert(
+      result.readinessTranscripts.some((text) => /^yes\b/i.test(text.trim())),
+      "Readiness confirmation was not transcribed",
+      { readinessTranscripts: result.readinessTranscripts },
+    );
+    assert(
+      Boolean(result.firstQuestionTurn?.text.includes("?")),
+      "Readiness confirmation did not produce the first clinical question",
+      { firstQuestionTurn: result.firstQuestionTurn?.text.slice(0, 200) ?? null },
+    );
+    assert(
+      result.turnCompletions.length >= 3,
+      "Expected at least three turn completions across the opening handshake",
+      { turnCompletions: result.turnCompletions },
+    );
+    assert(
+      result.turnCompletions.every(({ answerCount }) => answerCount === 0),
+      "Opening or readiness was incorrectly counted as a clinical answer",
+      { turnCompletions: result.turnCompletions },
+    );
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }

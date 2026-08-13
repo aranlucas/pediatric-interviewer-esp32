@@ -19,9 +19,14 @@ import {
   type InterviewExchange,
   type StoredInterviewReport,
 } from "./interview-report";
+import { isResponseComplete, shouldEndTurn } from "./turn-completion";
 import {
   GEMINI_LIVE_MODEL,
   geminiLiveConfig,
+  geminiOpeningTurn,
+  geminiReplayForAudioTurn,
+  geminiWarmUpTurn,
+  geminiReadinessTurn,
   geminiTextTurn,
   TURN_DISPOSITION_TOOL,
 } from "./gemini-live-protocol";
@@ -29,17 +34,41 @@ import { decodeBase64, encodeBase64, PcmFramer, resamplePcm16 } from "./pcm-audi
 
 export { PEDIATRIC_TOPICS };
 
-const DEVICE_SAMPLE_RATE = 24_000;
+export const DEVICE_SAMPLE_RATE = 24_000;
 const GEMINI_OUTPUT_SAMPLE_RATE = 24_000;
 // The device accepts arbitrary even-length PCM payloads and drains them in
 // 20 ms I2S chunks. Sending one WebSocket message per 20 ms caused hundreds of
 // TLS/WebSocket callbacks for a single prompt and destabilized the ESP32. Batch
 // five chunks per message while preserving Gemini's native 24 kHz mono stream.
-const OUTPUT_PCM_FRAME_BYTES = 4_800;
-const OUTPUT_PCM_FRAME_DURATION_MS = (OUTPUT_PCM_FRAME_BYTES / (DEVICE_SAMPLE_RATE * 2)) * 1_000;
+export const OUTPUT_PCM_FRAME_BYTES = 4_800;
+const OUTPUT_PCM_FRAME_DURATION_MS =
+  (OUTPUT_PCM_FRAME_BYTES / (DEVICE_SAMPLE_RATE * 2)) * 1_000;
 const LIVE_SESSION_LIMIT_MS = 14 * 60 * 1_000;
+const MAX_OPENING_AUDIO_RETRIES = 2;
 
-type TurnDisposition = "advance_skillset" | "probe_current_answer" | "provide_case_information";
+type TurnDisposition =
+  | "begin_first_question"
+  | "advance_skillset"
+  | "probe_current_answer"
+  | "provide_case_information";
+
+/**
+ * The opening handshake runs as one linear sequence: a throwaway warm-up turn,
+ * the generated case presentation, the readiness question, then the candidate's
+ * confirmation. Only after the confirmation is the interview under way.
+ */
+type OpeningStage =
+  | "warming_up"
+  | "presenting_case"
+  | "asking_readiness"
+  | "awaiting_confirmation"
+  | "complete";
+
+const OPENING_HANDSHAKE_STAGES: ReadonlySet<OpeningStage> = new Set([
+  "warming_up",
+  "presenting_case",
+  "asking_readiness",
+]);
 
 type InterviewerEnv = Env & {
   GEMINI_API_KEY: string;
@@ -53,16 +82,17 @@ export type InterviewPhase =
   | "evaluation_failed"
   | "complete";
 
+/**
+ * Durable interview state. Everything a client needs about progress is derived
+ * from `exchanges`: its length is the answer count, and the question number is
+ * that length capped at the planned question count.
+ */
 export type PediatricInterviewerState = {
   phase: InterviewPhase;
   topicId: PediatricTopicId;
-  questionIndex: number;
-  answerCount: number;
   currentQuestion: string;
   exchanges: InterviewExchange[];
   reportId: string;
-  reportJsonKey: string;
-  reportMarkdownKey: string;
   evaluation?: InterviewEvaluation;
 };
 
@@ -74,13 +104,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   initialState: PediatricInterviewerState = {
     phase: "idle",
     topicId: "behavior_guidance",
-    questionIndex: 0,
-    answerCount: 0,
     currentQuestion: "",
     exchanges: [],
     reportId: "",
-    reportJsonKey: "",
-    reportMarkdownKey: "",
   };
 
   private gemini?: Session;
@@ -95,19 +121,35 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   private outputAudioFrameHead = 0;
   private outputAudioDrain?: Promise<void>;
   private outputAudioGeneration = 0;
-  private modelSpeaking = false;
-  private acceptingCandidateInput = false;
+  private turnProducedAudio = false;
+  /** The last status sent to the device; also gates candidate input and
+   * de-duplicates the `speaking` transition. */
+  private lastStatus: DeviceStatus = "idle";
   private closingGemini = false;
-  private finishingTurn = false;
   private interruptedGeneration = false;
   private candidateActivityStarted = false;
   private responseCompletionHandled = false;
-  private loggedOutputFrame = false;
   private liveGeneration = 0;
   private turnDisposition: TurnDisposition = "advance_skillset";
   private awaitingToolContinuation = false;
+  private openingStage: OpeningStage = "complete";
+  private openingAudioRetryCount = 0;
   private pendingQuestion = "";
   private pendingAnswer = "";
+
+  /** Answers recorded so far; the interview ends at INTERVIEW_QUESTION_COUNT. */
+  private get answerCount(): number {
+    return this.state.exchanges.length;
+  }
+
+  /** One-based number of the question currently on screen. */
+  private get questionNumber(): number {
+    return Math.min(this.answerCount + 1, INTERVIEW_QUESTION_COUNT);
+  }
+
+  private get openingHandshakeInProgress(): boolean {
+    return OPENING_HANDSHAKE_STAGES.has(this.openingStage);
+  }
 
   onConnect(connection: Connection): void {
     this.sendJSON(connection, { type: "welcome", protocol_version: 1 });
@@ -144,8 +186,27 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   }
 
   private sendStatus(connection: Connection, status: DeviceStatus): void {
-    this.acceptingCandidateInput = status === "listening";
+    this.lastStatus = status;
     this.sendJSON(connection, { type: "status", status });
+  }
+
+  /** Persists a state change and mirrors it to the device's prompt view. */
+  private updateInterview(
+    connection: Connection,
+    patch: Partial<PediatricInterviewerState>,
+  ): void {
+    this.setState({ ...this.state, ...patch });
+    this.sendInterviewState(connection);
+  }
+
+  /**
+   * Drives the next scripted turn of the opening handshake. Re-arms the
+   * completion guard so Gemini's reply to this prompt is treated as a new turn.
+   */
+  private askGemini(connection: Connection, turn: { turns: string; turnComplete: true }): void {
+    this.responseCompletionHandled = false;
+    this.sendStatus(connection, "thinking");
+    this.gemini?.sendClientContent(turn);
   }
 
   private async startLiveSession(
@@ -166,35 +227,21 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       return;
     }
     const generation = ++this.liveGeneration;
+    this.resetTurnState();
+    this.resetOutputAudio();
     this.device = connection;
     this.closingGemini = false;
-    this.loggedOutputFrame = false;
-    this.responseCompletionHandled = false;
-    this.inputTranscript = "";
-    this.outputTranscript = "";
-    this.modelSpeaking = false;
-    this.acceptingCandidateInput = false;
-    this.finishingTurn = false;
-    this.interruptedGeneration = false;
-    this.candidateActivityStarted = false;
-    this.turnDisposition = "advance_skillset";
-    this.awaitingToolContinuation = false;
-    this.pendingQuestion = "";
-    this.pendingAnswer = "";
+    this.lastStatus = "idle";
+    this.openingStage = "warming_up";
     this.connecting = true;
-    this.setState({
+    this.updateInterview(connection, {
       phase: "interviewing",
       topicId: topic.id,
-      questionIndex: 0,
-      answerCount: 0,
       currentQuestion: "Generating a new oral-board vignette...",
       exchanges: [],
       reportId: "",
-      reportJsonKey: "",
-      reportMarkdownKey: "",
       evaluation: undefined,
     });
-    this.sendInterviewState(connection);
     try {
       this.releaseKeepAlive = await this.keepAlive();
       const ai = new GoogleGenAI({ apiKey: this.env.GEMINI_API_KEY });
@@ -244,10 +291,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         sampleRate: DEVICE_SAMPLE_RATE,
       });
       this.sendStatus(connection, "thinking");
-      this.gemini.sendClientContent({
-        turns: "BEGIN_EXAMINATION. Generate the vignette and ask question one now.",
-        turnComplete: true,
-      });
+      this.gemini.sendClientContent(geminiWarmUpTurn());
       this.sessionTimer = setTimeout(() => {
         this.sendJSON(connection, {
           type: "error",
@@ -268,23 +312,31 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     }
   }
 
+  /**
+   * Clears everything scoped to the conversation rather than to the socket, so
+   * that starting a session and tearing one down cannot drift apart.
+   */
+  private resetTurnState(): void {
+    this.inputTranscript = "";
+    this.outputTranscript = "";
+    this.interruptedGeneration = false;
+    this.candidateActivityStarted = false;
+    this.responseCompletionHandled = false;
+    this.turnDisposition = "advance_skillset";
+    this.awaitingToolContinuation = false;
+    this.openingStage = "complete";
+    this.openingAudioRetryCount = 0;
+    this.pendingQuestion = "";
+    this.pendingAnswer = "";
+  }
+
   private releaseLiveResources(): void {
     if (this.sessionTimer) clearTimeout(this.sessionTimer);
     this.sessionTimer = undefined;
     this.gemini = undefined;
     this.resetOutputAudio();
-    this.interruptedGeneration = false;
-    this.candidateActivityStarted = false;
-    this.responseCompletionHandled = false;
-    this.inputTranscript = "";
-    this.outputTranscript = "";
-    this.modelSpeaking = false;
-    this.acceptingCandidateInput = false;
-    this.finishingTurn = false;
-    this.turnDisposition = "advance_skillset";
-    this.awaitingToolContinuation = false;
-    this.pendingQuestion = "";
-    this.pendingAnswer = "";
+    this.resetTurnState();
+    this.lastStatus = "idle";
     this.device = undefined;
     this.releaseKeepAlive?.();
     this.releaseKeepAlive = undefined;
@@ -296,6 +348,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     this.outputAudioFrames = [];
     this.outputAudioFrameHead = 0;
     this.outputAudioDrain = undefined;
+    this.turnProducedAudio = false;
   }
 
   private closeLiveSession(reason: string): void {
@@ -344,7 +397,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
           ? "interview_not_active"
           : !gemini
             ? "gemini_not_connected"
-            : !this.acceptingCandidateInput
+            : this.lastStatus !== "listening"
               ? "interviewer_not_listening"
               : this.candidateActivityStarted
                 ? "audio_turn_active"
@@ -358,7 +411,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       return;
     }
     if (!gemini) return;
-    this.acceptingCandidateInput = false;
+    // Close the input window before anything can be sent back, so a second
+    // typed answer cannot slip in ahead of the `thinking` status below.
+    this.lastStatus = "thinking";
     this.responseCompletionHandled = false;
     this.turnDisposition = "advance_skillset";
     this.awaitingToolContinuation = false;
@@ -379,6 +434,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         if (call.name === TURN_DISPOSITION_TOOL) {
           const disposition = call.args?.disposition;
           if (
+            disposition === "begin_first_question" ||
             disposition === "advance_skillset" ||
             disposition === "probe_current_answer" ||
             disposition === "provide_case_information"
@@ -398,6 +454,27 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     }
     const content = message.serverContent;
     if (!content) return;
+    {
+      const parts = content.modelTurn?.parts ?? [];
+      console.log(
+        JSON.stringify({
+          event: "gemini_server_content",
+          stage: this.openingStage,
+          parts: parts.length,
+          audioParts: parts.filter((part) => part.inlineData?.data).length,
+          audioBytes: parts.reduce(
+            (total, part) => total + (part.inlineData?.data?.length ?? 0),
+            0,
+          ),
+          mimeTypes: [...new Set(parts.map((part) => part.inlineData?.mimeType ?? "none"))],
+          textParts: parts.filter((part) => part.text).length,
+          outputTranscriptionChars: content.outputTranscription?.text?.length ?? 0,
+          generationComplete: Boolean(content.generationComplete),
+          turnComplete: Boolean(content.turnComplete),
+          interrupted: Boolean(content.interrupted),
+        }),
+      );
+    }
     if (content.interrupted) {
       console.log(
         JSON.stringify({
@@ -408,7 +485,6 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       this.interruptedGeneration = true;
       this.resetOutputAudio();
       this.outputTranscript = "";
-      this.modelSpeaking = false;
       this.sendJSON(this.device, { type: "playback_interrupt" });
       this.sendStatus(this.device, "listening");
       return;
@@ -434,64 +510,52 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       const rate = inline.mimeType?.includes("rate=16000") ? 16_000 : GEMINI_OUTPUT_SAMPLE_RATE;
       const pcm = resamplePcm16(decodeBase64(inline.data), rate, DEVICE_SAMPLE_RATE);
       this.queueOutputAudio(pcm);
-      if (!this.modelSpeaking) {
-        this.modelSpeaking = true;
-        this.sendStatus(this.device, "speaking");
-      }
+      if (this.lastStatus !== "speaking") this.sendStatus(this.device, "speaking");
     }
-    const responseComplete = content.generationComplete || content.turnComplete;
+    const responseComplete = isResponseComplete(content);
     if (responseComplete && this.awaitingToolContinuation) return;
     if (responseComplete && this.interruptedGeneration) {
       this.interruptedGeneration = false;
       this.sendStatus(this.device, "listening");
       return;
     }
-    if (responseComplete && !this.responseCompletionHandled && !this.finishingTurn) {
-      this.responseCompletionHandled = true;
-      const audioDrained = this.flushOutputAudio();
-      const generation = this.liveGeneration;
-      const connectionId = this.device.id;
-      this.finishingTurn = true;
-      void audioDrained
-        .then(() => {
-          if (generation === this.liveGeneration && this.device?.id === connectionId) {
-            // The device may respond immediately after finishGeminiTurn sends
-            // `listening`. Clear the guard first so that next turn is accepted.
-            this.finishingTurn = false;
-            return this.finishGeminiTurn(this.device).then(() => {
-              if (generation === this.liveGeneration && this.device?.id === connectionId) {
-                this.sendJSON(this.device, {
-                  type: "turn_complete",
-                  answerCount: this.state.answerCount,
-                  questionNumber: this.state.questionIndex + 1,
-                });
-              }
-            });
-          }
-        })
-        .finally(() => {
-          if (generation === this.liveGeneration) this.finishingTurn = false;
-        });
-    }
+    if (!shouldEndTurn(content, this.openingHandshakeInProgress)) return;
+    if (this.responseCompletionHandled) return;
+    this.responseCompletionHandled = true;
+    const audioDrained = this.flushOutputAudio();
+    const generation = this.liveGeneration;
+    const connectionId = this.device.id;
+    void audioDrained.then(() => {
+      if (generation !== this.liveGeneration || this.device?.id !== connectionId) return;
+      return this.finishGeminiTurn(this.device).then(() => {
+        if (generation === this.liveGeneration && this.device?.id === connectionId) {
+          this.sendJSON(this.device, {
+            type: "turn_complete",
+            answerCount: this.answerCount,
+            questionNumber: this.questionNumber,
+          });
+        }
+      });
+    });
   }
 
+  /**
+   * Frames Gemini's audio for a real-time drain. Gemini can generate speech
+   * much faster than the ESP32 can play it; pacing here prevents burst/drain
+   * cycles from interrupting playback on the device.
+   */
   private queueOutputAudio(pcm: Uint8Array): void {
     if (!this.device) return;
+    // The warm-up turn exists only to absorb the cold-session anomaly.
+    if (this.openingStage === "warming_up") return;
+    this.turnProducedAudio = true;
     for (const frame of this.outputAudio.write(pcm)) {
-      if (!this.loggedOutputFrame) {
-        this.loggedOutputFrame = true;
-        console.log(
-          JSON.stringify({
-            event: "device_audio_frame",
-            bytes: OUTPUT_PCM_FRAME_BYTES,
-          }),
-        );
-      }
       this.outputAudioFrames.push(frame);
     }
     this.startOutputAudioDrain();
   }
 
+  /** Emits the partial trailing frame and resolves after its playback time. */
   private flushOutputAudio(): Promise<void> {
     const tail = this.outputAudio.flush();
     if (tail) this.outputAudioFrames.push(tail);
@@ -522,7 +586,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       await scheduler.wait(
         Math.max(
           1,
-          Math.round((frame.byteLength / OUTPUT_PCM_FRAME_BYTES) * OUTPUT_PCM_FRAME_DURATION_MS),
+          Math.round(
+            (frame.byteLength / OUTPUT_PCM_FRAME_BYTES) * OUTPUT_PCM_FRAME_DURATION_MS,
+          ),
         ),
       );
     }
@@ -535,9 +601,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   private async finishGeminiTurn(connection: Connection): Promise<void> {
     const answer = normalizeTranscript(this.inputTranscript);
     const examinerSpeech = normalizeTranscript(this.outputTranscript);
+    const producedAudio = this.turnProducedAudio;
     this.inputTranscript = "";
     this.outputTranscript = "";
-    this.modelSpeaking = false;
+    this.turnProducedAudio = false;
 
     if (examinerSpeech) {
       this.sendJSON(connection, { type: "transcript_start", role: "assistant" });
@@ -548,17 +615,51 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       });
     }
     if (!answer) {
+      // The first generation of a cold Live session behaves differently from
+      // every later one: it returns the whole transcript at once and streams
+      // its audio after turnComplete. Spend that anomaly on a throwaway
+      // warm-up turn so the case presentation is never the first generation.
+      if (this.openingStage === "warming_up") {
+        this.openingStage = "presenting_case";
+        this.askGemini(connection, geminiOpeningTurn());
+        return;
+      }
+      if (
+        this.openingHandshakeInProgress &&
+        !producedAudio &&
+        this.openingAudioRetryCount < MAX_OPENING_AUDIO_RETRIES
+      ) {
+        this.openingAudioRetryCount += 1;
+        this.askGemini(
+          connection,
+          this.openingStage === "presenting_case" && examinerSpeech
+            ? geminiReplayForAudioTurn(examinerSpeech)
+            : geminiReadinessTurn(),
+        );
+        return;
+      }
+      this.openingAudioRetryCount = 0;
       const generatedQuestion = openingPresentationForDisplay(examinerSpeech);
       if (
         this.state.phase === "interviewing" &&
-        this.state.answerCount === 0 &&
+        this.answerCount === 0 &&
+        this.openingStage === "presenting_case" &&
         generatedQuestion
       ) {
-        this.setState({
-          ...this.state,
-          currentQuestion: generatedQuestion,
+        this.updateInterview(connection, { currentQuestion: generatedQuestion });
+      }
+      if (this.openingStage === "presenting_case") {
+        this.openingStage = "asking_readiness";
+        this.askGemini(connection, geminiReadinessTurn());
+        return;
+      }
+      if (this.openingStage === "asking_readiness") {
+        this.openingStage = "awaiting_confirmation";
+        this.updateInterview(connection, {
+          currentQuestion: openingPresentationForDisplay(
+            `${this.state.currentQuestion} ${examinerSpeech}`,
+          ),
         });
-        this.sendInterviewState(connection);
       }
       this.sendStatus(connection, "listening");
       return;
@@ -575,16 +676,28 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       return;
     }
 
+    if (this.openingStage === "awaiting_confirmation") {
+      const readinessConfirmed =
+        this.turnDisposition === "begin_first_question" ||
+        /^(?:yes|yeah|yep|ready|i am ready|let'?s (?:begin|start)|go ahead)\b/i.test(answer);
+      if (readinessConfirmed) this.openingStage = "complete";
+      this.updateInterview(connection, {
+        currentQuestion: readinessConfirmed
+          ? questionForDisplay(examinerSpeech) || "The first clinical question is being prepared."
+          : this.state.currentQuestion,
+      });
+      this.sendStatus(connection, "listening");
+      return;
+    }
+
     if (this.turnDisposition !== "advance_skillset") {
       if (!this.pendingQuestion) this.pendingQuestion = this.state.currentQuestion;
       if (this.turnDisposition === "probe_current_answer") {
         this.pendingAnswer = normalizeTranscript(`${this.pendingAnswer} ${answer}`);
       }
-      this.setState({
-        ...this.state,
+      this.updateInterview(connection, {
         currentQuestion: questionForDisplay(examinerSpeech) || this.state.currentQuestion,
       });
-      this.sendInterviewState(connection);
       this.sendStatus(connection, "listening");
       return;
     }
@@ -597,31 +710,19 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       ...this.state.exchanges,
       { question: exchangeQuestion, answer: exchangeAnswer },
     ];
-    const answerCount = exchanges.length;
-    if (answerCount >= INTERVIEW_QUESTION_COUNT) {
-      this.setState({
-        ...this.state,
-        phase: "evaluating",
-        questionIndex: INTERVIEW_QUESTION_COUNT - 1,
-        answerCount,
-        exchanges,
-      });
-      this.sendInterviewState(connection);
+    if (exchanges.length >= INTERVIEW_QUESTION_COUNT) {
+      this.updateInterview(connection, { phase: "evaluating", exchanges });
       this.sendStatus(connection, "evaluating");
       await this.finishInterview(connection);
       return;
     }
 
-    this.setState({
-      ...this.state,
+    this.updateInterview(connection, {
       phase: "interviewing",
-      questionIndex: answerCount,
-      answerCount,
       currentQuestion:
         questionForDisplay(examinerSpeech) || "The next clinical question is being prepared.",
       exchanges,
     });
-    this.sendInterviewState(connection);
     this.sendStatus(connection, "listening");
   }
 
@@ -650,17 +751,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         },
         evaluation,
       };
-      const keys = await this.retry(
-        () => storeInterviewReport(this.env.INTERVIEW_REPORTS, report),
-        { maxAttempts: 3, baseDelayMs: 200, maxDelayMs: 2_000 },
-      );
-      this.setState({
-        ...this.state,
-        phase: "complete",
-        reportId,
-        reportJsonKey: keys.jsonKey,
-        reportMarkdownKey: keys.markdownKey,
-        evaluation,
+      await this.retry(() => storeInterviewReport(this.env.INTERVIEW_REPORTS, report), {
+        maxAttempts: 3,
+        baseDelayMs: 200,
+        maxDelayMs: 2_000,
       });
       this.sendJSON(connection, {
         type: "interview_report",
@@ -668,12 +762,11 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         outcome: evaluation.outcome,
         reviewPath: `/interviewer/reports/${reportId}.md`,
       });
-      this.sendInterviewState(connection);
+      this.updateInterview(connection, { phase: "complete", reportId, evaluation });
       this.sendStatus(connection, "complete");
       this.closeLiveSession("interview complete");
     } catch (error) {
-      this.setState({ ...this.state, phase: "evaluation_failed", reportId });
-      this.sendInterviewState(connection);
+      this.updateInterview(connection, { phase: "evaluation_failed", reportId });
       this.sendJSON(connection, {
         type: "error",
         message: `Could not save the interview review: ${String(error).slice(0, 180)}`,
@@ -686,10 +779,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     this.sendJSON(connection, {
       type: "interview_state",
       phase: this.state.phase,
-      questionNumber:
-        this.state.phase === "idle"
-          ? 0
-          : Math.min(this.state.questionIndex + 1, INTERVIEW_QUESTION_COUNT),
+      questionNumber: this.state.phase === "idle" ? 0 : this.questionNumber,
       totalQuestions: INTERVIEW_QUESTION_COUNT,
       domain: topic.label,
       question: this.state.currentQuestion,

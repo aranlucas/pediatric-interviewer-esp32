@@ -1,12 +1,12 @@
-const PCM_BYTES_PER_MILLISECOND = (16_000 * 2) / 1_000;
+const PCM_BYTES_PER_MILLISECOND = (24_000 * 2) / 1_000;
 
 export function simulatePlaybackBuffer({
   durationMs = 30_000,
-  frameBytes = 3_200,
+  frameBytes = 4_800,
   nominalFrameMs = 100,
   maximumJitterMs = 350,
-  prebufferBytes = 16 * 1_024,
-  capacityBytes = 128 * 1_024,
+  prebufferBytes = 24 * 1_024,
+  capacityBytes = 64 * 1_024,
 } = {}) {
   const arrivals = [];
   let previousArrival = 0;

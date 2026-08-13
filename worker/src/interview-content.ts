@@ -300,25 +300,3 @@ export function knownTopic(value: string | null | undefined): PediatricTopic | n
   return PEDIATRIC_TOPICS.find((topic) => topic.id === value) ?? null;
 }
 
-export function requestedTopic(value: string): PediatricTopic | null {
-  const match = value
-    .trim()
-    .toLowerCase()
-    .match(/^start topic:\s*([a-z_]+)$/);
-  return match ? knownTopic(match[1]) : null;
-}
-
-export function isSessionCommand(value: string): boolean {
-  return /^(begin|resume|start)(?:\s|$)/i.test(value.trim());
-}
-
-export function isRepeatRequest(value: string): boolean {
-  const normalized = value
-    .toLowerCase()
-    .replace(/[^a-z\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return /^(?:(?:could|can|would|will) you |please )?(?:repeat(?: the question)?|say (?:that|it) again)(?: please)?$/.test(
-    normalized,
-  );
-}

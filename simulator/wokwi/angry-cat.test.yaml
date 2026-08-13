@@ -2,12 +2,12 @@ name: Angry Cat ESP32-S3 smoke test
 version: 1
 author: Angry Cat Pediatric Interviewer
 steps:
-  - wait-serial: 'SIM_TEST: READY'
-  - write-serial: 't'
-  - wait-serial: 'SIM_TEST: topic guard passed'
-  - write-serial: 'e'
-  - wait-serial: 'SIM_TEST: event queue passed'
-  - write-serial: 'p'
-  - wait-serial: 'SIM_SPEAKER: 440 Hz test tone complete'
-  - write-serial: 'b'
-  - wait-serial: 'SIM_TEST: playback burst passed'
+  - wait-serial: "SIM_TEST: READY"
+  - write-serial: "t"
+  - wait-serial: "SIM_TEST: topic guard passed"
+  - write-serial: "e"
+  - wait-serial: "SIM_TEST: event queue passed"
+  - write-serial: "p"
+  - wait-serial: "SIM_SPEAKER: 440 Hz test tone complete"
+  - write-serial: "b"
+  - wait-serial: "SIM_TEST: playback burst passed"

@@ -1,7 +1,13 @@
 import { routeAgentRequest } from "agents";
 
-import { AngryCat, angryCatModels } from "./agent";
-import { PEDIATRIC_TOPICS, pediatricInterviewerModels } from "./interviewer";
+import { TURN_DISPOSITION_TOOL } from "./gemini-live-protocol";
+import { INTERVIEW_QUESTION_COUNT } from "./interview-report";
+import {
+  DEVICE_SAMPLE_RATE,
+  OUTPUT_PCM_FRAME_BYTES,
+  PEDIATRIC_TOPICS,
+  pediatricInterviewerModels,
+} from "./interviewer";
 
 type WorkerEnv = Env & {
   DEVICE_TOKEN: string;
@@ -14,7 +20,6 @@ const REPORT_PATH_PREFIX = "/interviewer/reports/";
 const REPORT_PATH_PATTERN =
   /^\/interviewer\/reports\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(json|md)$/i;
 
-export { AngryCat } from "./agent";
 export { PediatricInterviewer } from "./interviewer";
 
 function json(data: unknown, status = 200): Response {
@@ -60,44 +65,19 @@ export default {
       return new Response(object.body, { headers });
     }
 
-    if (request.method === "GET" && path === "/health") {
-      return json({
-        ok: true,
-        service: "esp32-angry-cat",
-        stateful: true,
-        streaming: true,
-        transport: "websocket-pcm16",
-        architecture: "thin-device-server-tools",
-        weatherSource: "open-meteo-worker-fetch",
-        models: angryCatModels,
-        apps: {
-          angryCat: "/agents/angry-cat/esp32",
-          pediatricInterviewer: "/agents/pediatric-interviewer/esp32",
-        },
-        tools: [
-          "get_current_weather",
-          "get_forecast",
-          "get_air_quality",
-          "remember_fact",
-          "set_animation",
-          "set_volume",
-          "set_gpio",
-          "respond_without_tool",
-        ],
-      });
-    }
-
-    if (request.method === "GET" && path === "/interviewer/health") {
+    if (request.method === "GET" && (path === "/health" || path === "/interviewer/health")) {
       return json({
         ok: true,
         service: "pediatric-dentistry-interviewer",
         stateful: true,
         streaming: true,
         transport: "persistent-websocket-pcm16",
-        outputAudioSampleRate: 24_000,
-        outputAudioFrameBytes: 4_800,
-        questions: 6,
+        endpoint: "/agents/pediatric-interviewer/esp32",
+        outputAudioSampleRate: DEVICE_SAMPLE_RATE,
+        outputAudioFrameBytes: OUTPUT_PCM_FRAME_BYTES,
+        questions: INTERVIEW_QUESTION_COUNT,
         finalStep: "structured-evaluation-to-private-r2",
+        tools: [TURN_DISPOSITION_TOOL],
         topics: PEDIATRIC_TOPICS.map(({ id, label, studyMaterial }) => ({
           id,
           label,
@@ -111,10 +91,7 @@ export default {
       onBeforeConnect: async (upgradeRequest, lobby) => {
         const supportedDeviceName =
           lobby.name === "esp32" || /^esp32-[0-9a-f]{8}$/.test(lobby.name);
-        const supported =
-          (lobby.className === "ANGRY_CAT" || lobby.className === "PEDIATRIC_INTERVIEWER") &&
-          supportedDeviceName;
-        if (!supported) {
+        if (lobby.className !== "PEDIATRIC_INTERVIEWER" || !supportedDeviceName) {
           return new Response("Not found", { status: 404 });
         }
         if (!(await verifyToken(upgradeRequest.headers.get("X-Device-Token"), env.DEVICE_TOKEN))) {

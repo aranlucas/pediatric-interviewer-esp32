@@ -4,15 +4,6 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-11",
   "compatibility_flags": ["nodejs_compat"],
-  "ai": {
-    "binding": "AI",
-    "remote": true,
-  },
-  "vars": {
-    "WEATHER_LOCATION": "Seattle",
-    "WEATHER_LATITUDE": "47.6062",
-    "WEATHER_LONGITUDE": "-122.3321",
-  },
   "r2_buckets": [
     {
       "binding": "INTERVIEW_REPORTS",
@@ -21,10 +12,6 @@
   ],
   "durable_objects": {
     "bindings": [
-      {
-        "name": "ANGRY_CAT",
-        "class_name": "AngryCat",
-      },
       {
         "name": "PEDIATRIC_INTERVIEWER",
         "class_name": "PediatricInterviewer",
@@ -39,6 +26,11 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["PediatricInterviewer"],
+    },
+    {
+      // Angry Cat was removed; this permanently destroys its stored state.
+      "tag": "v3",
+      "deleted_classes": ["AngryCat"],
     },
   ],
   "observability": {

@@ -32,11 +32,11 @@ void AngryCatAudio::queueSimulatorAnswer() {
 
 #else
 
-#include <AudioBoard.h>
 #include <Wire.h>
 
 namespace {
 
+constexpr uint8_t kCodecAddress = 0x18;
 constexpr int kI2sMclk = 44;
 constexpr int kI2sDataOut = 16;
 constexpr int kI2sDataIn = 14;
@@ -46,52 +46,45 @@ constexpr int kI2sWordSelect = 15;
 // rate so playback retains the model's full speech bandwidth. Microphone audio
 // uses the same full-duplex clock and Gemini resamples the 24 kHz input.
 constexpr uint32_t kVoiceSampleRate = 24000;
-constexpr int kCodecVolumePercent = 80;
-constexpr uint8_t kPlayerVolume = 8;
-// First-order 7.5 kHz low-pass at 24 kHz. The Q15 coefficient keeps the hot
-// playback loop floating-point free while gently taming the small speaker's
-// harsh upper range.
-constexpr int32_t kLowPassAlphaQ15 = 28'167;
-constexpr int32_t kLowPassQ15Scale = 32'768;
-constexpr int32_t kSpeakerLimiterThreshold = 9'000;
-constexpr int32_t kSpeakerLimiterRatio = 3;
-constexpr uint32_t kPlaybackDspResetGapMs = 250;
+constexpr uint8_t kCodecVolume80Percent = 0xCB;
+constexpr uint8_t kPlayerVolume = 3;
 constexpr size_t kPcmSamplesPerFrame = 480;
 constexpr int16_t kSilentStereoFrame[kPcmSamplesPerFrame * 2] = {};
 
-audio_driver::DriverDeviceInfo codecPins;
-audio_driver::AudioBoard codecBoard(audio_driver::AudioDriverES8311, codecPins);
-
-int16_t limitSpeakerPeak(int32_t sample) {
-  const bool negative = sample < 0;
-  int32_t magnitude = negative ? -sample : sample;
-  if (magnitude > kSpeakerLimiterThreshold) {
-    magnitude = kSpeakerLimiterThreshold +
-                (magnitude - kSpeakerLimiterThreshold) / kSpeakerLimiterRatio;
-  }
-  return static_cast<int16_t>(negative ? -magnitude : magnitude);
-}
-
 } // namespace
 
+bool AngryCatAudio::writeCodecRegister(uint8_t address, uint8_t value) {
+  Wire.beginTransmission(kCodecAddress);
+  Wire.write(address);
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
+
 bool AngryCatAudio::initializeCodec() {
-  // The display reset expander, touch controller, and codec share Wire. The
-  // sketch initializes that bus before audio, so the codec driver must reuse
-  // it without taking ownership or changing the verified bus configuration.
-  if (!codecPins.addI2C(audio_driver::PinFunction::CODEC, Wire, false))
+  if (!writeCodecRegister(0x00, 0x1F))
     return false;
+  delay(20);
 
-  audio_driver::CodecConfig config;
-  config.input_device = audio_driver::ADC_INPUT_LINE1;
-  config.output_device = audio_driver::DAC_OUTPUT_ALL;
-  config.i2s.bits = audio_driver::BIT_LENGTH_16BITS;
-  config.i2s.rate = audio_driver::RATE_24K;
-  config.i2s.channels = audio_driver::CHANNELS2;
-  config.i2s.fmt = audio_driver::I2S_NORMAL;
-  config.i2s.mode = audio_driver::MODE_SLAVE;
-  config.i2s.signal_type = audio_driver::SIGNAL_DIGITAL;
-
-  return codecBoard.begin(config) && codecBoard.setVolume(kCodecVolumePercent);
+  // Waveshare's verified ES8311 sequence for 16-bit I2S with a 256x MCLK.
+  // The divider ratio is unchanged at 24 kHz; I2S supplies a 6.144 MHz MCLK.
+  const uint8_t configuration[][2] = {
+      {0x00, 0x00}, {0x00, 0x80},
+      {0x01, 0x3F}, {0x02, 0x00},
+      {0x03, 0x10}, {0x04, 0x10},
+      {0x05, 0x00}, {0x06, 0x03},
+      {0x07, 0x00}, {0x08, 0xFF},
+      {0x00, 0x80}, {0x09, 0x0C},
+      {0x0A, 0x0C}, {0x0D, 0x01},
+      {0x0E, 0x02}, {0x12, 0x00},
+      {0x13, 0x10}, {0x17, 0xC8},
+      {0x14, 0x1A}, {0x1C, 0x6A},
+      {0x37, 0x08}, {0x32, kCodecVolume80Percent},
+  };
+  for (const auto &entry : configuration) {
+    if (!writeCodecRegister(entry[0], entry[1]))
+      return false;
+  }
+  return true;
 }
 
 bool AngryCatAudio::begin() {
@@ -110,14 +103,9 @@ bool AngryCatAudio::begin() {
     Serial.println("Angry Cat audio: I2S pin setup failed");
     return false;
   }
-  if (!audioBus_.configureRX(kVoiceSampleRate, I2S_DATA_BIT_WIDTH_16BIT,
-                             I2S_SLOT_MODE_STEREO,
-                             I2S_RX_TRANSFORM_16_STEREO_TO_MONO)) {
-    Serial.println("Angry Cat audio: microphone mono transform failed");
-    audioBus_.end();
-    return false;
-  }
-  microphoneReady_ = true;
+  microphoneReady_ = audioBus_.rxChan() != nullptr;
+  if (!microphoneReady_)
+    Serial.println("Angry Cat audio: microphone I2S setup failed");
   ready_ = true;
   return true;
 }
@@ -129,9 +117,6 @@ bool AngryCatAudio::isMicrophoneReady() const {
 bool AngryCatAudio::playPcm16(const uint8_t *data, size_t size) {
   if (!ready_ || data == nullptr || size < 2 || size % 2 != 0)
     return false;
-  const uint32_t now = millis();
-  if (lastPlaybackMs_ == 0 || now - lastPlaybackMs_ > kPlaybackDspResetGapMs)
-    playbackLowPassState_ = 0;
 
   int16_t stereo[kPcmSamplesPerFrame * 2];
   const int16_t *mono = reinterpret_cast<const int16_t *>(data);
@@ -140,12 +125,8 @@ bool AngryCatAudio::playPcm16(const uint8_t *data, size_t size) {
   while (offset < samples) {
     const size_t chunkSamples = min(kPcmSamplesPerFrame, samples - offset);
     for (size_t index = 0; index < chunkSamples; ++index) {
-      const int32_t scaled =
-          static_cast<int32_t>(mono[offset + index]) * kPlayerVolume / 21;
-      playbackLowPassState_ +=
-          ((scaled - playbackLowPassState_) * kLowPassAlphaQ15) /
-          kLowPassQ15Scale;
-      const int16_t speakerSample = limitSpeakerPeak(playbackLowPassState_);
+      const int16_t speakerSample = static_cast<int16_t>(
+          static_cast<int32_t>(mono[offset + index]) * kPlayerVolume / 21);
       stereo[index * 2] = speakerSample;
       stereo[index * 2 + 1] = speakerSample;
     }
@@ -156,7 +137,6 @@ bool AngryCatAudio::playPcm16(const uint8_t *data, size_t size) {
     }
     offset += chunkSamples;
   }
-  lastPlaybackMs_ = millis();
   return true;
 }
 
@@ -173,8 +153,22 @@ size_t AngryCatAudio::readPcm16(uint8_t *output, size_t outputCapacity) {
       sizeof(kSilentStereoFrame)) {
     return 0;
   }
-  return audioBus_.readBytes(reinterpret_cast<char *>(output),
-                             kPcmSamplesPerFrame * sizeof(int16_t));
+  int16_t input[kPcmSamplesPerFrame * 2];
+  const size_t bytesRead =
+      audioBus_.readBytes(reinterpret_cast<char *>(input), sizeof(input));
+  const size_t framesRead = bytesRead / (2 * sizeof(int16_t));
+  int16_t *pcm = reinterpret_cast<int16_t *>(output);
+  size_t outputSamples = 0;
+  for (size_t frame = 0;
+       frame < framesRead && outputSamples < kPcmSamplesPerFrame; ++frame) {
+    const int16_t left = input[frame * 2];
+    const int16_t right = input[frame * 2 + 1];
+    pcm[outputSamples++] =
+        abs(static_cast<int32_t>(left)) >= abs(static_cast<int32_t>(right))
+            ? left
+            : right;
+  }
+  return outputSamples * sizeof(int16_t);
 }
 
 #endif

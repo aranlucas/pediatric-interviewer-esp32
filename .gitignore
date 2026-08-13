@@ -4,3 +4,4 @@ firmware/**/build/
 *.bin
 *.elf
 *.map
+node_modules/
