@@ -1,5 +1,37 @@
 #include "angry_cat_audio.h"
 
+#if defined(ANGRY_CAT_SIMULATOR)
+
+#include <AngryCatSimulator.h>
+
+bool AngryCatAudio::begin() {
+  ready_ = angry_cat_simulator::beginAudio();
+  microphoneReady_ = ready_;
+  return ready_;
+}
+
+bool AngryCatAudio::isMicrophoneReady() const {
+  return ready_ && microphoneReady_;
+}
+
+bool AngryCatAudio::playPcm16(const uint8_t *data, size_t size) {
+  return ready_ && angry_cat_simulator::playPcm16(data, size);
+}
+
+size_t AngryCatAudio::readPcm16(uint8_t *output, size_t outputCapacity) {
+  return isMicrophoneReady()
+             ? angry_cat_simulator::readPcm16(output, outputCapacity)
+             : 0;
+}
+
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+void AngryCatAudio::queueSimulatorAnswer() {
+  angry_cat_simulator::queueAnswer();
+}
+#endif
+
+#else
+
 #include <AudioBoard.h>
 #include <Wire.h>
 
@@ -117,3 +149,5 @@ size_t AngryCatAudio::readPcm16(uint8_t *output, size_t outputCapacity) {
   return audioBus_.readBytes(reinterpret_cast<char *>(output),
                              kPcmSamplesPerFrame * sizeof(int16_t));
 }
+
+#endif

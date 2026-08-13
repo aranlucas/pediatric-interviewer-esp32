@@ -1,0 +1,9 @@
+name: Angry Cat ESP32-S3 smoke test
+version: 1
+author: Angry Cat Pediatric Interviewer
+steps:
+  - wait-serial: 'SIM_TEST: READY'
+  - write-serial: 't'
+  - wait-serial: 'SIM_TEST: topic guard passed'
+  - write-serial: 'e'
+  - wait-serial: 'SIM_TEST: event queue passed'
