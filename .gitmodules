@@ -1,0 +1,3 @@
+[submodule "firmware/angry_cat_pediatric_interviewer/third_party/arduino-audio-driver"]
+	path = firmware/angry_cat_pediatric_interviewer/third_party/arduino-audio-driver
+	url = https://github.com/pschatzmann/arduino-audio-driver.git

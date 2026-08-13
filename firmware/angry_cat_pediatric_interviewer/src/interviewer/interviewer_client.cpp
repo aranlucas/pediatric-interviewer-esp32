@@ -9,12 +9,12 @@
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 
-#include "angry_cat_audio.h"
+#include "../audio/angry_cat_audio.h"
 
 #if __has_include("interviewer_config.h")
 #include "interviewer_config.h"
-#elif __has_include("../waveshare_touch_demo/cloudflare_config.h")
-#include "../waveshare_touch_demo/cloudflare_config.h"
+#elif __has_include("../../../../../waveshare_touch_demo/cloudflare_config.h")
+#include "../../../../../waveshare_touch_demo/cloudflare_config.h"
 #define kPediatricInterviewerWebSocketUrl kAngryCatWebSocketUrl
 #define kPediatricInterviewerDeviceToken kAngryCatDeviceToken
 #define kPediatricInterviewerRootCa kAngryCatRootCa
@@ -29,14 +29,15 @@ namespace {
 constexpr uint32_t kCallStartupTimeoutMs = 20'000;
 constexpr uint32_t kResponseTimeoutMs = 90'000;
 constexpr uint32_t kSessionTimeoutMs = 30UL * 60UL * 1000UL;
-constexpr size_t kPcmChunkBytes = 640;
-constexpr size_t kPlaybackBufferBytes = 128 * 1024;
-constexpr size_t kPlaybackPrebufferBytes = 16 * 1024;
+constexpr uint32_t kAudioSampleRate = 24'000;
+constexpr size_t kPcmChunkBytes = 960;
+constexpr size_t kPlaybackBufferBytes = 192 * 1024;
+constexpr size_t kPlaybackPrebufferBytes = 24 * 1024;
 constexpr uint32_t kPlaybackPrebufferTimeoutMs = 750;
-constexpr size_t kPlaybackFadeSamples = 80;
+constexpr size_t kPlaybackFadeSamples = 120;
 constexpr int32_t kSpeechRmsThreshold = 1'100;
 constexpr uint8_t kSpeechStartFrames = 3;
-constexpr uint32_t kAutomaticTurnSilenceMs = 3'500;
+constexpr uint32_t kAutomaticTurnSilenceMs = 5'000;
 constexpr uint32_t kReportConnectTimeoutMs = 10'000;
 constexpr uint32_t kReportResponseTimeoutMs = 15'000;
 constexpr int kMaximumReportBytes = 128 * 1024;
@@ -400,8 +401,9 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
           firstBufferedMs = millis();
         if (!receivedAudio) {
           receivedAudio = true;
-          Serial.printf("Interviewer audio: buffering 16 kHz PCM frames (%u "
+          Serial.printf("Interviewer audio: buffering %lu Hz PCM frames (%u "
                         "bytes, %u-byte PSRAM queue, %u-byte prebuffer)\n",
+                        static_cast<unsigned long>(kAudioSampleRate),
                         static_cast<unsigned>(message.length()),
                         static_cast<unsigned>(kPlaybackBufferBytes),
                         static_cast<unsigned>(kPlaybackPrebufferBytes));
@@ -418,7 +420,18 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
       return;
     }
     const char *type = document["type"] | "";
-    if (strcmp(type, "status") == 0) {
+    if (strcmp(type, "audio_config") == 0) {
+      const char *format = document["format"] | "";
+      const uint32_t sampleRate = document["sampleRate"] | 0;
+      if (strcmp(format, "pcm16") != 0 || sampleRate != kAudioSampleRate) {
+        failed = true;
+        postEvent(eventQueue, InterviewerEventType::Error,
+                  "The Worker and device audio formats do not match.");
+      } else {
+        Serial.printf("Interviewer audio: negotiated PCM16 at %lu Hz\n",
+                      static_cast<unsigned long>(sampleRate));
+      }
+    } else if (strcmp(type, "status") == 0) {
       const char *status = document["status"] | "";
       stageStartedMs = millis();
       if (strcmp(status, "listening") == 0) {

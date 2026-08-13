@@ -23,6 +23,10 @@ https://www.aapd.org/research/oral-health-policies--recommendations/
 
 ## Build and device workflow
 
+The Arduino sketch lives in
+`firmware/angry_cat_pediatric_interviewer`; the root Makefile keeps the normal
+workflow independent of the repository's checkout directory name.
+
 ```sh
 make setup
 make compile
@@ -30,19 +34,31 @@ make upload
 make monitor
 ```
 
-The project vendors Waveshare's official `es8311` and
-`esp_lcd_touch_axs15231b` Arduino drivers from board-support commit
-`840daf2df7cb6b1f023fafc435371016e66f2ae0`. Small sketch-local build adapters
-under `src` compile these vendored libraries with the pinned Arduino profile.
-The vendored drivers carry small reliability fixes for allocation and I2C
+The display uses `GFX Library for Arduino`'s `Arduino_AXS15231B` driver and the
+codec uses `arduino-audio-driver` v0.3.0's ES8311 implementation through a
+commit-pinned Git submodule. The board's AXS15231B touch protocol is not
+provided by Arduino_GFX, so its official Waveshare touch driver remains
+vendored from board-support commit
+`840daf2df7cb6b1f023fafc435371016e66f2ae0`. A sketch-local adapter under
+`firmware/angry_cat_pediatric_interviewer/src/board` compiles that driver with
+the pinned Arduino profile. It carries small reliability fixes for I2C
 failures, complete touch results, and released-touch state.
 
 The app reuses the existing local Cloudflare device credentials when built next
 to `waveshare_touch_demo`. For a standalone copy, duplicate
-`interviewer_config.h.example` as the ignored `interviewer_config.h` and fill in
-the Worker endpoint, shared device token, and CA certificate.
+`firmware/angry_cat_pediatric_interviewer/interviewer_config.h.example` as
+`interviewer_config.h` in the same directory and fill in the Worker endpoint,
+shared device token, and CA certificate.
 
 The corresponding Worker is in
 `../waveshare_touch_demo/cloudflare/angry-cat-worker`. Its interviewer route is
 `/agents/pediatric-interviewer/esp32`; it uses one Gemini Live voice session and
-durable six-question interview state.
+durable six-question interview state. Gemini's native 24 kHz PCM output is
+preserved through the Worker, I2S bus, and ES8311 codec instead of being
+downsampled to 16 kHz before playback.
+
+## License
+
+This project is licensed under GNU GPL version 3. The audio-driver dependency
+is distributed under the same license; its ES8311 codec implementation retains
+the upstream notices in the submodule.

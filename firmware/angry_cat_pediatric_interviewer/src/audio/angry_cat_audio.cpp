@@ -1,6 +1,7 @@
 #include "angry_cat_audio.h"
 
-#include "libraries/es8311/src/es8311.h"
+#include <AudioBoard.h>
+#include <Wire.h>
 
 namespace {
 
@@ -9,33 +10,38 @@ constexpr int kI2sDataOut = 16;
 constexpr int kI2sDataIn = 14;
 constexpr int kI2sBitClock = 13;
 constexpr int kI2sWordSelect = 15;
-constexpr uint32_t kVoiceSampleRate = 16000;
-constexpr uint32_t kMclkFrequency = kVoiceSampleRate * 256;
+// Gemini Live emits native 24 kHz PCM. Keep the codec and I2S bus at that
+// rate so playback retains the model's full speech bandwidth. Microphone audio
+// uses the same full-duplex clock and Gemini resamples the 24 kHz input.
+constexpr uint32_t kVoiceSampleRate = 24000;
 constexpr int kCodecVolumePercent = 80;
-constexpr uint8_t kPlayerVolume = 18;
-constexpr size_t kPcmSamplesPerFrame = 320;
+constexpr uint8_t kPlayerVolume = 11;
+constexpr size_t kPcmSamplesPerFrame = 480;
 constexpr int16_t kSilentStereoFrame[kPcmSamplesPerFrame * 2] = {};
+
+audio_driver::DriverDeviceInfo codecPins;
+audio_driver::AudioBoard codecBoard(audio_driver::AudioDriverES8311, codecPins);
 
 } // namespace
 
 bool AngryCatAudio::initializeCodec() {
-  es8311_handle_t codec = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
-  if (codec == nullptr)
+  // The display reset expander, touch controller, and codec share Wire. The
+  // sketch initializes that bus before audio, so the codec driver must reuse
+  // it without taking ownership or changing the verified bus configuration.
+  if (!codecPins.addI2C(audio_driver::PinFunction::CODEC, Wire, false))
     return false;
-  const es8311_clock_config_t clock = {
-      .mclk_inverted = false,
-      .sclk_inverted = false,
-      .mclk_from_mclk_pin = true,
-      .mclk_frequency = kMclkFrequency,
-      .sample_frequency = kVoiceSampleRate,
-  };
-  const bool initialized =
-      es8311_init(codec, &clock, ES8311_RESOLUTION_16, ES8311_RESOLUTION_16) ==
-          ESP_OK &&
-      es8311_voice_volume_set(codec, kCodecVolumePercent, nullptr) == ESP_OK &&
-      es8311_microphone_config(codec, false) == ESP_OK;
-  es8311_delete(codec);
-  return initialized;
+
+  audio_driver::CodecConfig config;
+  config.input_device = audio_driver::ADC_INPUT_LINE1;
+  config.output_device = audio_driver::DAC_OUTPUT_ALL;
+  config.i2s.bits = audio_driver::BIT_LENGTH_16BITS;
+  config.i2s.rate = audio_driver::RATE_24K;
+  config.i2s.channels = audio_driver::CHANNELS2;
+  config.i2s.fmt = audio_driver::I2S_NORMAL;
+  config.i2s.mode = audio_driver::MODE_SLAVE;
+  config.i2s.signal_type = audio_driver::SIGNAL_DIGITAL;
+
+  return codecBoard.begin(config) && codecBoard.setVolume(kCodecVolumePercent);
 }
 
 bool AngryCatAudio::begin() {
