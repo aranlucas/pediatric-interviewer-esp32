@@ -1,0 +1,30 @@
+{
+  "name": "angry-cat-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "wrangler types --check && tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "generate-types": "wrangler types",
+    "simulate:interview": "node tools/simulate-interview.mjs",
+    "simulate:suite": "node tools/simulate-suite.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cloudflare/voice": "^0.3.5",
+    "@google/genai": "^2.17.0",
+    "agents": "^0.20.1",
+    "ai": "^7.0.64",
+    "workers-ai-provider": "^4.0.0",
+    "ws": "^8.21.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.123.0"
+  }
+}
