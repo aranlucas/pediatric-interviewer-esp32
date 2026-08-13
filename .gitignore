@@ -1,0 +1,5 @@
+interviewer_config.h
+build/
+*.bin
+*.elf
+*.map

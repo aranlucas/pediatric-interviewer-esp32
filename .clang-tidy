@@ -1,0 +1,9 @@
+---
+# LLVM 18 reports ArduinoJson's placement-new tagged union as leaked storage.
+# The document owns and releases that storage; keep every other analyzer check.
+Checks: >-
+  clang-diagnostic-*,
+  clang-analyzer-*,
+  -clang-analyzer-cplusplus.NewDeleteLeaks
+HeaderFilterRegex: '.*/angry_cat_pediatric_interviewer/.*'
+...

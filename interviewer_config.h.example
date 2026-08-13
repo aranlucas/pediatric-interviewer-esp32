@@ -1,0 +1,12 @@
+#pragma once
+
+// Copy this file to interviewer_config.h. The WebSocket endpoint is the
+// deployed Worker route ending in /agents/pediatric-interviewer/esp32.
+constexpr char kPediatricInterviewerWebSocketUrl[] =
+    "wss://YOUR-WORKER.workers.dev/agents/pediatric-interviewer/esp32";
+constexpr char kPediatricInterviewerDeviceToken[] = "YOUR_DEVICE_TOKEN";
+constexpr char kPediatricInterviewerRootCa[] = R"CERT(
+-----BEGIN CERTIFICATE-----
+YOUR_CA_CERTIFICATE
+-----END CERTIFICATE-----
+)CERT";
