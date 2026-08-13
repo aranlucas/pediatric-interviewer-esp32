@@ -3,9 +3,11 @@
 set -euo pipefail
 
 project_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+sketch_dir="$project_dir/firmware/angry_cat_pediatric_interviewer"
 build_dir="$project_dir/build/clang-tidy"
 profile=${PROFILE:-waveshare-3.5b}
 arduino_cli=${ARDUINO_CLI:-arduino-cli}
+audio_driver_include=${AUDIO_DRIVER_INCLUDE:-$sketch_dir/third_party/arduino-audio-driver/src}
 
 if [[ -n ${CLANG_TIDY:-} ]]; then
   clang_tidy=$CLANG_TIDY
@@ -33,8 +35,10 @@ for command in "$arduino_cli" jq; do
   fi
 done
 
-"$arduino_cli" compile --profile "$profile" --only-compilation-database \
-  --build-path "$build_dir" "$project_dir" >/dev/null
+"$arduino_cli" compile --profile "$profile" --only-compilation-database --clean \
+  --build-path "$build_dir" \
+  --build-property "compiler.cpp.extra_flags=-I$audio_driver_include" \
+  "$sketch_dir" >/dev/null
 
 compile_database="$build_dir/compile_commands.json"
 if [[ ! -s $compile_database ]]; then
@@ -102,7 +106,10 @@ while IFS= read -r source; do
   [[ -n $source ]] && sources+=("$source")
 done < <(
   jq -r --arg prefix "$build_dir/sketch/" '
-    .[].file | select(startswith($prefix) and endswith(".cpp"))
+    .[].file
+    | select(startswith($prefix) and endswith(".cpp"))
+    | select(contains("/src/generated/") | not)
+    | select(contains("/third_party/") | not)
   ' "$compile_database" | sort -u
 )
 

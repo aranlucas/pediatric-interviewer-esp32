@@ -9,10 +9,10 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
-#include "angry_cat_audio.h"
-#include "angry_cat_frames.h"
-#include "interviewer_client.h"
-#include "libraries/esp_lcd_touch_axs15231b/src/esp_lcd_touch_axs15231b.h"
+#include "src/audio/angry_cat_audio.h"
+#include "src/generated/angry_cat_frames.h"
+#include "src/interviewer/interviewer_client.h"
+#include "third_party/waveshare/esp_lcd_touch_axs15231b/src/esp_lcd_touch_axs15231b.h"
 
 namespace {
 

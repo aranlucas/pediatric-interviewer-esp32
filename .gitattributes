@@ -1,0 +1,2 @@
+firmware/**/src/generated/* linguist-generated=true
+firmware/**/third_party/* linguist-vendored=true

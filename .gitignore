@@ -1,5 +1,6 @@
-interviewer_config.h
+**/interviewer_config.h
 build/
+firmware/**/build/
 *.bin
 *.elf
 *.map
