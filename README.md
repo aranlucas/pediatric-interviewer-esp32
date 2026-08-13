@@ -34,6 +34,28 @@ make upload
 make monitor
 ```
 
+### Simulator
+
+The Wokwi profile exercises ESP32-S3 boot, the PSRAM framebuffer, Wi-Fi, topic
+routing, and FreeRTOS interviewer-event handling without a physical device. It
+uses deterministic display, touch, and audio seams because Wokwi does not
+simulate the Waveshare board or ESP32-S3 I2S.
+
+```sh
+make compile-simulator
+make simulator-config-check
+WOKWI_CLI_TOKEN=... make simulate
+WOKWI_CLI_TOKEN=... make simulate-integration
+```
+
+The test never loads local interviewer credentials or contacts the production
+Worker. The separate integration target is opt-in: it loads the ignored local
+interviewer configuration, runs all six turns against the deployed Worker, and
+verifies the saved report can be downloaded and parsed. For a local visual
+board and serial console, open `simulator/wokwi` in VS Code with the official
+Wokwi extension and run `Wokwi: Start Simulator`. See
+`simulator/wokwi/README.md` for coverage and limitations.
+
 The display uses `GFX Library for Arduino`'s `Arduino_AXS15231B` driver and the
 codec uses `arduino-audio-driver` v0.3.0's ES8311 implementation through a
 commit-pinned Git submodule. The board's AXS15231B touch protocol is not

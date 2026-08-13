@@ -8,6 +8,15 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
+#include <time.h>
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+#include <esp_task_wdt.h>
+#endif
+// Simulator builds stage this fixture beside a generated copy of the sketch.
+// Its implementation and test assets stay outside the production source tree.
+#if __has_include(<AngryCatSimulator.h>)
+#include <AngryCatSimulator.h>
+#endif
 
 #include "src/audio/angry_cat_audio.h"
 #include "src/generated/angry_cat_frames.h"
@@ -45,11 +54,15 @@ constexpr uint16_t kThinking = 0xFD20;
 constexpr uint16_t kSpeaking = 0x8E7F;
 constexpr uint16_t kError = 0xF986;
 
+#if defined(ANGRY_CAT_SIMULATOR)
+Arduino_Canvas display(kScreenWidth, kScreenHeight, nullptr, 0, 0, 0);
+#else
 Arduino_ESP32QSPI displayBus(kLcdCs, kLcdClock, kLcdData0, kLcdData1, kLcdData2,
                              kLcdData3);
 Arduino_AXS15231B panel(&displayBus, GFX_NOT_DEFINED, 0, false, kScreenWidth,
                         kScreenHeight);
 Arduino_Canvas display(kScreenWidth, kScreenHeight, &panel, 0, 0, 0);
+#endif
 TCA9554 ioExpander(kIoExpanderAddress, &Wire);
 AngryCatAudio audio;
 InterviewerClient interviewer;
@@ -65,10 +78,19 @@ bool returnToTopicsAfterStop = false;
 bool wasTouched = false;
 bool touchTracking = false;
 bool longPressHandled = false;
+bool tlsClockReady = false;
 uint32_t touchStartedMs = 0;
 uint32_t lastTouchSeenMs = 0;
 TouchPoint touchStart;
 TouchPoint lastTouch;
+#if defined(ANGRY_CAT_SIMULATOR)
+uint8_t simulatedTouchFrames = 0;
+bool simulatorTopicCheckPending = false;
+bool simulatorEventCheckPending = false;
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+uint8_t simulatorLiveAnswerCount = 0;
+#endif
+#endif
 
 enum class ScreenStatus : uint8_t {
   Ready,
@@ -562,9 +584,11 @@ void startInterview() {
     renderScreen();
     return;
   }
-  if (!audio.isMicrophoneReady() || !interviewer.isConfigured()) {
+  if (!audio.isMicrophoneReady() || !interviewer.isConfigured() ||
+      !tlsClockReady) {
     snprintf(currentQuestion, sizeof(currentQuestion),
-             "The microphone or Cloudflare interviewer is not configured.");
+             "The microphone, TLS clock, or Cloudflare interviewer is not "
+             "ready.");
     setScreenStatus(ScreenStatus::Error, "CHECK SERIAL OUTPUT");
     return;
   }
@@ -612,6 +636,12 @@ void processInterviewerEvents() {
     case InterviewerEventType::Listening:
       setScreenStatus(ScreenStatus::Listening,
                       "PAUSE OR TAP TO END YOUR ANSWER");
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+      audio.queueSimulatorAnswer();
+      ++simulatorLiveAnswerCount;
+      Serial.printf("SIM_INTEGRATION: streaming answer %u\n",
+                    simulatorLiveAnswerCount);
+#endif
       break;
     case InterviewerEventType::Thinking:
       setScreenStatus(ScreenStatus::Thinking, "ANSWER RECEIVED - PLEASE WAIT");
@@ -661,6 +691,9 @@ void processInterviewerEvents() {
       screenDirty = true;
       Serial.printf("Interview report saved: id=%s outcome=%s\n", savedReportId,
                     event.phase);
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+      Serial.println("SIM_INTEGRATION: report saved");
+#endif
       break;
     case InterviewerEventType::ReviewLoading:
       reviewLoading = true;
@@ -676,6 +709,14 @@ void processInterviewerEvents() {
         screenDirty = true;
       }
       Serial.printf("Interviewer report ready on device: %s\n", event.text);
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+      if (simulatorLiveAnswerCount >= 6 && interviewer.report().ready &&
+          interviewer.report().scoreCount > 0) {
+        Serial.println("SIM_INTEGRATION: END_TO_END_PASSED");
+      } else {
+        Serial.println("SIM_INTEGRATION: FAIL incomplete report path");
+      }
+#endif
       break;
     case InterviewerEventType::ReviewUnavailable:
       reviewLoading = false;
@@ -703,6 +744,9 @@ void processInterviewerEvents() {
       setScreenStatus(ScreenStatus::Complete,
                       reviewLoading ? "LOADING REVIEW FROM R2"
                                     : "TAP TO CHOOSE ANOTHER TOPIC");
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+      Serial.println("SIM_INTEGRATION: interview complete");
+#endif
       break;
     case InterviewerEventType::Stopped:
       sessionActive = false;
@@ -730,6 +774,9 @@ void processInterviewerEvents() {
       snprintf(currentQuestion, sizeof(currentQuestion), "%s", event.text);
       setScreenStatus(ScreenStatus::Error, "TAP TO RETRY");
       Serial.printf("Interviewer error: %s\n", event.text);
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+      Serial.printf("SIM_INTEGRATION: FAIL %s\n", event.text);
+#endif
       break;
     }
   }
@@ -802,6 +849,9 @@ bool beginIoExpander() {
 }
 
 void resetDisplayController() {
+#if defined(ANGRY_CAT_SIMULATOR)
+  Serial.println("SIM_TEST: display reset mock ready");
+#else
   if (!beginIoExpander()) {
     Serial.println("ERROR: TCA9554 not found at 0x20 after I2C recovery");
     while (true)
@@ -819,26 +869,67 @@ void resetDisplayController() {
   delay(10);
   ioExpander.write1(kLcdResetExpanderPin, HIGH);
   delay(200);
+#endif
 }
 
 bool beginTouch() {
+#if defined(ANGRY_CAT_SIMULATOR)
+  return true;
+#else
   Wire.beginTransmission(AXS5106L_ADDR);
   if (Wire.endTransmission() != 0)
     return false;
   bsp_touch_init(&Wire, -1, 0, kScreenWidth, kScreenHeight);
   return true;
+#endif
 }
 
 bool readTouch(TouchPoint &point) {
+#if defined(ANGRY_CAT_SIMULATOR)
+  if (simulatedTouchFrames == 0)
+    return false;
+  --simulatedTouchFrames;
+  point.x = 20;
+  point.y = 100;
+  return true;
+#else
   bsp_touch_read();
   touch_data_t data{};
   if (!bsp_touch_get_coordinates(&data))
     return false;
   point = data.coords[0];
   return point.x < kScreenWidth && point.y < kScreenHeight;
+#endif
+}
+
+bool synchronizeTlsClock() {
+  constexpr time_t kMinimumValidEpoch = 1704067200; // 2024-01-01 UTC
+  if (time(nullptr) >= kMinimumValidEpoch)
+    return true;
+
+  configTime(0, 0, "time.cloudflare.com", "pool.ntp.org");
+  const uint32_t startedMs = millis();
+  while (time(nullptr) < kMinimumValidEpoch && millis() - startedMs < 15000)
+    delay(100);
+
+  const bool synchronized = time(nullptr) >= kMinimumValidEpoch;
+  Serial.printf("TLS clock: %s\n",
+                synchronized ? "synchronized" : "NTP timed out");
+  return synchronized;
 }
 
 bool configureWiFi(bool forcePortal = false) {
+  bool connected = false;
+#if defined(ANGRY_CAT_SIMULATOR)
+  (void)forcePortal;
+  WiFi.mode(WIFI_STA);
+  WiFi.begin("Wokwi-GUEST", "", 6);
+  const uint32_t startedMs = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startedMs < 10000)
+    delay(100);
+  connected = WiFi.status() == WL_CONNECTED;
+  Serial.printf("SIM_TEST: Wi-Fi %s\n", connected ? "connected" : "failed");
+#else
   snprintf(currentQuestion, sizeof(currentQuestion),
            "Join the Pediatric Boards Setup network. Saved Wi-Fi credentials "
            "are preserved.");
@@ -849,11 +940,15 @@ bool configureWiFi(bool forcePortal = false) {
   manager.setConnectTimeout(20);
   manager.setConfigPortalTimeout(180);
   manager.setBreakAfterConfig(true);
-  const bool connected =
-      forcePortal ? manager.startConfigPortal("Pediatric Boards Setup")
-                  : manager.autoConnect("Pediatric Boards Setup");
+  connected = forcePortal ? manager.startConfigPortal("Pediatric Boards Setup")
+                          : manager.autoConnect("Pediatric Boards Setup");
   Serial.printf("Wi-Fi setup: %s\n", connected ? "connected" : "timed out");
-  return WiFi.status() == WL_CONNECTED;
+  connected = connected && WiFi.status() == WL_CONNECTED;
+#endif
+
+  tlsClockReady =
+      connected && (!interviewer.isConfigured() || synchronizeTlsClock());
+  return connected;
 }
 
 void handleSerial() {
@@ -861,6 +956,23 @@ void handleSerial() {
     const int command = Serial.read();
     if (command == 's' || command == 'S') {
       sessionActive ? stopInterview() : startInterview();
+#if defined(ANGRY_CAT_SIMULATOR)
+    } else if (command == 't' || command == 'T') {
+      simulatedTouchFrames = 1;
+      simulatorTopicCheckPending = true;
+      Serial.println("SIM_TEST: injecting topic touch");
+    } else if (command == 'e' || command == 'E') {
+      InterviewerEvent event;
+      event.type = InterviewerEventType::InterviewState;
+      event.questionNumber = 2;
+      event.totalQuestions = 6;
+      snprintf(event.phase, sizeof(event.phase), "questioning");
+      snprintf(event.domain, sizeof(event.domain), "SIMULATED DOMAIN");
+      snprintf(event.text, sizeof(event.text), "Simulated queue event?");
+      simulatorEventCheckPending =
+          xQueueSend(eventQueue, &event, pdMS_TO_TICKS(20)) == pdTRUE;
+      Serial.println("SIM_TEST: injecting interviewer event");
+#endif
     }
   }
 }
@@ -888,10 +1000,31 @@ void setup() {
   Serial.begin(115200);
   delay(250);
   Serial.println("Angry Cat Pediatric Dentistry Oral Boards");
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+  // Wokwi's software TLS handshake can hold a simulated core longer than the
+  // ESP-IDF idle-task watchdog window. The production firmware keeps both
+  // watchdogs at their normal timeout; only the opt-in integration profile
+  // gives the registered tasks more time.
+  const esp_task_wdt_config_t simulatorWatchdogConfig = {
+      .timeout_ms = 120000,
+      .idle_core_mask = (1U << portNUM_PROCESSORS) - 1U,
+      .trigger_panic = true,
+  };
+  if (esp_task_wdt_reconfigure(&simulatorWatchdogConfig) == ESP_OK) {
+    Serial.println("SIM_INTEGRATION: simulator watchdog timeout extended");
+  } else {
+    Serial.println("SIM_INTEGRATION: FAIL watchdog configuration");
+  }
+#endif
 
   Wire.begin(kI2cSda, kI2cScl, 100000);
   resetDisplayController();
-  if (!display.begin(32000000)) {
+#if defined(ANGRY_CAT_SIMULATOR)
+  const bool displayReady = display.begin(GFX_SKIP_OUTPUT_BEGIN);
+#else
+  const bool displayReady = display.begin(32000000);
+#endif
+  if (!displayReady) {
     Serial.println("ERROR: display or PSRAM framebuffer initialization failed");
     while (true)
       delay(1000);
@@ -927,11 +1060,39 @@ void setup() {
   configureWiFi();
   appView = AppView::Topics;
   renderScreen();
+#if defined(ANGRY_CAT_SIMULATOR)
+  if (audioReady && audio.isMicrophoneReady() &&
+      display.getFramebuffer() != nullptr && eventQueue != nullptr &&
+      WiFi.status() == WL_CONNECTED
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+      && interviewer.isConfigured() && tlsClockReady
+#endif
+  ) {
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+    Serial.println("SIM_INTEGRATION: READY");
+#else
+    Serial.println("SIM_TEST: READY");
+#endif
+  } else {
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+    Serial.println("SIM_INTEGRATION: FAIL boot invariants");
+#else
+    Serial.println("SIM_TEST: FAIL boot invariants");
+#endif
+  }
+#endif
 }
 
 void loop() {
   handleSerial();
   processInterviewerEvents();
+#if defined(ANGRY_CAT_SIMULATOR)
+  if (simulatorEventCheckPending && questionNumber == 2 &&
+      strcmp(currentDomain, "SIMULATED DOMAIN") == 0) {
+    simulatorEventCheckPending = false;
+    Serial.println("SIM_TEST: event queue passed");
+  }
+#endif
   TouchPoint point{};
   const uint32_t now = millis();
   const bool rawTouched = readTouch(point);
@@ -956,6 +1117,13 @@ void loop() {
       } else {
         startInterview();
       }
+#if defined(ANGRY_CAT_SIMULATOR)
+      if (simulatorTopicCheckPending && selectedTopicIndex == 0 &&
+          screenStatus == ScreenStatus::Error && !sessionActive) {
+        simulatorTopicCheckPending = false;
+        Serial.println("SIM_TEST: topic guard passed");
+      }
+#endif
     } else {
       touchTracking = true;
       longPressHandled = false;

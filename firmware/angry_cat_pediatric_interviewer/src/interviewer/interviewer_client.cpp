@@ -11,7 +11,14 @@
 
 #include "../audio/angry_cat_audio.h"
 
-#if __has_include("interviewer_config.h")
+#if defined(ANGRY_CAT_SIMULATOR) && !defined(ANGRY_CAT_SIMULATOR_LIVE)
+// Simulator builds must never inherit local production credentials. Network
+// and state tests exercise the same safe not-configured guard used by a fresh
+// checkout.
+constexpr char kPediatricInterviewerWebSocketUrl[] = "";
+constexpr char kPediatricInterviewerDeviceToken[] = "";
+constexpr char kPediatricInterviewerRootCa[] = "";
+#elif __has_include("interviewer_config.h")
 #include "interviewer_config.h"
 #elif __has_include("../../../../../waveshare_touch_demo/cloudflare_config.h")
 #include "../../../../../waveshare_touch_demo/cloudflare_config.h"

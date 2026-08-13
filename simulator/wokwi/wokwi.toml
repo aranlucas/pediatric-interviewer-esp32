@@ -1,0 +1,4 @@
+[wokwi]
+version = 1
+firmware = '../../build/wokwi/angry_cat_pediatric_interviewer.ino.merged.bin'
+elf = '../../build/wokwi/angry_cat_pediatric_interviewer.ino.elf'

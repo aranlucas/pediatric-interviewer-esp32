@@ -1,0 +1,7 @@
+name: Angry Cat live interview integration test
+version: 1
+author: Angry Cat Pediatric Interviewer
+steps:
+  - wait-serial: 'SIM_INTEGRATION: READY'
+  - write-serial: 's'
+  - wait-serial: 'SIM_INTEGRATION: END_TO_END_PASSED'
