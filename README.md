@@ -1,9 +1,11 @@
 # Angry Cat Pediatric Dentistry Interviewer
 
-A dedicated full-screen app for the Waveshare ESP32-S3-Touch-LCD-3.5B. The
-opening screen is a two-column list of the ten oral-board study domains. Choose one and Angry
-Cat runs a six-question pediatric dentistry interview over one persistent voice
-session. Answer each question aloud and the next question starts automatically.
+A full-stack pediatric oral-boards trainer for the Waveshare
+ESP32-S3-Touch-LCD-3.5B. This repository contains the device firmware, Wokwi
+simulator, and its Cloudflare Worker. The opening screen is a two-column list
+of the ten oral-board study domains. Choose one and Angry Cat runs a
+six-question pediatric dentistry interview over one persistent voice session.
+Answer each question aloud and the next question starts automatically.
 Normal taps are ignored once the interview begins, so an accidental tap cannot
 tear down the call. Hold for 2.5 seconds to end an interview; hold from the topic
 screen to reopen Wi-Fi setup.
@@ -66,18 +68,34 @@ vendored from board-support commit
 the pinned Arduino profile. It carries small reliability fixes for I2C
 failures, complete touch results, and released-touch state.
 
-The app reuses the existing local Cloudflare device credentials when built next
-to `waveshare_touch_demo`. For a standalone copy, duplicate
+Duplicate
 `firmware/angry_cat_pediatric_interviewer/interviewer_config.h.example` as
 `interviewer_config.h` in the same directory and fill in the Worker endpoint,
 shared device token, and CA certificate.
 
-The corresponding Worker is in
-`../waveshare_touch_demo/cloudflare/angry-cat-worker`. Its interviewer route is
-`/agents/pediatric-interviewer/esp32`; it uses one Gemini Live voice session and
-durable six-question interview state. Gemini's native 24 kHz PCM output is
-preserved through the Worker, I2S bus, and ES8311 codec instead of being
-downsampled to 16 kHz before playback.
+## Cloudflare Worker
+
+The deployable Worker lives in `worker`. Its interviewer route is
+`/agents/pediatric-interviewer/esp32`; it uses one Gemini Live voice session,
+durable six-question interview state, and private R2 report storage. Gemini's
+native 24 kHz PCM output is preserved through the Worker, I2S bus, and ES8311
+codec instead of being downsampled to 16 kHz before playback.
+
+```sh
+cd worker
+pnpm install --frozen-lockfile
+pnpm test
+pnpm run check
+pnpm exec wrangler secret put DEVICE_TOKEN
+pnpm exec wrangler secret put GEMINI_API_KEY
+pnpm run deploy
+```
+
+`worker/wrangler.jsonc` declares the Workers AI, Durable Object, and R2
+bindings. Secrets remain encrypted in Cloudflare and are not committed. The
+Worker also retains the original `/agents/angry-cat/esp32` voice route used by
+the weather display because both routes share the deployed Worker entrypoint.
+See `worker/README.md` for provisioning and live simulation commands.
 
 ## License
 

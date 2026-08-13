@@ -1,0 +1,48 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "esp32-angry-cat",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "ai": {
+    "binding": "AI",
+    "remote": true,
+  },
+  "vars": {
+    "WEATHER_LOCATION": "Seattle",
+    "WEATHER_LATITUDE": "47.6062",
+    "WEATHER_LONGITUDE": "-122.3321",
+  },
+  "r2_buckets": [
+    {
+      "binding": "INTERVIEW_REPORTS",
+      "bucket_name": "pediatric-oral-boards-reports",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ANGRY_CAT",
+        "class_name": "AngryCat",
+      },
+      {
+        "name": "PEDIATRIC_INTERVIEWER",
+        "class_name": "PediatricInterviewer",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AngryCat"],
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["PediatricInterviewer"],
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+}
