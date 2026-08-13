@@ -1,0 +1,35 @@
+{
+  "name": "Angry Cat 3.5-inch Display",
+  "author": "Angry Cat Pediatric Interviewer",
+  "pins": ["SCK", "MOSI", "CS", "MISO"],
+  "display": {
+    "width": 320,
+    "height": 480
+  },
+  "controls": [
+    {
+      "id": "touchX",
+      "label": "Touch X",
+      "type": "range",
+      "min": 0,
+      "max": 319,
+      "step": 1
+    },
+    {
+      "id": "touchY",
+      "label": "Touch Y",
+      "type": "range",
+      "min": 0,
+      "max": 479,
+      "step": 1
+    },
+    {
+      "id": "touchPressed",
+      "label": "Touch pressed",
+      "type": "range",
+      "min": 0,
+      "max": 1,
+      "step": 1
+    }
+  ]
+}

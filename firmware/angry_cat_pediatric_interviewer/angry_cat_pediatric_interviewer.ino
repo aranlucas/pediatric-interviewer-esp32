@@ -43,7 +43,7 @@ constexpr uint32_t kI2cStartupRetryMs = 100;
 constexpr uint32_t kLongPressMs = 2500;
 constexpr uint32_t kTouchReleaseDebounceMs = 100;
 constexpr int kPetX = (kScreenWidth - kAngryCatFrameWidth) / 2;
-constexpr int kPetY = 72;
+constexpr int kPetY = 8;
 
 constexpr uint16_t kWhite = 0xFFFF;
 constexpr uint16_t kSoftWhite = 0xD69A;
@@ -89,6 +89,8 @@ bool simulatorTopicCheckPending = false;
 bool simulatorEventCheckPending = false;
 #if defined(ANGRY_CAT_SIMULATOR_LIVE)
 uint8_t simulatorLiveAnswerCount = 0;
+QueueHandle_t simulatorTextAnswerQueue = nullptr;
+bool simulatorInteractiveText = false;
 #endif
 #endif
 
@@ -292,6 +294,14 @@ const AngryCatAnimationClip &animationClip() {
 
 uint8_t absoluteFrame() { return animationClip().firstFrame + currentFrame; }
 
+void flushDisplay() {
+  display.flush();
+#if defined(ANGRY_CAT_SIMULATOR)
+  angry_cat_simulator::showDisplay(display.getFramebuffer(), kScreenWidth,
+                                   kScreenHeight);
+#endif
+}
+
 void drawCatFrame() {
   display.fillRect(kPetX, kPetY, kAngryCatFrameWidth, kAngryCatFrameHeight,
                    kPetCard);
@@ -362,7 +372,7 @@ const char *statusLabel() {
 }
 
 void drawWrappedQuestion(const char *text) {
-  constexpr size_t kMaximumLines = 9;
+  constexpr size_t kMaximumLines = 13;
   constexpr size_t kCharactersPerLine = 43;
   char lines[kMaximumLines][kCharactersPerLine + 1] = {};
   char scratch[sizeof(currentQuestion)];
@@ -390,7 +400,7 @@ void drawWrappedQuestion(const char *text) {
   }
 
   const size_t lineCount = lineIndex + 1;
-  const int firstY = 278 + static_cast<int>(9 - lineCount) * 7;
+  const int firstY = 317 - static_cast<int>((lineCount - 1) * 15) / 2;
   for (size_t index = 0; index < lineCount; ++index) {
     drawCentered(lines[index], kScreenWidth / 2,
                  firstY + static_cast<int>(index) * 15, 1, kInk);
@@ -442,7 +452,7 @@ void renderTopicMenu() {
                    : "WI-FI OFFLINE - TAP A TOPIC TO SET UP",
                kScreenWidth / 2, 470, 1,
                WiFi.status() == WL_CONNECTED ? kListening : kThinking);
-  display.flush();
+  flushDisplay();
 }
 
 void renderReviewScreen() {
@@ -506,7 +516,7 @@ void renderReviewScreen() {
   drawCentered(reportLabel, kScreenWidth / 2, 436, 1, kSoftWhite);
   drawCentered("SWIPE FOR PAGES - HOLD FOR TOPICS", kScreenWidth / 2, 462, 1,
                kSoftWhite);
-  display.flush();
+  flushDisplay();
 }
 
 void renderScreen() {
@@ -523,35 +533,23 @@ void renderScreen() {
     appView = AppView::Interview;
   }
   drawBackground();
-  drawCentered("PEDIATRIC ORAL BOARDS", kScreenWidth / 2, 13, 2, kWhite);
-
-  char progress[28];
-  if (questionNumber == 0) {
-    snprintf(progress, sizeof(progress), "SIX CLINICAL QUESTIONS");
-  } else {
-    snprintf(progress, sizeof(progress), "QUESTION %u OF %u", questionNumber,
-             totalQuestions);
-  }
-  display.fillRoundRect(77, 40, 166, 24, 12, RGB565(75, 50, 100));
-  drawCentered(progress, kScreenWidth / 2, 48, 1, kSoftWhite);
-
-  display.fillRoundRect(20, 68, 280, 164, 22, kPetCard);
+  display.fillRoundRect(20, 4, 280, 164, 22, kPetCard);
   currentAnimation = animationForStatus();
   currentFrame = 0;
   lastFrameMs = millis();
   drawCatFrame();
 
-  display.fillTriangle(142, 250, 160, 229, 178, 250, kWhite);
-  display.fillRoundRect(14, 246, 292, 184, 18, kWhite);
+  display.fillTriangle(142, 186, 160, 165, 178, 186, kWhite);
+  display.fillRoundRect(14, 182, 292, 248, 18, kWhite);
   char domainLabel[49];
   snprintf(domainLabel, sizeof(domainLabel), "%.48s", currentDomain);
-  drawCentered(domainLabel, kScreenWidth / 2, 259, 1, RGB565(95, 77, 128));
+  drawCentered(domainLabel, kScreenWidth / 2, 195, 1, RGB565(95, 77, 128));
   drawWrappedQuestion(currentQuestion);
 
   display.fillRoundRect(42, 439, 236, 26, 13, RGB565(25, 31, 62));
   drawCentered(statusLabel(), kScreenWidth / 2, 447, 1, statusColor());
   drawCentered(statusDetail, kScreenWidth / 2, 470, 1, kSoftWhite);
-  display.flush();
+  flushDisplay();
 }
 
 void setScreenStatus(ScreenStatus status, const char *detail = nullptr) {
@@ -565,7 +563,12 @@ void setScreenStatus(ScreenStatus status, const char *detail = nullptr) {
 void sessionTask(void *) {
   const bool finished =
       interviewer.runSession(audio, kStudyTopics[selectedTopicIndex].id,
-                             eventQueue, stopRequested, commitTurnRequested);
+                             eventQueue, stopRequested, commitTurnRequested
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+                             ,
+                             simulatorTextAnswerQueue
+#endif
+      );
   if (finished && interviewer.lastReportId()[0] != '\0') {
     interviewer.fetchReport(interviewer.lastReportId(), eventQueue);
   }
@@ -637,10 +640,18 @@ void processInterviewerEvents() {
       setScreenStatus(ScreenStatus::Listening,
                       "PAUSE OR TAP TO END YOUR ANSWER");
 #if defined(ANGRY_CAT_SIMULATOR_LIVE)
-      audio.queueSimulatorAnswer();
-      ++simulatorLiveAnswerCount;
-      Serial.printf("SIM_INTEGRATION: streaming answer %u\n",
-                    simulatorLiveAnswerCount);
+      if (simulatorInteractiveText) {
+        Serial.println(
+            "SIM_MIC: awaiting answer; type a <answer text> and press Enter");
+        angry_cat_simulator::showMicrophoneText("AWAITING TYPED ANSWER", true);
+      } else {
+        audio.queueSimulatorAnswer();
+        angry_cat_simulator::showMicrophoneText("PRERECORDED PCM ANSWER",
+                                                false);
+        ++simulatorLiveAnswerCount;
+        Serial.printf("SIM_INTEGRATION: streaming answer %u\n",
+                      simulatorLiveAnswerCount);
+      }
 #endif
       break;
     case InterviewerEventType::Thinking:
@@ -795,7 +806,7 @@ void updateAnimation() {
   }
   lastFrameMs = millis();
   drawCatFrame();
-  display.flush();
+  flushDisplay();
 }
 
 uint8_t probeI2cDevice(uint8_t address) {
@@ -886,6 +897,13 @@ bool beginTouch() {
 
 bool readTouch(TouchPoint &point) {
 #if defined(ANGRY_CAT_SIMULATOR)
+  uint16_t simulatorX = 0;
+  uint16_t simulatorY = 0;
+  if (angry_cat_simulator::readTouch(simulatorX, simulatorY)) {
+    point.x = simulatorX;
+    point.y = simulatorY;
+    return true;
+  }
   if (simulatedTouchFrames == 0)
     return false;
   --simulatedTouchFrames;
@@ -948,6 +966,12 @@ bool configureWiFi(bool forcePortal = false) {
 
   tlsClockReady =
       connected && (!interviewer.isConfigured() || synchronizeTlsClock());
+#if defined(ANGRY_CAT_SIMULATOR)
+  const IPAddress localIp = WiFi.localIP();
+  const uint8_t ip[] = {localIp[0], localIp[1], localIp[2], localIp[3]};
+  angry_cat_simulator::showWifiStatus(connected, connected ? WiFi.RSSI() : -127,
+                                      ip);
+#endif
   return connected;
 }
 
@@ -961,6 +985,80 @@ void handleSerial() {
       simulatedTouchFrames = 1;
       simulatorTopicCheckPending = true;
       Serial.println("SIM_TEST: injecting topic touch");
+    } else if (command == 'p' || command == 'P') {
+      Serial.println("SIM_SPEAKER: playing 440 Hz test tone");
+      angry_cat_simulator::playSpeakerTestTone();
+    } else if (command == 'b' || command == 'B') {
+      Serial.printf("SIM_TEST: playback burst %s\n",
+                    InterviewerClient::runPlaybackBufferSelfTest() ? "passed"
+                                                                   : "failed");
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+    } else if (command == 'i' || command == 'I') {
+      simulatorInteractiveText = !simulatorInteractiveText;
+      xQueueReset(simulatorTextAnswerQueue);
+      Serial.printf("SIM_MIC: interactive text mode %s\n",
+                    simulatorInteractiveText ? "enabled" : "disabled");
+      angry_cat_simulator::showMicrophoneText(
+          simulatorInteractiveText ? "TYPE a <answer> IN TERMINAL"
+                                   : "PRERECORDED PCM MODE",
+          simulatorInteractiveText);
+    } else if (command == 'a' || command == 'A') {
+      SimulatorTextAnswer answer;
+      const size_t bytesRead =
+          Serial.readBytesUntil('\n', answer.text, sizeof(answer.text) - 1);
+      answer.text[bytesRead] = '\0';
+      bool answerTooLong = false;
+      if (bytesRead == sizeof(answer.text) - 1) {
+        const uint32_t drainStartedMs = millis();
+        int nextCharacter = -1;
+        while (nextCharacter < 0 && millis() - drainStartedMs < 100) {
+          if (Serial.available() > 0)
+            nextCharacter = Serial.read();
+          else
+            delay(1);
+        }
+        if (nextCharacter != '\n') {
+          answerTooLong = true;
+          while (millis() - drainStartedMs < 100) {
+            if (Serial.available() == 0) {
+              delay(1);
+              continue;
+            }
+            if (Serial.read() == '\n')
+              break;
+          }
+        }
+      }
+      char *text = answer.text;
+      while (*text == ' ' || *text == '\t')
+        ++text;
+      size_t textLength = strlen(text);
+      while (textLength > 0 &&
+             (text[textLength - 1] == '\r' || text[textLength - 1] == ' ' ||
+              text[textLength - 1] == '\t')) {
+        text[--textLength] = '\0';
+      }
+      if (answerTooLong) {
+        Serial.println("SIM_MIC: answer exceeds the 1000-character limit");
+      } else if (!simulatorInteractiveText) {
+        Serial.println("SIM_MIC: type i first to enable interactive text mode");
+      } else if (textLength == 0) {
+        Serial.println("SIM_MIC: answer text was empty");
+      } else {
+        SimulatorTextAnswer queuedAnswer;
+        snprintf(queuedAnswer.text, sizeof(queuedAnswer.text), "%s", text);
+        if (xQueueSend(simulatorTextAnswerQueue, &queuedAnswer,
+                       pdMS_TO_TICKS(20)) == pdTRUE) {
+          ++simulatorLiveAnswerCount;
+          angry_cat_simulator::showMicrophoneText(queuedAnswer.text, false);
+          Serial.printf("SIM_MIC: queued typed answer %u (%u characters)\n",
+                        simulatorLiveAnswerCount,
+                        static_cast<unsigned>(textLength));
+        } else {
+          Serial.println("SIM_MIC: answer queue is full");
+        }
+      }
+#endif
     } else if (command == 'e' || command == 'E') {
       InterviewerEvent event;
       event.type = InterviewerEventType::InterviewState;
@@ -1021,6 +1119,9 @@ void setup() {
   resetDisplayController();
 #if defined(ANGRY_CAT_SIMULATOR)
   const bool displayReady = display.begin(GFX_SKIP_OUTPUT_BEGIN);
+  const bool simulatorDisplayReady =
+      displayReady &&
+      angry_cat_simulator::beginDisplay(kScreenWidth, kScreenHeight);
 #else
   const bool displayReady = display.begin(32000000);
 #endif
@@ -1055,6 +1156,15 @@ void setup() {
     while (true)
       delay(1000);
   }
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+  simulatorTextAnswerQueue = xQueueCreate(4, sizeof(SimulatorTextAnswer));
+  if (simulatorTextAnswerQueue == nullptr) {
+    Serial.println("SIM_INTEGRATION: FAIL text answer queue allocation");
+    while (true)
+      delay(1000);
+  }
+  Serial.setTimeout(100);
+#endif
   appView = AppView::Topics;
   renderScreen();
   configureWiFi();
@@ -1063,9 +1173,10 @@ void setup() {
 #if defined(ANGRY_CAT_SIMULATOR)
   if (audioReady && audio.isMicrophoneReady() &&
       display.getFramebuffer() != nullptr && eventQueue != nullptr &&
-      WiFi.status() == WL_CONNECTED
+      simulatorDisplayReady && WiFi.status() == WL_CONNECTED
 #if defined(ANGRY_CAT_SIMULATOR_LIVE)
-      && interviewer.isConfigured() && tlsClockReady
+      && interviewer.isConfigured() && tlsClockReady &&
+      simulatorTextAnswerQueue != nullptr
 #endif
   ) {
 #if defined(ANGRY_CAT_SIMULATOR_LIVE)

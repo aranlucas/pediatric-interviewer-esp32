@@ -1,0 +1,19 @@
+{
+  "name": "Angry Cat PCM Speaker",
+  "author": "Angry Cat Pediatric Interviewer",
+  "pins": ["SCK", "MOSI", "CS", "AUDIO_OUT"],
+  "display": {
+    "width": 160,
+    "height": 64
+  },
+  "controls": [
+    {
+      "id": "volume",
+      "label": "Speaker volume",
+      "type": "range",
+      "min": 0,
+      "max": 100,
+      "step": 1
+    }
+  ]
+}

@@ -1,10 +1,54 @@
 #include "AngryCatSimulator.h"
 
 #include <Arduino.h>
+#include <SPI.h>
+#include <freertos/semphr.h>
 
 namespace angry_cat_simulator {
 
 namespace {
+
+constexpr int kDisplaySck = 9;
+constexpr int kDisplayMosi = 10;
+constexpr int kDisplayCs = 11;
+constexpr int kDisplayMiso = 17;
+constexpr int kSpeakerCs = 18;
+constexpr int kWifiCs = 19;
+constexpr int kMicrophoneCs = 20;
+constexpr uint32_t kDisplaySpiHz = 20000000;
+constexpr uint8_t kDisplayPacketMagic[] = {'A', 'C', 'D', '1'};
+constexpr size_t kTouchPacketSize = 7;
+constexpr uint8_t kSpeakerPacketMagic[] = {'A', 'C', 'S', '1'};
+constexpr uint8_t kWifiPacketMagic[] = {'A', 'C', 'W', '1'};
+constexpr uint8_t kMicrophonePacketMagic[] = {'A', 'C', 'M', '1'};
+
+SPIClass simulatorDisplaySpi(FSPI);
+SemaphoreHandle_t simulatorSpiMutex = nullptr;
+uint16_t *previousDisplayFrame = nullptr;
+uint16_t displayWidth = 0;
+uint16_t displayHeight = 0;
+bool firstDisplayFrame = true;
+uint16_t touchX = 0;
+uint16_t touchY = 0;
+bool touchPressed = false;
+bool touchStateInitialized = false;
+
+bool beginSpiPacket(int chipSelect) {
+  if (simulatorSpiMutex == nullptr ||
+      xSemaphoreTake(simulatorSpiMutex, portMAX_DELAY) != pdTRUE) {
+    return false;
+  }
+  simulatorDisplaySpi.beginTransaction(
+      SPISettings(kDisplaySpiHz, MSBFIRST, SPI_MODE0));
+  digitalWrite(chipSelect, LOW);
+  return true;
+}
+
+void endSpiPacket(int chipSelect) {
+  digitalWrite(chipSelect, HIGH);
+  simulatorDisplaySpi.endTransaction();
+  xSemaphoreGive(simulatorSpiMutex);
+}
 
 #if defined(ANGRY_CAT_SIMULATOR_LIVE)
 
@@ -6087,16 +6131,27 @@ bool simulatorAnswerActive = false;
 } // namespace
 
 bool beginAudio() {
-  Serial.println("SIM_TEST: audio loopback mock ready");
+  Serial.println("SIM_SPEAKER: PCM bridge ready at 24 kHz");
+  Serial.println("SIM_TEST: microphone fixture ready");
   return true;
 }
 
 bool playPcm16(const uint8_t *data, size_t size) {
   const bool valid = data != nullptr && size >= sizeof(int16_t) &&
-                     size % sizeof(int16_t) == 0;
-  if (valid)
-    delay(max<size_t>(1, size / 48));
-  return valid;
+                     size % sizeof(int16_t) == 0 && size <= UINT16_MAX * 2;
+  if (!valid || !beginSpiPacket(kSpeakerCs))
+    return false;
+
+  uint8_t header[6];
+  memcpy(header, kSpeakerPacketMagic, sizeof(kSpeakerPacketMagic));
+  const uint16_t samples = size / sizeof(int16_t);
+  header[4] = samples & 0xff;
+  header[5] = samples >> 8;
+  simulatorDisplaySpi.writeBytes(header, sizeof(header));
+  simulatorDisplaySpi.writeBytes(data, size);
+  endSpiPacket(kSpeakerCs);
+  delay(max<size_t>(1, size / 48));
+  return true;
 }
 
 size_t readPcm16(uint8_t *output, size_t outputCapacity) {
@@ -6131,6 +6186,186 @@ void queueAnswer() {
   simulatorAnswerOffset = 0;
   simulatorAnswerActive = true;
 #endif
+}
+
+bool beginDisplay(uint16_t width, uint16_t height) {
+  if (width == 0 || height == 0)
+    return false;
+
+  const size_t frameBytes =
+      static_cast<size_t>(width) * height * sizeof(uint16_t);
+  previousDisplayFrame = static_cast<uint16_t *>(ps_malloc(frameBytes));
+  if (previousDisplayFrame == nullptr)
+    return false;
+
+  displayWidth = width;
+  displayHeight = height;
+  firstDisplayFrame = true;
+  memset(previousDisplayFrame, 0, frameBytes);
+
+  pinMode(kDisplayCs, OUTPUT);
+  pinMode(kSpeakerCs, OUTPUT);
+  pinMode(kWifiCs, OUTPUT);
+  pinMode(kMicrophoneCs, OUTPUT);
+  digitalWrite(kDisplayCs, HIGH);
+  digitalWrite(kSpeakerCs, HIGH);
+  digitalWrite(kWifiCs, HIGH);
+  digitalWrite(kMicrophoneCs, HIGH);
+  simulatorDisplaySpi.begin(kDisplaySck, kDisplayMiso, kDisplayMosi,
+                            kDisplayCs);
+  simulatorSpiMutex = xSemaphoreCreateMutex();
+  if (simulatorSpiMutex == nullptr)
+    return false;
+  Serial.printf("SIM_DISPLAY: bridge ready %ux%u\n", width, height);
+  Serial.println("SIM_TOUCH: SPI coordinate bridge ready on GPIO 17");
+  return true;
+}
+
+void showDisplay(const uint16_t *framebuffer, uint16_t width, uint16_t height) {
+  if (framebuffer == nullptr || previousDisplayFrame == nullptr ||
+      width != displayWidth || height != displayHeight) {
+    return;
+  }
+
+  uint16_t minX = width;
+  uint16_t minY = height;
+  uint16_t maxX = 0;
+  uint16_t maxY = 0;
+
+  if (firstDisplayFrame) {
+    minX = 0;
+    minY = 0;
+    maxX = width - 1;
+    maxY = height - 1;
+  } else {
+    for (uint16_t y = 0; y < height; ++y) {
+      const size_t rowOffset = static_cast<size_t>(y) * width;
+      for (uint16_t x = 0; x < width; ++x) {
+        const size_t index = rowOffset + x;
+        if (framebuffer[index] == previousDisplayFrame[index])
+          continue;
+        minX = min(minX, x);
+        minY = min(minY, y);
+        maxX = max(maxX, x);
+        maxY = max(maxY, y);
+      }
+    }
+  }
+
+  if (minX >= width || minY >= height)
+    return;
+
+  const uint16_t rectWidth = maxX - minX + 1;
+  const uint16_t rectHeight = maxY - minY + 1;
+  uint8_t header[12];
+  memcpy(header, kDisplayPacketMagic, sizeof(kDisplayPacketMagic));
+  const uint16_t fields[] = {minX, minY, rectWidth, rectHeight};
+  for (size_t index = 0; index < 4; ++index) {
+    header[4 + index * 2] = static_cast<uint8_t>(fields[index] & 0xff);
+    header[5 + index * 2] = static_cast<uint8_t>(fields[index] >> 8);
+  }
+
+  if (!beginSpiPacket(kDisplayCs))
+    return;
+  simulatorDisplaySpi.writeBytes(header, sizeof(header));
+  for (uint16_t y = minY; y <= maxY; ++y) {
+    const size_t rowOffset = static_cast<size_t>(y) * width + minX;
+    const uint8_t *row =
+        reinterpret_cast<const uint8_t *>(framebuffer + rowOffset);
+    simulatorDisplaySpi.writeBytes(row, static_cast<uint32_t>(rectWidth) *
+                                            sizeof(uint16_t));
+    memcpy(previousDisplayFrame + rowOffset, framebuffer + rowOffset,
+           static_cast<size_t>(rectWidth) * sizeof(uint16_t));
+  }
+  endSpiPacket(kDisplayCs);
+
+  if (firstDisplayFrame) {
+    firstDisplayFrame = false;
+    Serial.println("SIM_DISPLAY: first frame sent");
+  }
+}
+
+bool readTouch(uint16_t &x, uint16_t &y) {
+  uint8_t request[kTouchPacketSize]{};
+  uint8_t response[kTouchPacketSize]{};
+  if (!beginSpiPacket(kDisplayCs))
+    return false;
+  simulatorDisplaySpi.transferBytes(request, response, sizeof(response));
+  endSpiPacket(kDisplayCs);
+
+  if (response[0] != 'A' || response[1] != 'C')
+    return false;
+
+  const uint16_t nextX = static_cast<uint16_t>(response[2]) |
+                         (static_cast<uint16_t>(response[3]) << 8);
+  const uint16_t nextY = static_cast<uint16_t>(response[4]) |
+                         (static_cast<uint16_t>(response[5]) << 8);
+  const bool nextPressed = response[6] != 0;
+  if (!touchStateInitialized || nextX != touchX || nextY != touchY ||
+      nextPressed != touchPressed) {
+    touchX = nextX;
+    touchY = nextY;
+    touchPressed = nextPressed;
+    touchStateInitialized = true;
+    Serial.printf("SIM_TOUCH: %s at %u,%u\n",
+                  touchPressed ? "down" : "released", touchX, touchY);
+  }
+
+  if (!touchPressed || touchX >= displayWidth || touchY >= displayHeight)
+    return false;
+
+  x = touchX;
+  y = touchY;
+  return true;
+}
+
+void showWifiStatus(bool connected, int32_t rssi, const uint8_t ip[4]) {
+  if (!beginSpiPacket(kWifiCs))
+    return;
+
+  uint8_t packet[10];
+  memcpy(packet, kWifiPacketMagic, sizeof(kWifiPacketMagic));
+  packet[4] = connected ? 1 : 0;
+  packet[5] = static_cast<uint8_t>(constrain(rssi, -127, 0));
+  for (size_t index = 0; index < 4; ++index)
+    packet[6 + index] = ip == nullptr ? 0 : ip[index];
+  simulatorDisplaySpi.writeBytes(packet, sizeof(packet));
+  endSpiPacket(kWifiCs);
+}
+
+void showMicrophoneText(const char *text, bool waiting) {
+  if (text == nullptr || !beginSpiPacket(kMicrophoneCs))
+    return;
+
+  const size_t textLength = min<size_t>(strlen(text), 320);
+  uint8_t header[7];
+  memcpy(header, kMicrophonePacketMagic, sizeof(kMicrophonePacketMagic));
+  header[4] = waiting ? 1 : 0;
+  header[5] = static_cast<uint8_t>(textLength & 0xff);
+  header[6] = static_cast<uint8_t>(textLength >> 8);
+  simulatorDisplaySpi.writeBytes(header, sizeof(header));
+  simulatorDisplaySpi.writeBytes(reinterpret_cast<const uint8_t *>(text),
+                                 textLength);
+  endSpiPacket(kMicrophoneCs);
+}
+
+void playSpeakerTestTone() {
+  constexpr size_t kSamplesPerFrame = 480;
+  constexpr size_t kFrameCount = 25;
+  int16_t samples[kSamplesPerFrame];
+  uint32_t phase = 0;
+  for (size_t frame = 0; frame < kFrameCount; ++frame) {
+    for (size_t index = 0; index < kSamplesPerFrame; ++index) {
+      const uint16_t cycle = phase % 24000;
+      const int32_t triangle = cycle < 12000
+                                   ? static_cast<int32_t>(cycle) - 6000
+                                   : 18000 - static_cast<int32_t>(cycle);
+      samples[index] = static_cast<int16_t>(triangle * 3);
+      phase += 440;
+    }
+    playPcm16(reinterpret_cast<const uint8_t *>(samples), sizeof(samples));
+  }
+  Serial.println("SIM_SPEAKER: 440 Hz test tone complete");
 }
 
 } // namespace angry_cat_simulator

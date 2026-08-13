@@ -8,7 +8,9 @@ This profile runs the production Arduino sketch on Wokwi's ESP32-S3 model with
 - connection to Wokwi's virtual Wi-Fi network;
 - serial-injected touch routing to the first study topic;
 - the safe guard that prevents an interview without credentials; and
-- FreeRTOS queue delivery of an interviewer state event.
+- FreeRTOS queue delivery of an interviewer state event; and
+- a 40-second synthetic PCM burst through the 1 MiB PSRAM ring and its
+  high/low-water backpressure transitions.
 
 Simulator builds define `ANGRY_CAT_SIMULATOR`. That build never includes local
 interviewer credentials and cannot contact the production Worker.
@@ -24,17 +26,39 @@ only.
 
 `make compile-simulator-integration` builds an explicit opt-in integration
 profile. It uses the ignored local `interviewer_config.h`, the real TLS
-WebSocket Worker route, and Wokwi's virtual Wi-Fi. A short generated candidate
-answer replaces only the unavailable I2S microphone boundary. The firmware
-streams that PCM answer at 24 kHz for each of the six turns, waits for the real
-interview to complete, downloads the private R2 report, and validates its score
-entries on the simulated ESP32-S3.
+WebSocket Worker route, and Wokwi's virtual Wi-Fi. Its default automated mode
+streams a short generated candidate answer at 24 kHz to test the normal PCM
+transport boundary. Because a real interview asks dynamic questions, an
+interactive mode also accepts a new typed answer for every question and sends
+it into the same authenticated Gemini Live conversation. Both modes wait for
+the real interview to complete, download the private R2 report, and validate
+its score entries on the simulated ESP32-S3.
 
 With a Wokwi CLI token, run the complete scenario with:
 
 ```sh
 WOKWI_CLI_TOKEN=... make simulate-integration
 ```
+
+For the fastest agent loop, avoid the VS Code terminal and run the official
+Wokwi CLI in interactive mode:
+
+```sh
+WOKWI_CLI_TOKEN=... make simulate-integration-interactive
+```
+
+The process exposes ESP32 serial on stdin/stdout, so an agent can wait for
+`SIM_MIC: awaiting answer` and write a question-specific `a <answer>` line
+directly. `make simulate-turn-complete` provides a shorter deterministic gate
+that asserts both `client turn complete=true` and the subsequent
+`Gemini turn complete` event. `make wokwi-mcp` starts Wokwi CLI's experimental
+MCP server when direct MCP integration is preferred.
+
+Standard and live-integration firmware now compile into separate build and
+staging directories. After a successful link, the selected profile atomically
+updates `build/wokwi-active`; Wokwi never observes a half-cleaned build
+directory, and concurrent standard/integration compiles cannot delete each
+other's objects.
 
 For the visual local flow, run `make compile-simulator-integration`, start the
 Wokwi extension, and type `s` into Wokwi Terminal. Success ends with
@@ -43,6 +67,19 @@ and creates a real private interview report. It requires Wokwi's Private IoT
 Gateway. The Community license's Public Gateway can reach ordinary HTTPS but
 did not complete the ESP32-S3 WebSocket TLS handshake; the simulator refuses
 to fall back to plaintext or disable certificate validation.
+
+For a question-aware interactive interview, type `i` before `s`. Whenever the
+terminal prints `SIM_MIC: awaiting answer`, enter a new response as:
+
+```text
+a I would first assess the child's immediate safety and ask the caregiver for specific examples.
+```
+
+The `a ` prefix is a simulator command and is not included in the candidate
+answer. The custom microphone display shows whether it is waiting or has queued
+text, and the Wokwi Chips output logs the supplied text. Type `i` again to
+return to the automated PCM fixture. Typed answers are an integration-test
+seam only; the production firmware continues to use the physical microphone.
 
 The Worker repository also provides a hardware-free integration suite that
 streams synthesized speech through the deployed Worker and Gemini Live, then
@@ -61,14 +98,51 @@ npm run simulate:suite
 3. Install the official Wokwi Simulator extension.
 4. Run `Wokwi: Start Simulator` from the command palette.
 
-The Wokwi window displays the virtual ESP32-S3 board and its live serial
-terminal. The current profile intentionally uses an offscreen 320 x 480
-framebuffer, so it validates UI rendering memory and state transitions but does
-not display the Angry Cat pixels. Wokwi does not provide the board's
-AXS15231B QSPI display as a standard visual part.
+The Wokwi window displays the virtual ESP32-S3 board, the live serial terminal,
+and four custom peripherals:
+
+- a 320 x 480 Angry Cat display with coordinate touch controls;
+- a terminal-fed text microphone status display for dynamic interviews;
+- a Wi-Fi monitor driven by the ESP32's Wokwi-native radio state; and
+- a 24 kHz PCM speaker/DAC with a live level meter and audible buzzer sink.
+
+Simulator builds mirror the production `Arduino_Canvas` framebuffer over a
+dedicated SPI test seam on GPIO 9, 10, and 11. The seam sends only the changed
+rectangle after each flush, so screen transitions and animation remain
+responsive. The Wi-Fi and speaker monitors share the SPI clock/data pins and
+use chip selects on GPIO 19 and 18. None of these seams are compiled into the
+production firmware. Their virtual wires remain electrically connected but are
+kept in a wiring bay to the left of the display so they do not cover the
+framebuffer.
+
+Click the custom display to open its controls. Set **Touch X** and **Touch Y**
+to a screen coordinate, turn **Touch pressed** on, then turn it off to release.
+The ESP32-S3 polls those coordinates over simulator-only SPI MISO on GPIO 17,
+and the production touch state machine handles the resulting tap, hold, or
+swipe.
+Wokwi custom framebuffers do not expose pointer coordinates, so these controls
+provide coordinate-accurate touch input rather than direct mouse clicks on the
+pixels.
+
+Type `p` in Wokwi Terminal to play a half-second 440 Hz speaker test. Real
+interviewer PCM uses the same bridge. Wi-Fi networking itself is not replaced
+by the status chip: the ESP32 connects to Wokwi's `Wokwi-GUEST` virtual access
+point and retains the simulator's real TCP/TLS stack. The chip reflects that
+connection and its signal strength.
+
+Interviewer playback uses a 1 MiB PSRAM ring. When a burst reaches 256 KiB,
+the receive callback plays buffered PCM down to 128 KiB before accepting more
+socket data. This applies TCP backpressure while preserving every audio frame;
+the remaining capacity protects against unexpectedly large individual frames.
+Type `b` in Wokwi Terminal to run the deterministic buffer wrap and burst test.
+
+Wokwi does not provide the board's AXS15231B QSPI display as a standard visual
+part. The custom display is therefore a pixel-accurate visual mirror rather
+than an electrical model of the physical controller.
 
 Wokwi does not currently emulate ESP32-S3 I2S or the exact Waveshare
-ESP32-S3-Touch-LCD-3.5B. The AXS15231B QSPI panel, AXS5106L touch protocol,
-TCA9554 reset path, ES8311 codec, microphone, and speaker therefore remain
-physical-device acceptance tests. The production build does not use any of the
-simulator seams.
+ESP32-S3-Touch-LCD-3.5B. The AXS15231B electrical protocol, AXS5106L I2C
+protocol, TCA9554 reset path, and ES8311 register/I2S behavior therefore remain
+physical-device acceptance tests. The simulator exercises their application
+boundaries through the display, touch, microphone fixture, Wi-Fi, and speaker
+bridges. The production build does not use any simulator seams.

@@ -1,4 +1,20 @@
 [wokwi]
 version = 1
-firmware = '../../build/wokwi/angry_cat_pediatric_interviewer.ino.merged.bin'
-elf = '../../build/wokwi/angry_cat_pediatric_interviewer.ino.elf'
+firmware = '../../build/wokwi-active/angry_cat_pediatric_interviewer.ino.merged.bin'
+elf = '../../build/wokwi-active/angry_cat_pediatric_interviewer.ino.elf'
+
+[[chip]]
+name = 'angry-cat-display'
+binary = 'chips/angry-cat-display.chip.wasm'
+
+[[chip]]
+name = 'angry-cat-speaker'
+binary = 'chips/angry-cat-speaker.chip.wasm'
+
+[[chip]]
+name = 'angry-cat-wifi'
+binary = 'chips/angry-cat-wifi.chip.wasm'
+
+[[chip]]
+name = 'angry-cat-microphone'
+binary = 'chips/angry-cat-microphone.chip.wasm'

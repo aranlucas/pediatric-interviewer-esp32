@@ -38,8 +38,10 @@ constexpr uint32_t kResponseTimeoutMs = 90'000;
 constexpr uint32_t kSessionTimeoutMs = 30UL * 60UL * 1000UL;
 constexpr uint32_t kAudioSampleRate = 24'000;
 constexpr size_t kPcmChunkBytes = 960;
-constexpr size_t kPlaybackBufferBytes = 192 * 1024;
+constexpr size_t kPlaybackBufferBytes = 1024 * 1024;
 constexpr size_t kPlaybackPrebufferBytes = 24 * 1024;
+constexpr size_t kPlaybackBackpressureHighWaterBytes = 256 * 1024;
+constexpr size_t kPlaybackBackpressureLowWaterBytes = 128 * 1024;
 constexpr uint32_t kPlaybackPrebufferTimeoutMs = 750;
 constexpr size_t kPlaybackFadeSamples = 120;
 constexpr int32_t kSpeechRmsThreshold = 1'100;
@@ -48,6 +50,13 @@ constexpr uint32_t kAutomaticTurnSilenceMs = 5'000;
 constexpr uint32_t kReportConnectTimeoutMs = 10'000;
 constexpr uint32_t kReportResponseTimeoutMs = 15'000;
 constexpr int kMaximumReportBytes = 128 * 1024;
+constexpr uint8_t kReportDownloadAttempts = 4;
+constexpr uint32_t kReportRetryBaseDelayMs = 250;
+
+static_assert(kPlaybackPrebufferBytes < kPlaybackBackpressureLowWaterBytes);
+static_assert(kPlaybackBackpressureLowWaterBytes <
+              kPlaybackBackpressureHighWaterBytes);
+static_assert(kPlaybackBackpressureHighWaterBytes < kPlaybackBufferBytes);
 
 class PcmRingBuffer {
 public:
@@ -66,6 +75,7 @@ public:
 
   bool isReady() const { return data_ != nullptr; }
   size_t size() const { return size_; }
+  size_t freeSpace() const { return capacity_ - size_; }
 
   void clear() {
     readOffset_ = 0;
@@ -74,7 +84,7 @@ public:
   }
 
   bool push(const uint8_t *input, size_t length) {
-    if (input == nullptr || length > capacity_ - size_)
+    if (input == nullptr || length > freeSpace())
       return false;
     const size_t first = min(length, capacity_ - writeOffset_);
     memcpy(data_ + writeOffset_, input, first);
@@ -211,6 +221,57 @@ bool InterviewerClient::isConfigured() const {
          strncmp(rootCa, "-----BEGIN CERTIFICATE-----", 27) == 0;
 }
 
+#if defined(ANGRY_CAT_SIMULATOR)
+bool InterviewerClient::runPlaybackBufferSelfTest() {
+  constexpr size_t kTestFrameBytes = 4'800;
+  constexpr size_t kTestFrameCount = 400;
+  static uint8_t input[kTestFrameBytes];
+  uint8_t output[kPcmChunkBytes];
+  size_t inputOffset = 0;
+  size_t outputOffset = 0;
+  uint32_t backpressureCycles = 0;
+  PcmRingBuffer playback(kPlaybackBufferBytes);
+  if (!playback.isReady())
+    return false;
+
+  const auto drainChunk = [&]() {
+    const size_t bytesRead = playback.pop(output, sizeof(output));
+    if (bytesRead == 0)
+      return false;
+    for (size_t index = 0; index < bytesRead; ++index) {
+      const uint8_t expected =
+          static_cast<uint8_t>((outputOffset + index) & 0xff);
+      if (output[index] != expected)
+        return false;
+    }
+    outputOffset += bytesRead;
+    return true;
+  };
+
+  for (size_t frame = 0; frame < kTestFrameCount; ++frame) {
+    for (size_t index = 0; index < sizeof(input); ++index) {
+      input[index] = static_cast<uint8_t>((inputOffset + index) & 0xff);
+    }
+    if (!playback.push(input, sizeof(input)))
+      return false;
+    inputOffset += sizeof(input);
+    if (playback.size() >= kPlaybackBackpressureHighWaterBytes) {
+      ++backpressureCycles;
+      while (playback.size() > kPlaybackBackpressureLowWaterBytes) {
+        if (!drainChunk())
+          return false;
+      }
+    }
+  }
+  while (playback.size() > 0) {
+    if (!drainChunk())
+      return false;
+  }
+  return backpressureCycles > 0 && outputOffset == inputOffset &&
+         playback.freeSpace() == kPlaybackBufferBytes;
+}
+#endif
+
 void InterviewerClient::clearReport() {
   report_ = DeviceInterviewReport{};
   lastReportId_[0] = '\0';
@@ -233,34 +294,10 @@ bool InterviewerClient::fetchReport(const char *reportId,
 
   postEvent(eventQueue, InterviewerEventType::ReviewLoading,
             "Loading your private review from R2.");
-  WiFiClientSecure secureClient;
-  secureClient.setCACert(kPediatricInterviewerRootCa);
-  HTTPClient http;
   const String url = reportUrl(reportId);
-  if (url.isEmpty() || !http.begin(secureClient, url)) {
+  if (url.isEmpty()) {
     postEvent(eventQueue, InterviewerEventType::ReviewUnavailable,
               "Could not start the private report download.");
-    return false;
-  }
-  http.setConnectTimeout(kReportConnectTimeoutMs);
-  http.setTimeout(kReportResponseTimeoutMs);
-  http.useHTTP10(true);
-  http.addHeader("X-Device-Token", kPediatricInterviewerDeviceToken);
-  const int status = http.GET();
-  if (status != HTTP_CODE_OK) {
-    char message[96];
-    snprintf(message, sizeof(message),
-             "The review is saved, but report download returned HTTP %d.",
-             status);
-    http.end();
-    postEvent(eventQueue, InterviewerEventType::ReviewUnavailable, message);
-    return false;
-  }
-  const int contentLength = http.getSize();
-  if (contentLength > kMaximumReportBytes) {
-    http.end();
-    postEvent(eventQueue, InterviewerEventType::ReviewUnavailable,
-              "The saved report was too large for the device review.");
     return false;
   }
 
@@ -275,14 +312,75 @@ bool InterviewerClient::fetchReport(const char *reportId,
   filter["evaluation"]["scoreSummary"][0]["rationale"] = true;
 
   JsonDocument document;
-  const DeserializationError jsonError = deserializeJson(
-      document, http.getStream(), DeserializationOption::Filter(filter));
-  http.end();
-  if (jsonError) {
-    char message[96];
-    snprintf(message, sizeof(message), "Could not read the saved review: %s.",
-             jsonError.c_str());
-    postEvent(eventQueue, InterviewerEventType::ReviewUnavailable, message);
+  int contentLength = 0;
+  bool downloaded = false;
+  for (uint8_t attempt = 1; attempt <= kReportDownloadAttempts; ++attempt) {
+    if (WiFi.status() != WL_CONNECTED) {
+      postEvent(eventQueue, InterviewerEventType::ReviewUnavailable,
+                "The review is saved, but Wi-Fi disconnected before it could "
+                "be loaded.");
+      return false;
+    }
+
+    WiFiClientSecure secureClient;
+    secureClient.setCACert(kPediatricInterviewerRootCa);
+    HTTPClient http;
+    if (!http.begin(secureClient, url)) {
+      Serial.printf("Interviewer report: attempt %u could not start HTTPS\n",
+                    attempt);
+    } else {
+      http.setConnectTimeout(kReportConnectTimeoutMs);
+      http.setTimeout(kReportResponseTimeoutMs);
+      http.useHTTP10(true);
+      http.addHeader("X-Device-Token", kPediatricInterviewerDeviceToken);
+      const int status = http.GET();
+      if (status == HTTP_CODE_OK) {
+        contentLength = http.getSize();
+        if (contentLength > kMaximumReportBytes) {
+          http.end();
+          postEvent(eventQueue, InterviewerEventType::ReviewUnavailable,
+                    "The saved report was too large for the device review.");
+          return false;
+        }
+        document.clear();
+        const DeserializationError jsonError = deserializeJson(
+            document, http.getStream(), DeserializationOption::Filter(filter));
+        http.end();
+        if (!jsonError) {
+          downloaded = true;
+          break;
+        }
+        Serial.printf("Interviewer report: attempt %u/%u returned %d bytes "
+                      "with JSON error %s\n",
+                      attempt, kReportDownloadAttempts, contentLength,
+                      jsonError.c_str());
+      } else {
+        Serial.printf("Interviewer report: attempt %u/%u returned HTTP %d\n",
+                      attempt, kReportDownloadAttempts, status);
+        http.end();
+        if (attempt == kReportDownloadAttempts) {
+          char message[96];
+          snprintf(message, sizeof(message),
+                   "The review is saved, but report download returned HTTP "
+                   "%d.",
+                   status);
+          postEvent(eventQueue, InterviewerEventType::ReviewUnavailable,
+                    message);
+          return false;
+        }
+      }
+    }
+
+    if (attempt < kReportDownloadAttempts) {
+      const uint32_t retryDelayMs = kReportRetryBaseDelayMs << (attempt - 1);
+      Serial.printf("Interviewer report: retrying in %lu ms\n",
+                    static_cast<unsigned long>(retryDelayMs));
+      delay(retryDelayMs);
+    }
+  }
+  if (!downloaded) {
+    postEvent(eventQueue, InterviewerEventType::ReviewUnavailable,
+              "Could not read the complete saved review after four attempts.");
     return false;
   }
 
@@ -337,7 +435,8 @@ bool InterviewerClient::fetchReport(const char *reportId,
 bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
                                    QueueHandle_t eventQueue,
                                    std::atomic_bool &stopRequested,
-                                   std::atomic_bool &commitTurnRequested) {
+                                   std::atomic_bool &commitTurnRequested,
+                                   QueueHandle_t simulatorTextAnswerQueue) {
   using namespace websockets;
   clearReport();
   if (!isConfigured()) {
@@ -367,17 +466,80 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
   bool fadeInPlayback = false;
   uint32_t firstBufferedMs = 0;
   uint32_t playbackUnderruns = 0;
+  uint32_t playbackBackpressureCycles = 0;
+  size_t peakPlaybackBytes = 0;
   bool candidateSpeechDetected = false;
   uint8_t consecutiveSpeechFrames = 0;
   uint32_t lastSpeechMs = 0;
   uint32_t stageStartedMs = millis();
   const uint32_t sessionStartedMs = millis();
+  const uint32_t playbackPsramCaps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+  const size_t freePsramBefore = heap_caps_get_free_size(playbackPsramCaps);
+  const size_t largestPsramBefore =
+      heap_caps_get_largest_free_block(playbackPsramCaps);
   PcmRingBuffer playback(kPlaybackBufferBytes);
   if (!playback.isReady()) {
+    Serial.printf("Interviewer audio: could not allocate %u-byte PSRAM queue "
+                  "(%u free, %u largest block)\n",
+                  static_cast<unsigned>(kPlaybackBufferBytes),
+                  static_cast<unsigned>(freePsramBefore),
+                  static_cast<unsigned>(largestPsramBefore));
     postEvent(eventQueue, InterviewerEventType::Error,
               "Could not allocate the audio playback buffer.");
     return false;
   }
+  Serial.printf(
+      "Interviewer audio: allocated %u-byte PSRAM queue (%u free "
+      "before, %u largest block, %u free after)\n",
+      static_cast<unsigned>(kPlaybackBufferBytes),
+      static_cast<unsigned>(freePsramBefore),
+      static_cast<unsigned>(largestPsramBefore),
+      static_cast<unsigned>(heap_caps_get_free_size(playbackPsramCaps)));
+
+  uint8_t pcm[kPcmChunkBytes];
+  const auto playNextBufferedChunk = [&]() {
+    if (!playbackStarted) {
+      playbackStarted = true;
+      fadeInPlayback = true;
+    }
+    const bool finalChunk = playbackEnding && playback.size() <= sizeof(pcm);
+    const size_t bytesToPlay = playback.pop(pcm, sizeof(pcm));
+    fadePcmBoundary(pcm, bytesToPlay, fadeInPlayback, finalChunk);
+    fadeInPlayback = false;
+    if (bytesToPlay == 0 || !audio.playPcm16(pcm, bytesToPlay)) {
+      failed = true;
+      postEvent(eventQueue, InterviewerEventType::Error,
+                "Could not play the interviewer's speech.");
+      return false;
+    }
+    if (finalChunk) {
+      playbackStarted = false;
+      firstBufferedMs = 0;
+    }
+    return true;
+  };
+
+  const auto applyPlaybackBackpressure = [&]() {
+    if (playback.size() < kPlaybackBackpressureHighWaterBytes)
+      return true;
+
+    ++playbackBackpressureCycles;
+    // ArduinoWebsockets::poll() drains every frame already available on the
+    // socket. Playing down to the low-water mark inside this callback blocks
+    // additional reads long enough for TCP flow control to push back on a
+    // burst without dropping PCM or waiting for poll() to return.
+    Serial.printf("Interviewer audio: backpressure cycle %lu at %u bytes; "
+                  "draining to %u\n",
+                  static_cast<unsigned long>(playbackBackpressureCycles),
+                  static_cast<unsigned>(playback.size()),
+                  static_cast<unsigned>(kPlaybackBackpressureLowWaterBytes));
+    while (playback.size() > kPlaybackBackpressureLowWaterBytes && !failed &&
+           !stopRequested.load()) {
+      if (!playNextBufferedChunk())
+        return false;
+    }
+    return !failed;
+  };
 
   WebsocketsClient client;
   client.setCACert(kPediatricInterviewerRootCa);
@@ -395,15 +557,23 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
   });
   client.onMessage([&](WebsocketsMessage message) {
     if (message.isBinary()) {
+      if (failed || stopRequested.load())
+        return;
       microphoneActive = false;
       microphoneStartPending = false;
       const bool wasEmpty = playback.size() == 0;
       if (!playback.push(reinterpret_cast<const uint8_t *>(message.c_str()),
                          message.length())) {
         failed = true;
+        Serial.printf("Interviewer audio: protected queue rejected %u-byte "
+                      "frame with %u bytes free (peak %u)\n",
+                      static_cast<unsigned>(message.length()),
+                      static_cast<unsigned>(playback.freeSpace()),
+                      static_cast<unsigned>(peakPlaybackBytes));
         postEvent(eventQueue, InterviewerEventType::Error,
                   "The interview audio buffer overflowed.");
       } else {
+        peakPlaybackBytes = max(peakPlaybackBytes, playback.size());
         if (wasEmpty)
           firstBufferedMs = millis();
         if (!receivedAudio) {
@@ -415,6 +585,7 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
                         static_cast<unsigned>(kPlaybackBufferBytes),
                         static_cast<unsigned>(kPlaybackPrebufferBytes));
         }
+        applyPlaybackBackpressure();
       }
       return;
     }
@@ -486,6 +657,19 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
       microphoneActive = false;
       microphoneStartPending = false;
       Serial.println("Interviewer audio: cancelled buffered playback");
+    } else if (strcmp(type, "candidate_text_ack") == 0) {
+      const bool accepted = document["accepted"] | false;
+      const bool turnComplete = document["turnComplete"] | false;
+      Serial.printf("SIM_MIC: Worker %s typed answer; client turn complete=%s; "
+                    "reason=%s\n",
+                    accepted ? "accepted" : "rejected",
+                    turnComplete ? "true" : "false",
+                    document["reason"] | "none");
+    } else if (strcmp(type, "turn_complete") == 0) {
+      Serial.printf("Interviewer: Gemini turn complete; answer count=%u; next "
+                    "question=%u\n",
+                    static_cast<unsigned>(document["answerCount"] | 0),
+                    static_cast<unsigned>(document["questionNumber"] | 0));
     } else if (strcmp(type, "transcript") == 0 &&
                strcmp(document["role"] | "", "user") == 0) {
       postEvent(eventQueue, InterviewerEventType::CandidateTranscript,
@@ -557,7 +741,6 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
   serializeJson(startCall, startPayload, sizeof(startPayload));
   client.send(startPayload);
 
-  uint8_t pcm[kPcmChunkBytes];
   while (!complete && !failed && !stopRequested.load()) {
     client.poll();
     if (commitTurnRequested.exchange(false)) {
@@ -599,19 +782,7 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
       fadeInPlayback = true;
     }
     if (playbackStarted && playback.size() > 0) {
-      const bool finalChunk = playbackEnding && playback.size() <= sizeof(pcm);
-      const size_t bytesToPlay = playback.pop(pcm, sizeof(pcm));
-      fadePcmBoundary(pcm, bytesToPlay, fadeInPlayback, finalChunk);
-      fadeInPlayback = false;
-      if (bytesToPlay == 0 || !audio.playPcm16(pcm, bytesToPlay)) {
-        failed = true;
-        postEvent(eventQueue, InterviewerEventType::Error,
-                  "Could not play the interviewer's speech.");
-      }
-      if (finalChunk) {
-        playbackStarted = false;
-        firstBufferedMs = 0;
-      }
+      playNextBufferedChunk();
       continue;
     }
     if (playbackStarted && playback.size() == 0) {
@@ -630,6 +801,37 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
       postEvent(eventQueue, InterviewerEventType::Listening);
     }
     if (microphoneActive) {
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+      SimulatorTextAnswer textAnswer;
+      if (simulatorTextAnswerQueue != nullptr &&
+          xQueueReceive(simulatorTextAnswerQueue, &textAnswer, 0) == pdTRUE) {
+        JsonDocument textTurn;
+        textTurn["type"] = "candidate_text";
+        textTurn["text"] = textAnswer.text;
+        char textPayload[kSimulatorTextAnswerBytes + 80];
+        const size_t payloadLength =
+            serializeJson(textTurn, textPayload, sizeof(textPayload));
+        if (payloadLength == 0 || payloadLength >= sizeof(textPayload) - 1 ||
+            !client.send(textPayload, payloadLength)) {
+          failed = true;
+          postEvent(eventQueue, InterviewerEventType::Error,
+                    "Could not send the simulator text answer.");
+        } else {
+          microphoneActive = false;
+          microphoneStartPending = false;
+          candidateSpeechDetected = false;
+          consecutiveSpeechFrames = 0;
+          postEvent(eventQueue, InterviewerEventType::Thinking,
+                    "Typed answer sent to Gemini Live.");
+          stageStartedMs = millis();
+          Serial.printf("SIM_MIC: sent typed answer (%u characters)\n",
+                        static_cast<unsigned>(strlen(textAnswer.text)));
+        }
+        continue;
+      }
+#else
+      (void)simulatorTextAnswerQueue;
+#endif
       const size_t bytesRead = audio.readPcm16(pcm, sizeof(pcm));
       if (bytesRead == 0 ||
           !client.sendBinary(reinterpret_cast<const char *>(pcm), bytesRead)) {
@@ -685,6 +887,12 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
   }
   if (stopped)
     postEvent(eventQueue, InterviewerEventType::Stopped);
+  Serial.printf("Interviewer audio: peak %u of %u bytes; %lu backpressure "
+                "cycles; %lu underruns\n",
+                static_cast<unsigned>(peakPlaybackBytes),
+                static_cast<unsigned>(kPlaybackBufferBytes),
+                static_cast<unsigned long>(playbackBackpressureCycles),
+                static_cast<unsigned long>(playbackUnderruns));
   Serial.printf("Interviewer: voice session %s\n",
                 complete ? "complete" : (stopped ? "stopped" : "failed"));
   return complete || stopped;

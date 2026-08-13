@@ -10,16 +10,74 @@
       "left": 0,
       "attrs": {
         "flashSize": "16",
-      "psramSize": "8",
-      "psramType": "octal",
-      "cpuFrequency": "max",
-      "firmwareOffset": "0"
+        "psramSize": "8",
+        "psramType": "octal",
+        "cpuFrequency": "max",
+        "firmwareOffset": "0"
+      }
+    },
+    {
+      "type": "chip-angry-cat-display",
+      "id": "screen",
+      "top": -180,
+      "left": 600,
+      "attrs": {
+        "touchX": "20",
+        "touchY": "100",
+        "touchPressed": "0"
+      }
+    },
+    {
+      "type": "chip-angry-cat-wifi",
+      "id": "wifiStatus",
+      "top": -150,
+      "left": 230,
+      "attrs": {}
+    },
+    {
+      "type": "chip-angry-cat-speaker",
+      "id": "speakerCodec",
+      "top": 20,
+      "left": 230,
+      "attrs": {
+        "volume": "75"
+      }
+    },
+    {
+      "type": "chip-angry-cat-microphone",
+      "id": "microphone",
+      "top": 180,
+      "left": 230,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "speaker",
+      "top": 80,
+      "left": 470,
+      "attrs": {
+        "volume": "0.5"
       }
     }
   ],
   "connections": [
     ["$serialMonitor:RX", "esp:TX", "", []],
-    ["$serialMonitor:TX", "esp:RX", "", []]
+    ["$serialMonitor:TX", "esp:RX", "", []],
+    ["esp:9", "screen:SCK", "green", ["v220", "h800"]],
+    ["esp:10", "screen:MOSI", "blue", ["v232", "h800"]],
+    ["esp:11", "screen:CS", "orange", ["v244", "h800"]],
+    ["esp:17", "screen:MISO", "purple", ["v256", "h800"]],
+    ["esp:9", "wifiStatus:SCK", "green", []],
+    ["esp:10", "wifiStatus:MOSI", "blue", []],
+    ["esp:19", "wifiStatus:CS", "orange", []],
+    ["esp:9", "speakerCodec:SCK", "green", []],
+    ["esp:10", "speakerCodec:MOSI", "blue", []],
+    ["esp:18", "speakerCodec:CS", "orange", []],
+    ["esp:9", "microphone:SCK", "green", []],
+    ["esp:10", "microphone:MOSI", "blue", []],
+    ["esp:20", "microphone:CS", "orange", []],
+    ["speakerCodec:AUDIO_OUT", "speaker:2", "purple", []],
+    ["speaker:1", "esp:GND.1", "black", []]
   ],
   "dependencies": {}
 }

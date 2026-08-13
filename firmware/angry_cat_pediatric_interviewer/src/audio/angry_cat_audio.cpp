@@ -47,12 +47,30 @@ constexpr int kI2sWordSelect = 15;
 // uses the same full-duplex clock and Gemini resamples the 24 kHz input.
 constexpr uint32_t kVoiceSampleRate = 24000;
 constexpr int kCodecVolumePercent = 80;
-constexpr uint8_t kPlayerVolume = 11;
+constexpr uint8_t kPlayerVolume = 8;
+// First-order 7.5 kHz low-pass at 24 kHz. The Q15 coefficient keeps the hot
+// playback loop floating-point free while gently taming the small speaker's
+// harsh upper range.
+constexpr int32_t kLowPassAlphaQ15 = 28'167;
+constexpr int32_t kLowPassQ15Scale = 32'768;
+constexpr int32_t kSpeakerLimiterThreshold = 9'000;
+constexpr int32_t kSpeakerLimiterRatio = 3;
+constexpr uint32_t kPlaybackDspResetGapMs = 250;
 constexpr size_t kPcmSamplesPerFrame = 480;
 constexpr int16_t kSilentStereoFrame[kPcmSamplesPerFrame * 2] = {};
 
 audio_driver::DriverDeviceInfo codecPins;
 audio_driver::AudioBoard codecBoard(audio_driver::AudioDriverES8311, codecPins);
+
+int16_t limitSpeakerPeak(int32_t sample) {
+  const bool negative = sample < 0;
+  int32_t magnitude = negative ? -sample : sample;
+  if (magnitude > kSpeakerLimiterThreshold) {
+    magnitude = kSpeakerLimiterThreshold +
+                (magnitude - kSpeakerLimiterThreshold) / kSpeakerLimiterRatio;
+  }
+  return static_cast<int16_t>(negative ? -magnitude : magnitude);
+}
 
 } // namespace
 
@@ -111,6 +129,10 @@ bool AngryCatAudio::isMicrophoneReady() const {
 bool AngryCatAudio::playPcm16(const uint8_t *data, size_t size) {
   if (!ready_ || data == nullptr || size < 2 || size % 2 != 0)
     return false;
+  const uint32_t now = millis();
+  if (lastPlaybackMs_ == 0 || now - lastPlaybackMs_ > kPlaybackDspResetGapMs)
+    playbackLowPassState_ = 0;
+
   int16_t stereo[kPcmSamplesPerFrame * 2];
   const int16_t *mono = reinterpret_cast<const int16_t *>(data);
   const size_t samples = size / sizeof(int16_t);
@@ -120,8 +142,12 @@ bool AngryCatAudio::playPcm16(const uint8_t *data, size_t size) {
     for (size_t index = 0; index < chunkSamples; ++index) {
       const int32_t scaled =
           static_cast<int32_t>(mono[offset + index]) * kPlayerVolume / 21;
-      stereo[index * 2] = static_cast<int16_t>(scaled);
-      stereo[index * 2 + 1] = static_cast<int16_t>(scaled);
+      playbackLowPassState_ +=
+          ((scaled - playbackLowPassState_) * kLowPassAlphaQ15) /
+          kLowPassQ15Scale;
+      const int16_t speakerSample = limitSpeakerPeak(playbackLowPassState_);
+      stereo[index * 2] = speakerSample;
+      stereo[index * 2 + 1] = speakerSample;
     }
     const size_t stereoBytes = chunkSamples * 2 * sizeof(int16_t);
     if (audioBus_.write(reinterpret_cast<const uint8_t *>(stereo),
@@ -130,6 +156,7 @@ bool AngryCatAudio::playPcm16(const uint8_t *data, size_t size) {
     }
     offset += chunkSamples;
   }
+  lastPlaybackMs_ = millis();
   return true;
 }
 

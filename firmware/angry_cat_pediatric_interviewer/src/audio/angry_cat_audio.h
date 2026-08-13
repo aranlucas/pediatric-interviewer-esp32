@@ -21,6 +21,8 @@ private:
   bool initializeCodec();
 
   I2SClass audioBus_{I2S_NUM_0};
+  int32_t playbackLowPassState_ = 0;
+  uint32_t lastPlaybackMs_ = 0;
 #endif
   bool microphoneReady_ = false;
   bool ready_ = false;

@@ -1,0 +1,9 @@
+{
+  "name": "Angry Cat Wi-Fi Monitor",
+  "author": "Angry Cat Pediatric Interviewer",
+  "pins": ["SCK", "MOSI", "CS"],
+  "display": {
+    "width": 160,
+    "height": 80
+  }
+}

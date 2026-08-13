@@ -7,6 +7,14 @@
 
 class AngryCatAudio;
 
+#if defined(ANGRY_CAT_SIMULATOR_LIVE)
+// One command-prefix space, up to 1,000 Worker-accepted characters, and NUL.
+constexpr size_t kSimulatorTextAnswerBytes = 1002;
+struct SimulatorTextAnswer {
+  char text[kSimulatorTextAnswerBytes] = {};
+};
+#endif
+
 enum class InterviewerEventType : uint8_t {
   Connected,
   Listening,
@@ -61,11 +69,15 @@ public:
   bool isConfigured() const;
   bool runSession(AngryCatAudio &audio, const char *topicId,
                   QueueHandle_t eventQueue, std::atomic_bool &stopRequested,
-                  std::atomic_bool &commitTurnRequested);
+                  std::atomic_bool &commitTurnRequested,
+                  QueueHandle_t simulatorTextAnswerQueue = nullptr);
   bool fetchReport(const char *reportId, QueueHandle_t eventQueue);
   const DeviceInterviewReport &report() const { return report_; }
   const char *lastReportId() const { return lastReportId_; }
   void clearReport();
+#if defined(ANGRY_CAT_SIMULATOR)
+  static bool runPlaybackBufferSelfTest();
+#endif
 
 private:
   DeviceInterviewReport report_;

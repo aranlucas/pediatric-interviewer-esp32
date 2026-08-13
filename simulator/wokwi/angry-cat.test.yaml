@@ -7,3 +7,7 @@ steps:
   - wait-serial: 'SIM_TEST: topic guard passed'
   - write-serial: 'e'
   - wait-serial: 'SIM_TEST: event queue passed'
+  - write-serial: 'p'
+  - wait-serial: 'SIM_SPEAKER: 440 Hz test tone complete'
+  - write-serial: 'b'
+  - wait-serial: 'SIM_TEST: playback burst passed'

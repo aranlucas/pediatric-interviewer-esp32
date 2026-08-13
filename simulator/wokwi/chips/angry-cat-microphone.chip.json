@@ -1,0 +1,9 @@
+{
+  "name": "Angry Cat Text Microphone",
+  "author": "Angry Cat Pediatric Interviewer",
+  "pins": ["SCK", "MOSI", "CS"],
+  "display": {
+    "width": 200,
+    "height": 80
+  }
+}
