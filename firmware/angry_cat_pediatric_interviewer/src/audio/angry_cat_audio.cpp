@@ -14,6 +14,8 @@ bool AngryCatAudio::isMicrophoneReady() const {
   return ready_ && microphoneReady_;
 }
 
+bool AngryCatAudio::primePlayback() { return ready_; }
+
 bool AngryCatAudio::playPcm16(const uint8_t *data, size_t size) {
   return ready_ && angry_cat_simulator::playPcm16(data, size);
 }
@@ -49,6 +51,7 @@ constexpr uint32_t kVoiceSampleRate = 24000;
 constexpr uint8_t kCodecVolume80Percent = 0xCB;
 constexpr uint8_t kPlayerVolume = 3;
 constexpr size_t kPcmSamplesPerFrame = 480;
+constexpr uint8_t kPlaybackPrimeFrames = 5;
 constexpr int16_t kSilentStereoFrame[kPcmSamplesPerFrame * 2] = {};
 
 } // namespace
@@ -112,6 +115,23 @@ bool AngryCatAudio::begin() {
 
 bool AngryCatAudio::isMicrophoneReady() const {
   return ready_ && microphoneReady_;
+}
+
+bool AngryCatAudio::primePlayback() {
+  if (!ready_)
+    return false;
+
+  // Keep I2S, its DMA buffers, the codec DAC, and the speaker output at a
+  // settled zero level before the first real waveform arrives. Five 20 ms
+  // frames are long enough to fill the ESP32 TX descriptors and reach the
+  // physical output without adding time to Wi-Fi startup.
+  for (uint8_t frame = 0; frame < kPlaybackPrimeFrames; ++frame) {
+    if (audioBus_.write(kSilentStereoFrame, sizeof(kSilentStereoFrame)) !=
+        sizeof(kSilentStereoFrame)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool AngryCatAudio::playPcm16(const uint8_t *data, size_t size) {

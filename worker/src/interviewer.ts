@@ -41,8 +41,6 @@ const GEMINI_OUTPUT_SAMPLE_RATE = 24_000;
 // TLS/WebSocket callbacks for a single prompt and destabilized the ESP32. Batch
 // five chunks per message while preserving Gemini's native 24 kHz mono stream.
 export const OUTPUT_PCM_FRAME_BYTES = 4_800;
-const OUTPUT_PCM_FRAME_DURATION_MS =
-  (OUTPUT_PCM_FRAME_BYTES / (DEVICE_SAMPLE_RATE * 2)) * 1_000;
 const LIVE_SESSION_LIMIT_MS = 14 * 60 * 1_000;
 const MAX_OPENING_AUDIO_RETRIES = 2;
 
@@ -117,10 +115,6 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   private inputTranscript = "";
   private outputTranscript = "";
   private readonly outputAudio = new PcmFramer(OUTPUT_PCM_FRAME_BYTES);
-  private outputAudioFrames: Uint8Array[] = [];
-  private outputAudioFrameHead = 0;
-  private outputAudioDrain?: Promise<void>;
-  private outputAudioGeneration = 0;
   private turnProducedAudio = false;
   /** The last status sent to the device; also gates candidate input and
    * de-duplicates the `speaking` transition. */
@@ -343,11 +337,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   }
 
   private resetOutputAudio(): void {
-    this.outputAudioGeneration += 1;
     this.outputAudio.clear();
-    this.outputAudioFrames = [];
-    this.outputAudioFrameHead = 0;
-    this.outputAudioDrain = undefined;
     this.turnProducedAudio = false;
   }
 
@@ -539,63 +529,22 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     });
   }
 
-  /**
-   * Frames Gemini's audio for a real-time drain. Gemini can generate speech
-   * much faster than the ESP32 can play it; pacing here prevents burst/drain
-   * cycles from interrupting playback on the device.
-   */
+  /** Frames Gemini audio; the ESP32 applies flow control at its jitter queue. */
   private queueOutputAudio(pcm: Uint8Array): void {
     if (!this.device) return;
     // The warm-up turn exists only to absorb the cold-session anomaly.
     if (this.openingStage === "warming_up") return;
     this.turnProducedAudio = true;
     for (const frame of this.outputAudio.write(pcm)) {
-      this.outputAudioFrames.push(frame);
+      this.device.send(frame);
     }
-    this.startOutputAudioDrain();
   }
 
-  /** Emits the partial trailing frame and resolves after its playback time. */
+  /** Emits the partial trailing frame before the ordered turn-complete status. */
   private flushOutputAudio(): Promise<void> {
     const tail = this.outputAudio.flush();
-    if (tail) this.outputAudioFrames.push(tail);
-    this.startOutputAudioDrain();
-    return this.outputAudioDrain ?? Promise.resolve();
-  }
-
-  private startOutputAudioDrain(): void {
-    if (this.outputAudioDrain || this.outputAudioFrameHead >= this.outputAudioFrames.length) {
-      return;
-    }
-    const generation = this.outputAudioGeneration;
-    this.outputAudioDrain = this.drainOutputAudio(generation).finally(() => {
-      if (generation !== this.outputAudioGeneration) return;
-      this.outputAudioDrain = undefined;
-      this.startOutputAudioDrain();
-    });
-  }
-
-  private async drainOutputAudio(generation: number): Promise<void> {
-    while (
-      generation === this.outputAudioGeneration &&
-      this.outputAudioFrameHead < this.outputAudioFrames.length
-    ) {
-      const frame = this.outputAudioFrames[this.outputAudioFrameHead++];
-      if (!this.device) return;
-      this.device.send(frame);
-      await scheduler.wait(
-        Math.max(
-          1,
-          Math.round(
-            (frame.byteLength / OUTPUT_PCM_FRAME_BYTES) * OUTPUT_PCM_FRAME_DURATION_MS,
-          ),
-        ),
-      );
-    }
-    if (generation === this.outputAudioGeneration) {
-      this.outputAudioFrames = [];
-      this.outputAudioFrameHead = 0;
-    }
+    if (tail && this.device) this.device.send(tail);
+    return Promise.resolve();
   }
 
   private async finishGeminiTurn(connection: Connection): Promise<void> {

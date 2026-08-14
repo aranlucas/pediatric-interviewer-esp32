@@ -1,8 +1,10 @@
 #include "interviewer_client.h"
 
 #include <ArduinoJson.h>
-#include <ArduinoWebsockets.h>
+#include <AudioTools/Concurrency/RTOS/BufferRTOS.h>
+#include <AudioTools/CoreAudio/BaseStream.h>
 #include <HTTPClient.h>
+#include <WebSocketsClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <ctype.h>
@@ -38,13 +40,22 @@ constexpr uint32_t kResponseTimeoutMs = 90'000;
 constexpr uint32_t kSessionTimeoutMs = 30UL * 60UL * 1000UL;
 constexpr uint32_t kAudioSampleRate = 24'000;
 constexpr size_t kPcmChunkBytes = 960;
+constexpr uint32_t kPcmChunkDurationMs =
+    kPcmChunkBytes * 1000 / (kAudioSampleRate * sizeof(int16_t));
+constexpr size_t kNetworkPcmFrameBytes = 4'800;
 // The Worker paces 4,800-byte frames at their 100 ms playback duration. This
-// ring holds more than twice the 24 KiB jitter prebuffer without reserving a
-// large fraction of PSRAM for audio that should never arrive as a burst.
+// ring remains far smaller than the former 1 MiB queue. Real Gemini output can
+// pause between generated speech segments, so playback starts with roughly one
+// second of audio and retains headroom for incoming network frames.
 constexpr size_t kPlaybackBufferBytes = 64 * 1024;
-constexpr size_t kPlaybackPrebufferBytes = 24 * 1024;
-constexpr uint32_t kPlaybackPrebufferTimeoutMs = 750;
+constexpr size_t kPlaybackPrebufferBytes = 48 * 1024;
+constexpr uint32_t kPlaybackPrebufferTimeoutMs = 2'000;
+constexpr size_t kPlaybackReceiveHighWaterBytes = 48 * 1024;
+constexpr size_t kPlaybackReceiveLowWaterBytes = 24 * 1024;
 constexpr size_t kPlaybackFadeSamples = 120;
+constexpr BaseType_t kPlaybackTaskCore = 1;
+constexpr UBaseType_t kPlaybackTaskPriority = 2;
+constexpr uint32_t kPlaybackTaskStackBytes = 6'144;
 constexpr int32_t kSpeechRmsThreshold = 1'100;
 constexpr uint8_t kSpeechStartFrames = 3;
 // Long enough to discard codec start-up noise, short enough that a one-word
@@ -58,63 +69,43 @@ constexpr uint8_t kReportDownloadAttempts = 4;
 constexpr uint32_t kReportRetryBaseDelayMs = 250;
 
 static_assert(kPlaybackPrebufferBytes < kPlaybackBufferBytes);
+static_assert(kPlaybackReceiveLowWaterBytes < kPlaybackReceiveHighWaterBytes);
+static_assert(kPlaybackReceiveHighWaterBytes + kNetworkPcmFrameBytes <
+              kPlaybackBufferBytes);
+static_assert(kPcmChunkDurationMs == 20);
 
-class PcmRingBuffer {
+class PcmPlaybackQueue {
 public:
-  explicit PcmRingBuffer(size_t capacity) : capacity_(capacity) {
-    data_ = static_cast<uint8_t *>(
-        heap_caps_malloc(capacity_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  explicit PcmPlaybackQueue(size_t capacity)
+      : allocator_(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+        buffer_(capacity, 1, 0, 0, allocator_), stream_(buffer_) {
+    stream_.begin();
   }
 
-  ~PcmRingBuffer() {
-    if (data_ != nullptr)
-      heap_caps_free(data_);
+  PcmPlaybackQueue(const PcmPlaybackQueue &) = delete;
+  PcmPlaybackQueue &operator=(const PcmPlaybackQueue &) = delete;
+
+  bool isReady() { return static_cast<bool>(buffer_); }
+  size_t size() { return static_cast<size_t>(stream_.available()); }
+  size_t freeSpace() {
+    return static_cast<size_t>(stream_.availableForWrite());
   }
 
-  PcmRingBuffer(const PcmRingBuffer &) = delete;
-  PcmRingBuffer &operator=(const PcmRingBuffer &) = delete;
-
-  bool isReady() const { return data_ != nullptr; }
-  size_t size() const { return size_; }
-  size_t freeSpace() const { return capacity_ - size_; }
-
-  void clear() {
-    readOffset_ = 0;
-    writeOffset_ = 0;
-    size_ = 0;
-  }
+  void clear() { buffer_.reset(); }
 
   bool push(const uint8_t *input, size_t length) {
-    if (input == nullptr || length > freeSpace())
-      return false;
-    const size_t first = min(length, capacity_ - writeOffset_);
-    memcpy(data_ + writeOffset_, input, first);
-    if (first < length)
-      memcpy(data_, input + first, length - first);
-    writeOffset_ = (writeOffset_ + length) % capacity_;
-    size_ += length;
-    return true;
+    return input != nullptr && length <= freeSpace() &&
+           stream_.write(input, length) == length;
   }
 
   size_t pop(uint8_t *output, size_t capacity) {
-    const size_t length = min(capacity, size_);
-    if (output == nullptr || length == 0)
-      return 0;
-    const size_t first = min(length, capacity_ - readOffset_);
-    memcpy(output, data_ + readOffset_, first);
-    if (first < length)
-      memcpy(output + first, data_, length - first);
-    readOffset_ = (readOffset_ + length) % capacity_;
-    size_ -= length;
-    return length;
+    return output == nullptr ? 0 : stream_.readBytes(output, capacity);
   }
 
 private:
-  uint8_t *data_ = nullptr;
-  size_t capacity_ = 0;
-  size_t readOffset_ = 0;
-  size_t writeOffset_ = 0;
-  size_t size_ = 0;
+  audio_tools::AllocatorESP32 allocator_;
+  audio_tools::BufferRTOS<uint8_t> buffer_;
+  audio_tools::QueueStream<uint8_t> stream_;
 };
 
 void fadePcmBoundary(uint8_t *data, size_t length, bool fadeIn, bool fadeOut) {
@@ -139,6 +130,89 @@ void fadePcmBoundary(uint8_t *data, size_t length, bool fadeIn, bool fadeOut) {
                                (ramp - 1 - index) / (ramp - 1));
     }
   }
+}
+
+void postEvent(QueueHandle_t queue, InterviewerEventType type,
+               const char *text);
+
+struct PlaybackTaskContext {
+  AngryCatAudio *audio = nullptr;
+  PcmPlaybackQueue *buffer = nullptr;
+  QueueHandle_t eventQueue = nullptr;
+  std::atomic_bool stop{false};
+  std::atomic_bool exited{false};
+  std::atomic_bool failed{false};
+  std::atomic_bool started{false};
+  std::atomic_bool ending{false};
+  std::atomic_uint32_t firstBufferedMs{0};
+  std::atomic_uint32_t underruns{0};
+  std::atomic_size_t playedBytes{0};
+};
+
+void playbackTask(void *parameter) {
+  auto &context = *static_cast<PlaybackTaskContext *>(parameter);
+  uint8_t pcm[kPcmChunkBytes];
+  bool fadeIn = false;
+  TickType_t nextPlaybackWake = xTaskGetTickCount();
+
+  while (!context.stop.load()) {
+    const size_t bufferedBytes = context.buffer->size();
+    const uint32_t firstBufferedMs = context.firstBufferedMs.load();
+    if (!context.started.load() && bufferedBytes > 0 &&
+        (bufferedBytes >= kPlaybackPrebufferBytes ||
+         (firstBufferedMs != 0 &&
+          millis() - firstBufferedMs >= kPlaybackPrebufferTimeoutMs))) {
+      context.started.store(true);
+      fadeIn = true;
+      nextPlaybackWake = xTaskGetTickCount();
+      Serial.printf("Interviewer audio: starting playback with %u buffered "
+                    "bytes\n",
+                    static_cast<unsigned>(bufferedBytes));
+    }
+
+    if (context.started.load() && bufferedBytes > 0) {
+      const bool finalChunk =
+          context.ending.load() && bufferedBytes <= sizeof(pcm);
+      const size_t bytesToPlay = context.buffer->pop(pcm, sizeof(pcm));
+      if (bytesToPlay == 0)
+        continue;
+      fadePcmBoundary(pcm, bytesToPlay, fadeIn, finalChunk);
+      fadeIn = false;
+      if (!context.audio->playPcm16(pcm, bytesToPlay)) {
+        context.failed.store(true);
+        postEvent(context.eventQueue, InterviewerEventType::Error,
+                  "Could not play the interviewer's speech.");
+        break;
+      }
+      context.playedBytes.fetch_add(bytesToPlay);
+      // I2S writes can return as soon as DMA has accepted a chunk, which is
+      // faster than the samples actually leave the speaker. Pace the producer
+      // at the PCM duration so this task cannot race ahead and create its own
+      // artificial underruns between Worker frames.
+      vTaskDelayUntil(&nextPlaybackWake, pdMS_TO_TICKS(kPcmChunkDurationMs));
+      if (finalChunk) {
+        context.started.store(false);
+        context.firstBufferedMs.store(0);
+      }
+      continue;
+    }
+
+    if (context.started.load() && bufferedBytes == 0) {
+      context.started.store(false);
+      fadeIn = false;
+      context.firstBufferedMs.store(0);
+      if (!context.ending.load()) {
+        const uint32_t underruns = context.underruns.fetch_add(1) + 1;
+        Serial.printf("Interviewer audio: jitter underrun %lu; rebuffering\n",
+                      static_cast<unsigned long>(underruns));
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+
+  context.started.store(false);
+  context.exited.store(true);
+  vTaskDelete(nullptr);
 }
 
 bool containsSpeech(const uint8_t *data, size_t length) {
@@ -230,7 +304,7 @@ bool InterviewerClient::runPlaybackBufferSelfTest() {
   uint8_t output[kPcmChunkBytes];
   size_t inputOffset = 0;
   size_t outputOffset = 0;
-  PcmRingBuffer playback(kPlaybackBufferBytes);
+  PcmPlaybackQueue playback(kPlaybackBufferBytes);
   if (!playback.isReady())
     return false;
 
@@ -436,7 +510,6 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
                                    std::atomic_bool &stopRequested,
                                    std::atomic_bool &commitTurnRequested,
                                    QueueHandle_t simulatorTextAnswerQueue) {
-  using namespace websockets;
   clearReport();
   if (!isConfigured()) {
     postEvent(eventQueue, InterviewerEventType::Error,
@@ -460,14 +533,12 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
   bool closingLocally = false;
   bool assistantTranscript = false;
   bool receivedAudio = false;
-  bool playbackStarted = false;
-  bool playbackEnding = false;
-  bool fadeInPlayback = false;
-  uint32_t firstBufferedMs = 0;
-  uint32_t playbackUnderruns = 0;
   size_t peakPlaybackBytes = 0;
   size_t receivedPlaybackBytes = 0;
-  size_t playedPlaybackBytes = 0;
+  uint32_t lastPlaybackFrameMs = 0;
+  uint32_t maximumPlaybackFrameGapMs = 0;
+  bool playbackReceivePaused = false;
+  uint32_t playbackReceivePauseCycles = 0;
   bool candidateSpeechDetected = false;
   uint8_t consecutiveSpeechFrames = 0;
   uint32_t microphoneActivatedMs = 0;
@@ -478,7 +549,7 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
   const size_t freePsramBefore = heap_caps_get_free_size(playbackPsramCaps);
   const size_t largestPsramBefore =
       heap_caps_get_largest_free_block(playbackPsramCaps);
-  PcmRingBuffer playback(kPlaybackBufferBytes);
+  PcmPlaybackQueue playback(kPlaybackBufferBytes);
   if (!playback.isReady()) {
     Serial.printf("Interviewer audio: could not allocate %u-byte PSRAM queue "
                   "(%u free, %u largest block)\n",
@@ -497,86 +568,78 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
       static_cast<unsigned>(largestPsramBefore),
       static_cast<unsigned>(heap_caps_get_free_size(playbackPsramCaps)));
 
+  PlaybackTaskContext playbackContext;
+  playbackContext.audio = &audio;
+  playbackContext.buffer = &playback;
+  playbackContext.eventQueue = eventQueue;
+  TaskHandle_t playbackTaskHandle = nullptr;
   uint8_t pcm[kPcmChunkBytes];
-  const auto playNextBufferedChunk = [&]() {
-    if (!playbackStarted) {
-      playbackStarted = true;
-      fadeInPlayback = true;
-      Serial.printf("Interviewer audio: starting playback with %u buffered "
-                    "bytes\n",
-                    static_cast<unsigned>(playback.size()));
-    }
-    const bool finalChunk = playbackEnding && playback.size() <= sizeof(pcm);
-    const size_t bytesToPlay = playback.pop(pcm, sizeof(pcm));
-    fadePcmBoundary(pcm, bytesToPlay, fadeInPlayback, finalChunk);
-    fadeInPlayback = false;
-    if (bytesToPlay == 0 || !audio.playPcm16(pcm, bytesToPlay)) {
-      failed = true;
-      postEvent(eventQueue, InterviewerEventType::Error,
-                "Could not play the interviewer's speech.");
-      return false;
-    }
-    playedPlaybackBytes += bytesToPlay;
-    if (finalChunk) {
-      playbackStarted = false;
-      firstBufferedMs = 0;
-    }
-    return true;
-  };
 
-  WebsocketsClient client;
-  client.setCACert(kPediatricInterviewerRootCa);
-  client.addHeader("X-Device-Token", kPediatricInterviewerDeviceToken);
-  client.onEvent([&](WebsocketsEvent event, String) {
-    if (event == WebsocketsEvent::ConnectionOpened) {
+  WebSocketsClient client;
+  client.onEvent([&](WStype_t event, uint8_t *payload, size_t length) {
+    if (event == WStype_CONNECTED) {
       connected = true;
       postEvent(eventQueue, InterviewerEventType::Connected);
-    } else if (event == WebsocketsEvent::ConnectionClosed && !complete &&
-               !failed && !closingLocally) {
-      failed = true;
-      postEvent(eventQueue, InterviewerEventType::Error,
-                "Cloudflare closed the interview connection.");
+      return;
     }
-  });
-  client.onMessage([&](WebsocketsMessage message) {
-    if (message.isBinary()) {
+    if (event == WStype_DISCONNECTED) {
+      const bool wasConnected = connected;
+      connected = false;
+      if (wasConnected && !complete && !failed && !closingLocally) {
+        failed = true;
+        postEvent(eventQueue, InterviewerEventType::Error,
+                  "Cloudflare closed the interview connection.");
+      }
+      return;
+    }
+    if (event == WStype_ERROR) {
+      Serial.printf("Interviewer WebSocket error (%u bytes)\n",
+                    static_cast<unsigned>(length));
+      return;
+    }
+    if (event == WStype_BIN) {
       if (failed || stopRequested.load())
         return;
+      const uint32_t frameReceivedMs = millis();
+      if (lastPlaybackFrameMs != 0) {
+        maximumPlaybackFrameGapMs = max(maximumPlaybackFrameGapMs,
+                                        frameReceivedMs - lastPlaybackFrameMs);
+      }
+      lastPlaybackFrameMs = frameReceivedMs;
       microphoneActive = false;
       microphoneStartPending = false;
       const bool wasEmpty = playback.size() == 0;
-      if (!playback.push(reinterpret_cast<const uint8_t *>(message.c_str()),
-                         message.length())) {
+      if (!playback.push(payload, length)) {
         failed = true;
         Serial.printf("Interviewer audio: protected queue rejected %u-byte "
                       "frame with %u bytes free (peak %u)\n",
-                      static_cast<unsigned>(message.length()),
+                      static_cast<unsigned>(length),
                       static_cast<unsigned>(playback.freeSpace()),
                       static_cast<unsigned>(peakPlaybackBytes));
         postEvent(eventQueue, InterviewerEventType::Error,
                   "The interview audio buffer overflowed.");
       } else {
-        receivedPlaybackBytes += message.length();
+        receivedPlaybackBytes += length;
         peakPlaybackBytes = max(peakPlaybackBytes, playback.size());
         if (wasEmpty)
-          firstBufferedMs = millis();
+          playbackContext.firstBufferedMs.store(millis());
         if (!receivedAudio) {
           receivedAudio = true;
           Serial.printf("Interviewer audio: buffering %lu Hz PCM frames (%u "
                         "bytes, %u-byte PSRAM queue, %u-byte prebuffer)\n",
                         static_cast<unsigned long>(kAudioSampleRate),
-                        static_cast<unsigned>(message.length()),
+                        static_cast<unsigned>(length),
                         static_cast<unsigned>(kPlaybackBufferBytes),
                         static_cast<unsigned>(kPlaybackPrebufferBytes));
         }
       }
       return;
     }
-    if (!message.isText())
+    if (event != WStype_TEXT)
       return;
 
     JsonDocument document;
-    if (deserializeJson(document, message.c_str(), message.length()) !=
+    if (deserializeJson(document, payload, length) !=
         DeserializationError::Ok) {
       return;
     }
@@ -597,7 +660,7 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
       stageStartedMs = millis();
       if (strcmp(status, "listening") == 0) {
         ready = true;
-        playbackEnding = true;
+        playbackContext.ending.store(true);
         candidateSpeechDetected = false;
         consecutiveSpeechFrames = 0;
         lastSpeechMs = 0;
@@ -624,7 +687,8 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
         postEvent(eventQueue, InterviewerEventType::Complete);
       } else if (strcmp(status, "speaking") == 0) {
         ready = true;
-        playbackEnding = false;
+        playbackContext.ending.store(false);
+        lastPlaybackFrameMs = 0;
         microphoneActive = false;
         microphoneStartPending = false;
         if (serverComplete)
@@ -633,10 +697,9 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
       }
     } else if (strcmp(type, "playback_interrupt") == 0) {
       playback.clear();
-      playbackStarted = false;
-      playbackEnding = false;
-      fadeInPlayback = false;
-      firstBufferedMs = 0;
+      playbackContext.started.store(false);
+      playbackContext.ending.store(false);
+      playbackContext.firstBufferedMs.store(0);
       microphoneActive = false;
       microphoneStartPending = false;
       Serial.println("Interviewer audio: cancelled buffered playback");
@@ -708,24 +771,76 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
   });
 
   const String url = newSessionUrl();
-  if (!client.connect(url) || !connected) {
+  constexpr char kSecureWebSocketPrefix[] = "wss://";
+  const int pathOffset = url.indexOf('/', strlen(kSecureWebSocketPrefix));
+  if (!url.startsWith(kSecureWebSocketPrefix) || pathOffset < 0) {
+    postEvent(eventQueue, InterviewerEventType::Error,
+              "The Cloudflare voice URL is invalid.");
+    return false;
+  }
+  const String host = url.substring(strlen(kSecureWebSocketPrefix), pathOffset);
+  const String path = url.substring(pathOffset);
+  String extraHeaders = "X-Device-Token: ";
+  extraHeaders += kPediatricInterviewerDeviceToken;
+  client.setExtraHeaders(extraHeaders.c_str());
+  // WebSockets 2.7.2 leaves its optional client-certificate pointers
+  // uninitialized when beginSslWithCA() is used on ESP32. This public entry
+  // point initializes them explicitly while still performing ordinary
+  // server-only CA verification.
+  client.beginSslWithClientKey(host.c_str(), 443, path.c_str(),
+                               kPediatricInterviewerRootCa, nullptr, nullptr,
+                               "");
+  const uint32_t connectStartedMs = millis();
+  while (!connected && !failed &&
+         millis() - connectStartedMs < kCallStartupTimeoutMs) {
+    client.loop();
+    delay(1);
+  }
+  if (!connected) {
+    closingLocally = true;
+    client.disconnect();
     postEvent(eventQueue, InterviewerEventType::Error,
               "Could not connect to Cloudflare voice.");
     return false;
   }
   Serial.printf("Interviewer: persistent voice connection open: %s\n",
                 url.c_str());
-  client.send("{\"type\":\"hello\",\"protocol_version\":1}");
+  if (xTaskCreatePinnedToCore(playbackTask, "interview-speaker",
+                              kPlaybackTaskStackBytes, &playbackContext,
+                              kPlaybackTaskPriority, &playbackTaskHandle,
+                              kPlaybackTaskCore) != pdPASS) {
+    closingLocally = true;
+    client.disconnect();
+    postEvent(eventQueue, InterviewerEventType::Error,
+              "Could not start the audio playback task.");
+    return false;
+  }
+  client.sendTXT("{\"type\":\"hello\",\"protocol_version\":1}");
   JsonDocument startCall;
   startCall["type"] = "start_call";
   startCall["preferred_format"] = "pcm16";
   startCall["topic_id"] = topicId == nullptr ? "behavior_guidance" : topicId;
   char startPayload[128];
   serializeJson(startCall, startPayload, sizeof(startPayload));
-  client.send(startPayload);
+  client.sendTXT(startPayload);
 
-  while (!complete && !failed && !stopRequested.load()) {
-    client.poll();
+  while (!complete && !failed && !playbackContext.failed.load() &&
+         !stopRequested.load()) {
+    const size_t queuedPlaybackBytes = playback.size();
+    if (!playbackReceivePaused &&
+        queuedPlaybackBytes >= kPlaybackReceiveHighWaterBytes) {
+      playbackReceivePaused = true;
+      ++playbackReceivePauseCycles;
+      Serial.printf("Interviewer audio: pausing receive at %u queued bytes\n",
+                    static_cast<unsigned>(queuedPlaybackBytes));
+    } else if (playbackReceivePaused &&
+               queuedPlaybackBytes <= kPlaybackReceiveLowWaterBytes) {
+      playbackReceivePaused = false;
+      Serial.printf("Interviewer audio: resuming receive at %u queued bytes\n",
+                    static_cast<unsigned>(queuedPlaybackBytes));
+    }
+    if (!playbackReceivePaused)
+      client.loop();
     if (commitTurnRequested.exchange(false)) {
       if (microphoneActive) {
         // A deliberate tap always ends the turn. Gating this on detected
@@ -739,7 +854,7 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
         microphoneStartPending = false;
         candidateSpeechDetected = false;
         consecutiveSpeechFrames = 0;
-        client.send("{\"type\":\"commit_turn\"}");
+        client.sendTXT("{\"type\":\"commit_turn\"}");
         postEvent(eventQueue, InterviewerEventType::Thinking,
                   "Answer committed. Waiting for Gemini Live.");
         stageStartedMs = millis();
@@ -765,30 +880,8 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
                 "The thirty-minute interview limit was reached.");
       continue;
     }
-    if (!playbackStarted && playback.size() > 0 &&
-        (playback.size() >= kPlaybackPrebufferBytes || playbackEnding ||
-         now - firstBufferedMs >= kPlaybackPrebufferTimeoutMs)) {
-      playbackStarted = true;
-      fadeInPlayback = true;
-      Serial.printf("Interviewer audio: starting playback with %u buffered "
-                    "bytes\n",
-                    static_cast<unsigned>(playback.size()));
-    }
-    if (playbackStarted && playback.size() > 0) {
-      playNextBufferedChunk();
-      continue;
-    }
-    if (playbackStarted && playback.size() == 0) {
-      playbackStarted = false;
-      fadeInPlayback = false;
-      firstBufferedMs = 0;
-      if (!playbackEnding) {
-        ++playbackUnderruns;
-        Serial.printf("Interviewer audio: jitter underrun %lu; rebuffering\n",
-                      static_cast<unsigned long>(playbackUnderruns));
-      }
-    }
-    if (microphoneStartPending) {
+    if (microphoneStartPending && !playbackContext.started.load() &&
+        playback.size() == 0) {
       microphoneStartPending = false;
       microphoneActive = true;
       microphoneActivatedMs = millis();
@@ -806,7 +899,8 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
         const size_t payloadLength =
             serializeJson(textTurn, textPayload, sizeof(textPayload));
         if (payloadLength == 0 || payloadLength >= sizeof(textPayload) - 1 ||
-            !client.send(textPayload, payloadLength)) {
+            !client.sendTXT(reinterpret_cast<uint8_t *>(textPayload),
+                            payloadLength)) {
           failed = true;
           postEvent(eventQueue, InterviewerEventType::Error,
                     "Could not send the simulator text answer.");
@@ -835,8 +929,7 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
         const uint32_t audioNow = millis();
         if (audioNow - microphoneActivatedMs < kMicrophoneSettleMs)
           continue;
-        if (!client.sendBinary(reinterpret_cast<const char *>(pcm),
-                               bytesRead)) {
+        if (!client.sendBIN(pcm, bytesRead)) {
           failed = true;
           postEvent(eventQueue, InterviewerEventType::Error,
                     "Could not stream microphone audio.");
@@ -861,7 +954,7 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
             microphoneActive = false;
             microphoneStartPending = false;
             candidateSpeechDetected = false;
-            client.send("{\"type\":\"commit_turn\"}");
+            client.sendTXT("{\"type\":\"commit_turn\"}");
             postEvent(eventQueue, InterviewerEventType::Thinking,
                       "Pause detected. Waiting for Gemini Live.");
             stageStartedMs = audioNow;
@@ -876,26 +969,40 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
     }
   }
 
+  failed = failed || playbackContext.failed.load();
   const bool stopped = stopRequested.load();
-  if (client.available()) {
+  if (client.isConnected()) {
     closingLocally = true;
-    client.send("{\"type\":\"end_call\"}");
+    client.sendTXT("{\"type\":\"end_call\"}");
     const uint32_t closeStartedMs = millis();
-    while (client.available() && millis() - closeStartedMs < 120) {
-      client.poll();
+    while (client.isConnected() && millis() - closeStartedMs < 120) {
+      client.loop();
       delay(1);
     }
-    client.close();
+    client.disconnect();
+  }
+  playbackContext.stop.store(true);
+  const uint32_t playbackStopStartedMs = millis();
+  while (!playbackContext.exited.load() &&
+         millis() - playbackStopStartedMs < 1'000) {
+    delay(1);
+  }
+  if (!playbackContext.exited.load() && playbackTaskHandle != nullptr) {
+    vTaskDelete(playbackTaskHandle);
+    playbackContext.exited.store(true);
   }
   if (stopped)
     postEvent(eventQueue, InterviewerEventType::Stopped);
   Serial.printf("Interviewer audio: received %u bytes; played %u bytes; peak "
-                "%u of %u bytes; %lu underruns\n",
+                "%u of %u bytes; %lu underruns; max frame gap %lu ms; %lu "
+                "flow-control cycles\n",
                 static_cast<unsigned>(receivedPlaybackBytes),
-                static_cast<unsigned>(playedPlaybackBytes),
+                static_cast<unsigned>(playbackContext.playedBytes.load()),
                 static_cast<unsigned>(peakPlaybackBytes),
                 static_cast<unsigned>(kPlaybackBufferBytes),
-                static_cast<unsigned long>(playbackUnderruns));
+                static_cast<unsigned long>(playbackContext.underruns.load()),
+                static_cast<unsigned long>(maximumPlaybackFrameGapMs),
+                static_cast<unsigned long>(playbackReceivePauseCycles));
   Serial.printf("Interviewer: voice session %s\n",
                 complete ? "complete" : (stopped ? "stopped" : "failed"));
   return complete || stopped;

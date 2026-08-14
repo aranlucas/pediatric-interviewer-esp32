@@ -67,6 +67,14 @@ TCA9554 ioExpander(kIoExpanderAddress, &Wire);
 AngryCatAudio audio;
 InterviewerClient interviewer;
 
+void primeAudioDuringWifi(void *parameter) {
+  auto *audioDevice = static_cast<AngryCatAudio *>(parameter);
+  const bool primed = audioDevice != nullptr && audioDevice->primePlayback();
+  Serial.printf("Audio: speaker prime during Wi-Fi setup %s\n",
+                primed ? "complete" : "failed");
+  vTaskDelete(nullptr);
+}
+
 using TouchPoint = coords_t;
 
 QueueHandle_t eventQueue = nullptr;
@@ -1167,6 +1175,11 @@ void setup() {
 #endif
   appView = AppView::Topics;
   renderScreen();
+  if (audioReady &&
+      xTaskCreatePinnedToCore(primeAudioDuringWifi, "audio-prime", 3072, &audio,
+                              1, nullptr, 0) != pdPASS) {
+    Serial.println("Audio: could not start speaker prime task");
+  }
   configureWiFi();
   appView = AppView::Topics;
   renderScreen();

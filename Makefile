@@ -9,6 +9,9 @@ SIMULATOR_ACTIVE_PATH := build/wokwi-active
 SKETCH_DIR := firmware/angry_cat_pediatric_interviewer
 AUDIO_DRIVER_DIR := $(SKETCH_DIR)/third_party/arduino-audio-driver
 AUDIO_DRIVER_INCLUDE := $(abspath $(AUDIO_DRIVER_DIR)/src)
+AUDIO_TOOLS_DIR := $(SKETCH_DIR)/third_party/arduino-audio-tools
+AUDIO_TOOLS_INCLUDE := $(abspath $(AUDIO_TOOLS_DIR)/src)
+AUDIO_INCLUDE_FLAGS := -I$(AUDIO_DRIVER_INCLUDE) -I$(AUDIO_TOOLS_INCLUDE)
 CLANG_FORMAT ?= $(shell command -v clang-format 2>/dev/null || xcrun --find clang-format 2>/dev/null)
 CLANG_TIDY ?=
 PYTHON ?= python3
@@ -30,7 +33,7 @@ setup:
 	git submodule update --init --recursive
 	$(ARDUINO_CLI) core update-index
 	$(ARDUINO_CLI) core install esp32:esp32@3.3.11
-	$(ARDUINO_CLI) lib install "GFX Library for Arduino@1.6.7" "TCA9554@0.1.3" "ArduinoJson@7.4.3" "WiFiManager@2.0.17" "ArduinoWebsockets@0.5.4"
+	$(ARDUINO_CLI) lib install "GFX Library for Arduino@1.6.7" "TCA9554@0.1.3" "ArduinoJson@7.4.3" "WiFiManager@2.0.17" "WebSockets@2.7.2"
 
 pet-assets:
 	$(PYTHON) tools/generate_codex_pet.py --atlas "$(PET_ATLAS)" --output-dir $(SKETCH_DIR)/src/generated
@@ -44,12 +47,12 @@ format-check:
 	$(CLANG_FORMAT) --style=LLVM --dry-run --Werror $(FORMAT_SOURCES)
 
 tidy:
-	PROFILE=$(PROFILE) ARDUINO_CLI=$(ARDUINO_CLI) CLANG_TIDY="$(CLANG_TIDY)" AUDIO_DRIVER_INCLUDE="$(AUDIO_DRIVER_INCLUDE)" tools/run_clang_tidy.sh
+	PROFILE=$(PROFILE) ARDUINO_CLI=$(ARDUINO_CLI) CLANG_TIDY="$(CLANG_TIDY)" AUDIO_DRIVER_INCLUDE="$(AUDIO_DRIVER_INCLUDE)" AUDIO_TOOLS_INCLUDE="$(AUDIO_TOOLS_INCLUDE)" tools/run_clang_tidy.sh
 
 lint: format-check tidy
 
 compile:
-	$(ARDUINO_CLI) compile --profile $(PROFILE) --build-path $(BUILD_PATH) --build-property "compiler.cpp.extra_flags=-I$(AUDIO_DRIVER_INCLUDE)" --clean --export-binaries $(SKETCH_DIR)
+	$(ARDUINO_CLI) compile --profile $(PROFILE) --build-path $(BUILD_PATH) --build-property "compiler.cpp.extra_flags=$(AUDIO_INCLUDE_FLAGS)" --clean --export-binaries $(SKETCH_DIR)
 
 stage-simulator:
 	@test "$(SIMULATOR_STAGE_ROOT)" = "build/wokwi-standard-sketch"
@@ -59,7 +62,7 @@ stage-simulator:
 	cp $(SIMULATOR_FIXTURES)/AngryCatSimulator.h $(SIMULATOR_FIXTURES)/AngryCatSimulator.cpp $(SIMULATOR_SKETCH_DIR)/
 
 compile-simulator: stage-simulator
-	$(ARDUINO_CLI) compile --fqbn $(SIMULATOR_FQBN) --build-path $(SIMULATOR_BUILD_PATH) --build-property "compiler.cpp.extra_flags=-I$(AUDIO_DRIVER_INCLUDE) -DANGRY_CAT_SIMULATOR=1" --clean --export-binaries $(SIMULATOR_SKETCH_DIR)
+	$(ARDUINO_CLI) compile --fqbn $(SIMULATOR_FQBN) --build-path $(SIMULATOR_BUILD_PATH) --build-property "compiler.cpp.extra_flags=$(AUDIO_INCLUDE_FLAGS) -DANGRY_CAT_SIMULATOR=1" --clean --export-binaries $(SIMULATOR_SKETCH_DIR)
 	ln -sfn "$(notdir $(SIMULATOR_BUILD_PATH))" "$(SIMULATOR_ACTIVE_PATH).next"
 	mv -f "$(SIMULATOR_ACTIVE_PATH).next" "$(SIMULATOR_ACTIVE_PATH)"
 
@@ -71,7 +74,7 @@ stage-simulator-integration:
 	cp $(SIMULATOR_FIXTURES)/AngryCatSimulator.h $(SIMULATOR_FIXTURES)/AngryCatSimulator.cpp $(SIMULATOR_INTEGRATION_SKETCH_DIR)/
 
 compile-simulator-integration: stage-simulator-integration
-	$(ARDUINO_CLI) compile --fqbn $(SIMULATOR_FQBN) --build-path $(SIMULATOR_INTEGRATION_BUILD_PATH) --build-property "compiler.cpp.extra_flags=-I$(AUDIO_DRIVER_INCLUDE) -DANGRY_CAT_SIMULATOR=1 -DANGRY_CAT_SIMULATOR_LIVE=1" --clean --export-binaries $(SIMULATOR_INTEGRATION_SKETCH_DIR)
+	$(ARDUINO_CLI) compile --fqbn $(SIMULATOR_FQBN) --build-path $(SIMULATOR_INTEGRATION_BUILD_PATH) --build-property "compiler.cpp.extra_flags=$(AUDIO_INCLUDE_FLAGS) -DANGRY_CAT_SIMULATOR=1 -DANGRY_CAT_SIMULATOR_LIVE=1" --clean --export-binaries $(SIMULATOR_INTEGRATION_SKETCH_DIR)
 	ln -sfn "$(notdir $(SIMULATOR_INTEGRATION_BUILD_PATH))" "$(SIMULATOR_ACTIVE_PATH).next"
 	mv -f "$(SIMULATOR_ACTIVE_PATH).next" "$(SIMULATOR_ACTIVE_PATH)"
 

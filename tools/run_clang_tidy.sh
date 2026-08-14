@@ -8,6 +8,7 @@ build_dir="$project_dir/build/clang-tidy"
 profile=${PROFILE:-waveshare-3.5b}
 arduino_cli=${ARDUINO_CLI:-arduino-cli}
 audio_driver_include=${AUDIO_DRIVER_INCLUDE:-$sketch_dir/third_party/arduino-audio-driver/src}
+audio_tools_include=${AUDIO_TOOLS_INCLUDE:-$sketch_dir/third_party/arduino-audio-tools/src}
 
 if [[ -n ${CLANG_TIDY:-} ]]; then
   clang_tidy=$CLANG_TIDY
@@ -37,7 +38,7 @@ done
 
 "$arduino_cli" compile --profile "$profile" --only-compilation-database --clean \
   --build-path "$build_dir" \
-  --build-property "compiler.cpp.extra_flags=-I$audio_driver_include" \
+  --build-property "compiler.cpp.extra_flags=-I$audio_driver_include -I$audio_tools_include" \
   "$sketch_dir" >/dev/null
 
 compile_database="$build_dir/compile_commands.json"
