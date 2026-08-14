@@ -18,7 +18,7 @@ type WorkerEnv = Env & {
 const TOKEN_ENCODER = new TextEncoder();
 const REPORT_PATH_PREFIX = "/interviewer/reports/";
 const REPORT_PATH_PATTERN =
-  /^\/interviewer\/reports\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(json|md)$/i;
+  /^\/interviewer\/reports\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(-cheatsheet)?\.(json|md)$/i;
 
 export { PediatricInterviewer } from "./interviewer";
 
@@ -51,14 +51,19 @@ export default {
       if (!(await verifyToken(request.headers.get("X-Device-Token"), env.DEVICE_TOKEN))) {
         return json({ error: "unauthorized" }, 401);
       }
-      const [, reportId, format] = reportMatch;
+      const [, reportId, cheatsheetSuffix, format] = reportMatch;
+      // The cheat sheet is markdown only; there is no JSON variant of it.
+      if (cheatsheetSuffix && format.toLowerCase() !== "md") {
+        return json({ error: "report_not_found" }, 404);
+      }
+      const suffix = cheatsheetSuffix ? "-cheatsheet" : "";
       const object = await env.INTERVIEW_REPORTS.get(
-        `pediatric-oral-boards/reports/${reportId}.${format}`,
+        `pediatric-oral-boards/reports/${reportId}${suffix}.${format}`,
       );
       if (!object) return json({ error: "report_not_found" }, 404);
       const headers = new Headers({
         "Cache-Control": "private, no-store",
-        "Content-Disposition": `attachment; filename="pediatric-oral-boards-${reportId}.${format}"`,
+        "Content-Disposition": `attachment; filename="pediatric-oral-boards-${reportId}${suffix}.${format}"`,
         ETag: object.httpEtag,
       });
       object.writeHttpMetadata(headers);

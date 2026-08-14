@@ -14,9 +14,13 @@ import {
   EVALUATION_MODEL,
   evaluateInterview,
   INTERVIEW_QUESTION_COUNT,
+  MAX_FOLLOW_UPS_PER_EXCHANGE,
   storeInterviewReport,
+  buildInterviewCheatsheet,
+  type InterviewCheatsheet,
   type InterviewEvaluation,
   type InterviewExchange,
+  type InterviewFollowUp,
   type StoredInterviewReport,
 } from "./interview-report";
 import { isResponseComplete, shouldEndTurn } from "./turn-completion";
@@ -26,6 +30,7 @@ import {
   geminiOpeningTurn,
   geminiReplayForAudioTurn,
   geminiWarmUpTurn,
+  END_INTERVIEW_TOOL,
   geminiReadinessTurn,
   geminiTextTurn,
   TURN_DISPOSITION_TOOL,
@@ -126,10 +131,19 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   private liveGeneration = 0;
   private turnDisposition: TurnDisposition = "advance_skillset";
   private awaitingToolContinuation = false;
+  private endInterviewRequested = false;
   private openingStage: OpeningStage = "complete";
   private openingAudioRetryCount = 0;
   private pendingQuestion = "";
   private pendingAnswer = "";
+  private pendingFollowUps: InterviewFollowUp[] = [];
+  /**
+   * The question the candidate is answering right now: the primary question of
+   * the exchange, or the latest probe. Tracked separately from
+   * `state.currentQuestion` because a case-information reply overwrites the
+   * display without changing what is actually being answered.
+   */
+  private activeQuestion = "";
 
   /** Answers recorded so far; the interview ends at INTERVIEW_QUESTION_COUNT. */
   private get answerCount(): number {
@@ -264,8 +278,13 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
               }),
             );
             ++this.liveGeneration;
+            const unexpected = !this.closingGemini;
+            const salvageable =
+              unexpected && this.state.phase === "interviewing" && this.answerCount > 0;
             this.releaseLiveResources();
-            if (!this.closingGemini) {
+            if (salvageable) {
+              void this.salvageInterview(connection, `gemini closed with ${event.code}`);
+            } else if (unexpected) {
               this.sendJSON(connection, {
                 type: "error",
                 message: "Gemini Live closed the interview.",
@@ -287,11 +306,16 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       this.sendStatus(connection, "thinking");
       this.gemini.sendClientContent(geminiWarmUpTurn());
       this.sessionTimer = setTimeout(() => {
+        const salvageable = this.state.phase === "interviewing" && this.answerCount > 0;
+        this.closeLiveSession("session limit");
+        if (salvageable) {
+          void this.salvageInterview(connection, "session limit reached");
+          return;
+        }
         this.sendJSON(connection, {
           type: "error",
           message: "The fourteen-minute Gemini Live session limit was reached.",
         });
-        this.closeLiveSession("session limit");
       }, LIVE_SESSION_LIMIT_MS);
     } catch (error) {
       if (generation !== this.liveGeneration) return;
@@ -318,10 +342,13 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     this.responseCompletionHandled = false;
     this.turnDisposition = "advance_skillset";
     this.awaitingToolContinuation = false;
+    this.endInterviewRequested = false;
     this.openingStage = "complete";
     this.openingAudioRetryCount = 0;
     this.pendingQuestion = "";
     this.pendingAnswer = "";
+    this.pendingFollowUps = [];
+    this.activeQuestion = "";
   }
 
   private releaseLiveResources(): void {
@@ -420,7 +447,14 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   private handleGeminiMessage(message: LiveServerMessage): void {
     if (!this.device) return;
     if (message.toolCall?.functionCalls?.length) {
+      const endCall = message.toolCall.functionCalls.find(
+        (call) => call.name === END_INTERVIEW_TOOL,
+      );
       const responses = message.toolCall.functionCalls.map((call) => {
+        if (call.name === END_INTERVIEW_TOOL) {
+          this.endInterviewRequested = true;
+          this.awaitingToolContinuation = true;
+        }
         if (call.name === TURN_DISPOSITION_TOOL) {
           const disposition = call.args?.disposition;
           if (
@@ -440,6 +474,15 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         };
       });
       this.gemini?.sendToolResponse({ functionResponses: responses });
+      if (endCall) {
+        console.log(
+          JSON.stringify({
+            event: "end_interview_requested",
+            reason: String(endCall.args?.reason ?? "unspecified").slice(0, 40),
+            answerCount: this.answerCount,
+          }),
+        );
+      }
       return;
     }
     const content = message.serverContent;
@@ -563,6 +606,27 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         text: examinerSpeech,
       });
     }
+
+    // The examiner asked to stop early. The turn that requests it is a request,
+    // not an answer, so it is shown but never recorded as an exchange.
+    if (this.endInterviewRequested && this.state.phase === "interviewing") {
+      this.endInterviewRequested = false;
+      if (answer) this.sendJSON(connection, { type: "transcript", role: "user", text: answer });
+      if (this.answerCount === 0) {
+        this.sendJSON(connection, {
+          type: "error",
+          message: "The interview ended before any question was answered.",
+        });
+        this.updateInterview(connection, { phase: "idle" });
+        this.sendStatus(connection, "idle");
+        this.closeLiveSession("ended before any answer");
+        return;
+      }
+      this.updateInterview(connection, { phase: "evaluating" });
+      this.sendStatus(connection, "evaluating");
+      await this.finishInterview(connection);
+      return;
+    }
     if (!answer) {
       // The first generation of a cold Live session behaves differently from
       // every later one: it returns the whole transcript at once and streams
@@ -630,34 +694,65 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         this.turnDisposition === "begin_first_question" ||
         /^(?:yes|yeah|yep|ready|i am ready|let'?s (?:begin|start)|go ahead)\b/i.test(answer);
       if (readinessConfirmed) this.openingStage = "complete";
-      this.updateInterview(connection, {
-        currentQuestion: readinessConfirmed
-          ? questionForDisplay(examinerSpeech) || "The first clinical question is being prepared."
-          : this.state.currentQuestion,
-      });
+      const firstQuestion = readinessConfirmed
+        ? questionForDisplay(examinerSpeech) || "The first clinical question is being prepared."
+        : this.state.currentQuestion;
+      if (readinessConfirmed) this.activeQuestion = firstQuestion;
+      this.updateInterview(connection, { currentQuestion: firstQuestion });
       this.sendStatus(connection, "listening");
       return;
+    }
+
+    // The model does not reliably honor its own probe limit, so enforce it
+    // here: past the cap the next answer closes the exchange whatever the
+    // model classified, which keeps the interview reaching six exchanges.
+    const probeLimitReached =
+      this.turnDisposition === "probe_current_answer" &&
+      this.pendingFollowUps.length >= MAX_FOLLOW_UPS_PER_EXCHANGE;
+    if (probeLimitReached) {
+      console.log(
+        JSON.stringify({
+          event: "probe_limit_reached",
+          questionNumber: this.questionNumber,
+          followUps: this.pendingFollowUps.length,
+        }),
+      );
+      this.turnDisposition = "advance_skillset";
     }
 
     if (this.turnDisposition !== "advance_skillset") {
-      if (!this.pendingQuestion) this.pendingQuestion = this.state.currentQuestion;
       if (this.turnDisposition === "probe_current_answer") {
-        this.pendingAnswer = normalizeTranscript(`${this.pendingAnswer} ${answer}`);
+        // The answer just given replies to whatever was last asked; the probe
+        // in `examinerSpeech` is what the *next* answer will reply to.
+        this.recordAnswerToActiveQuestion(answer);
+        const probe = questionForDisplay(examinerSpeech) || this.state.currentQuestion;
+        this.activeQuestion = probe;
+        this.updateInterview(connection, { currentQuestion: probe });
+      } else {
+        // A case-information reply does not ask anything new, so the candidate
+        // is still answering the same question.
+        this.updateInterview(connection, {
+          currentQuestion: questionForDisplay(examinerSpeech) || this.state.currentQuestion,
+        });
       }
-      this.updateInterview(connection, {
-        currentQuestion: questionForDisplay(examinerSpeech) || this.state.currentQuestion,
-      });
       this.sendStatus(connection, "listening");
       return;
     }
 
+    this.recordAnswerToActiveQuestion(answer);
     const exchangeQuestion = this.pendingQuestion || this.state.currentQuestion;
-    const exchangeAnswer = normalizeTranscript(`${this.pendingAnswer} ${answer}`);
+    const followUps = this.pendingFollowUps;
+    const exchangeAnswer = this.pendingAnswer;
     this.pendingQuestion = "";
     this.pendingAnswer = "";
+    this.pendingFollowUps = [];
     const exchanges = [
       ...this.state.exchanges,
-      { question: exchangeQuestion, answer: exchangeAnswer },
+      {
+        question: exchangeQuestion,
+        answer: exchangeAnswer,
+        ...(followUps.length > 0 ? { followUps } : {}),
+      },
     ];
     if (exchanges.length >= INTERVIEW_QUESTION_COUNT) {
       this.updateInterview(connection, { phase: "evaluating", exchanges });
@@ -666,13 +761,56 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       return;
     }
 
+    const nextQuestion =
+      questionForDisplay(examinerSpeech) || "The next clinical question is being prepared.";
+    this.activeQuestion = nextQuestion;
     this.updateInterview(connection, {
       phase: "interviewing",
-      currentQuestion:
-        questionForDisplay(examinerSpeech) || "The next clinical question is being prepared.",
+      currentQuestion: nextQuestion,
       exchanges,
     });
     this.sendStatus(connection, "listening");
+  }
+
+  /**
+   * Files the candidate's answer against the question it actually replies to.
+   * The first answer of an exchange is the primary one; every later answer is a
+   * follow-up, so the report can tell volunteered content from prompted content.
+   */
+  private recordAnswerToActiveQuestion(answer: string): void {
+    const question = this.activeQuestion || this.state.currentQuestion;
+    if (!this.pendingQuestion) {
+      this.pendingQuestion = question;
+      this.pendingAnswer = answer;
+      return;
+    }
+    if (this.pendingFollowUps.length >= MAX_FOLLOW_UPS_PER_EXCHANGE) {
+      // Past the cap, keep the content but stop growing the array.
+      const last = this.pendingFollowUps[this.pendingFollowUps.length - 1];
+      last.answer = normalizeTranscript(`${last.answer} ${answer}`);
+      return;
+    }
+    this.pendingFollowUps.push({ question, answer });
+  }
+
+  /**
+   * Grades whatever the candidate answered when the interview stops for a
+   * reason outside their control: Gemini dropping the Live session, or the
+   * session time limit. Losing an unfinished exam entirely is the worst
+   * outcome available, so anything with at least one answer still reaches the
+   * review screen.
+   */
+  private async salvageInterview(connection: Connection, reason: string): Promise<void> {
+    console.log(
+      JSON.stringify({
+        event: "interview_salvaged",
+        reason: reason.slice(0, 60),
+        answerCount: this.answerCount,
+      }),
+    );
+    this.updateInterview(connection, { phase: "evaluating" });
+    this.sendStatus(connection, "evaluating");
+    await this.finishInterview(connection);
   }
 
   private async finishInterview(connection: Connection): Promise<void> {
@@ -683,6 +821,23 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         () => evaluateInterview(this.env.GEMINI_API_KEY, topic, this.state.exchanges),
         { maxAttempts: 3, baseDelayMs: 300, maxDelayMs: 3_000 },
       );
+      // The cheat sheet is a study aid, not the result. A failure here must
+      // never cost the candidate the report they just earned.
+      let cheatsheet: InterviewCheatsheet | undefined;
+      try {
+        cheatsheet = await this.retry(
+          () => buildInterviewCheatsheet(this.env.GEMINI_API_KEY, topic, evaluation),
+          { maxAttempts: 2, baseDelayMs: 300, maxDelayMs: 2_000 },
+        );
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            event: "cheatsheet_generation_failed",
+            reportId,
+            error: String(error).slice(0, 200),
+          }),
+        );
+      }
       const report: StoredInterviewReport = {
         schemaVersion: 1,
         reportId,
@@ -699,6 +854,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
           competencies: topic.competencies.map((competency) => ({ ...competency })),
         },
         evaluation,
+        ...(cheatsheet ? { cheatsheet } : {}),
       };
       await this.retry(() => storeInterviewReport(this.env.INTERVIEW_REPORTS, report), {
         maxAttempts: 3,
@@ -710,6 +866,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         reportId,
         outcome: evaluation.outcome,
         reviewPath: `/interviewer/reports/${reportId}.md`,
+        ...(cheatsheet
+          ? { cheatsheetPath: `/interviewer/reports/${reportId}-cheatsheet.md` }
+          : {}),
       });
       this.updateInterview(connection, { phase: "complete", reportId, evaluation });
       this.sendStatus(connection, "complete");

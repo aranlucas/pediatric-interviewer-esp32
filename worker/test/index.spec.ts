@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PEDIATRIC_TOPICS } from "../src/interview-content";
 import {
+  buildCheatsheetMarkdown,
+  buildInterviewCheatsheet,
   buildInterviewMarkdown,
   evaluateInterview,
   interviewEvaluationSchema,
@@ -12,6 +14,7 @@ import {
 } from "../src/interview-report";
 import { isResponseComplete, shouldEndTurn } from "../src/turn-completion";
 import {
+  END_INTERVIEW_TOOL,
   GEMINI_LIVE_MODEL,
   geminiLiveConfig,
   geminiOpeningTurn,
@@ -148,6 +151,23 @@ describe("Pediatric oral-board interviewer", () => {
               required: ["disposition"],
             }),
           }),
+          expect.objectContaining({
+            name: END_INTERVIEW_TOOL,
+            parametersJsonSchema: expect.objectContaining({
+              properties: {
+                reason: {
+                  type: "string",
+                  enum: [
+                    "candidate_requested",
+                    "candidate_unable_to_continue",
+                    "running_out_of_time",
+                    "examination_complete",
+                  ],
+                },
+              },
+              required: ["reason"],
+            }),
+          }),
         ],
       },
     ]);
@@ -155,14 +175,25 @@ describe("Pediatric oral-board interviewer", () => {
     expect(instruction).toContain("Topic: Behavior Guidance");
     expect(instruction).toContain("Generate a new clinical vignette");
     expect(instruction).toContain("Temperament and cooperation potential");
-    expect(instruction).toContain("ask what they would ask the parent, patient, or caregiver");
+    expect(instruction).toContain("WHAT AN EXAMINER LISTENS FOR");
     expect(instruction).toContain(
-      "do not announce the omission, suggest content, or turn the probe into a checklist",
+      "never turn a probe into a checklist, a compound question, or a leading question",
     );
     expect(instruction).toContain(
       "give a brief internally consistent finding and let them continue",
     );
+    // A thin answer must be probed rather than silently recorded, and probing
+    // must terminate: without a forced advance the exchange never reaches the
+    // review and the session runs to the Live time limit.
+    expect(instruction).toContain("Probe a thin answer instead of accepting it");
+    expect(instruction).toContain("First probe: open and neutral");
+    expect(instruction).toContain("Later probes: name the missing dimension, never its content");
+    expect(instruction).toContain("Never probe the same skillset more than four times");
     expect(instruction).toContain(
+      "classify advance_skillset even if the answer is still thin",
+    );
+    expect(instruction).toContain("no more than four times per skillset");
+    expect(instruction).not.toContain(
       "A shallow but complete answer gets one neutral opportunity to elaborate",
     );
     expect(instruction).toContain(
@@ -174,7 +205,7 @@ describe("Pediatric oral-board interviewer", () => {
     );
     expect(instruction).toContain("Acknowledgements are optional");
     expect(instruction).toContain(
-      "Clarification and case-information turns remain within the current exchange",
+      "Probe, clarification, and case-information turns remain within the current exchange",
     );
     expect(instruction).toContain(
       "If the candidate says they did not hear, missed, or were not given the opening case or question",
@@ -217,15 +248,60 @@ describe("Pediatric oral-board interviewer", () => {
     }
   });
 
-  it("requires a six-exchange Oral Boards-compatible evaluation", () => {
+  it("grades a full exam, and a short one when the interview ended early", () => {
     const evaluation = sampleReport().evaluation;
     expect(interviewEvaluationSchema.parse(evaluation).exchanges).toHaveLength(6);
+    // An interview ended by the end_interview tool is still worth grading on
+    // whatever the candidate answered.
+    expect(
+      interviewEvaluationSchema.parse({
+        ...evaluation,
+        exchanges: evaluation.exchanges.slice(0, 2),
+      }).exchanges,
+    ).toHaveLength(2);
+    expect(() =>
+      interviewEvaluationSchema.parse({ ...evaluation, exchanges: [] }),
+    ).toThrow();
     expect(() =>
       interviewEvaluationSchema.parse({
         ...evaluation,
-        exchanges: evaluation.exchanges.slice(0, 5),
+        exchanges: [...evaluation.exchanges, evaluation.exchanges[0]],
       }),
     ).toThrow();
+  });
+
+  it("pins the response schema to the number of exchanges actually answered", async () => {
+    const report = sampleReport();
+    const transcript = report.evaluation.exchanges.slice(0, 3).map(({ question, answer }) => ({
+      question,
+      answer,
+    }));
+    const shortEvaluation = {
+      ...structuredClone(report.evaluation),
+      exchanges: structuredClone(report.evaluation.exchanges).slice(0, 3),
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        candidates: [{ content: { parts: [{ text: JSON.stringify(shortEvaluation) }] } }],
+      }),
+    );
+
+    const evaluation = await evaluateInterview(
+      "test-gemini-key",
+      PEDIATRIC_TOPICS.find(({ id }) => id === "pulp_therapy")!,
+      transcript,
+    );
+
+    expect(evaluation.exchanges).toHaveLength(3);
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    // The model must not pad a short interview back up to six invented answers.
+    expect(requestBody.generationConfig.responseJsonSchema.properties.exchanges).toMatchObject({
+      minItems: 3,
+      maxItems: 3,
+    });
+    expect(requestBody.systemInstruction.parts[0].text).toContain(
+      "This interview ended after 3 of 6 planned questions",
+    );
   });
 
   it("requests a structured Gemini review and preserves the recorded transcript", async () => {
@@ -273,6 +349,122 @@ describe("Pediatric oral-board interviewer", () => {
     const evaluationInput = JSON.parse(requestBody.contents[0].parts[0].text);
     expect(evaluationInput.topic.competencies).toHaveLength(6);
     expect(evaluationInput.topic.blueprintWeight).toBe(8);
+  });
+
+  it("sends examiner follow-ups to the evaluator and restores them verbatim", async () => {
+    const report = sampleReport();
+    const transcript = report.evaluation.exchanges.map(({ question, answer }, index) => ({
+      question,
+      answer,
+      ...(index === 0
+        ? {
+            followUps: [
+              { question: "What would change that plan?", answer: "A change in cooperation." },
+            ],
+          }
+        : {}),
+    }));
+    // The model never echoes followUps back; the runtime reattaches them.
+    const modelEvaluation = structuredClone(report.evaluation);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        candidates: [{ content: { parts: [{ text: JSON.stringify(modelEvaluation) }] } }],
+      }),
+    );
+
+    const evaluation = await evaluateInterview(
+      "test-gemini-key",
+      PEDIATRIC_TOPICS.find(({ id }) => id === "pulp_therapy")!,
+      transcript,
+    );
+
+    expect(evaluation.exchanges[0].followUps).toEqual(transcript[0].followUps);
+    expect(evaluation.exchanges[1].followUps).toBeUndefined();
+    const requestBody = JSON.parse(
+      String(vi.mocked(globalThis.fetch).mock.calls[0][1]?.body),
+    );
+    const evaluationInput = JSON.parse(requestBody.contents[0].parts[0].text);
+    expect(evaluationInput.exchanges[0].followUps).toHaveLength(1);
+    // Prompted content must be credited but must not score the same as
+    // content the candidate volunteered.
+    expect(requestBody.systemInstruction.parts[0].text).toContain(
+      "content the candidate produced only after a probe is still demonstrated knowledge",
+    );
+    expect(requestBody.systemInstruction.parts[0].text).toContain(
+      "is normally a 2 rather than a 3",
+    );
+  });
+
+  it("builds a cheat sheet about answering, grounded in what needed probing", async () => {
+    const report = sampleReport();
+    report.evaluation.exchanges[0].followUps = [
+      { question: "What would change that plan?", answer: "A change in cooperation." },
+    ];
+    const cheatsheet = sampleCheatsheet();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        candidates: [{ content: { parts: [{ text: JSON.stringify(cheatsheet) }] } }],
+      }),
+    );
+
+    const built = await buildInterviewCheatsheet(
+      "test-gemini-key",
+      PEDIATRIC_TOPICS.find(({ id }) => id === "pulp_therapy")!,
+      report.evaluation,
+    );
+
+    expect(built).toEqual(cheatsheet);
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const input = JSON.parse(requestBody.contents[0].parts[0].text);
+    expect(input.probedExchangeCount).toBe(1);
+    expect(input.exchanges[0].probesNeeded).toBe(1);
+    expect(input.exchanges[0].probeQuestions).toEqual(["What would change that plan?"]);
+    // The student sits a different case next time, so the aid must be about
+    // structure rather than this vignette's clinical content.
+    expect(requestBody.systemInstruction.parts[0].text).toContain(
+      "not about this vignette's clinical facts",
+    );
+  });
+
+  it("renders the cheat sheet as its own document and inside the review", () => {
+    const report = { ...sampleReport(), cheatsheet: sampleCheatsheet() };
+    const cheatsheet = buildCheatsheetMarkdown(report);
+    expect(cheatsheet).toContain("## Cheat sheet: how to answer next time");
+    expect(cheatsheet).toContain("### The answer spine");
+    expect(cheatsheet).toContain("### Phrases to borrow");
+    expect(cheatsheet).toContain("Commit to a position");
+    expect(cheatsheet).toContain("Study aid only.");
+    // The standalone sheet must not drag the transcript along with it.
+    expect(cheatsheet).not.toContain("### Question 1");
+    expect(buildInterviewMarkdown(report)).toContain("## Cheat sheet: how to answer next time");
+  });
+
+  it("omits the cheat sheet object when generation failed", async () => {
+    const withoutCheatsheet = sampleReport();
+    const puts: string[] = [];
+    const bucket = {
+      put: async (key: string) => {
+        puts.push(key);
+      },
+      delete: async () => undefined,
+    } as unknown as R2Bucket;
+
+    const stored = await storeInterviewReport(bucket, withoutCheatsheet);
+
+    expect(puts).toEqual([reportObjectKeys(withoutCheatsheet).json, reportObjectKeys(withoutCheatsheet).markdown]);
+    expect(stored.cheatsheetKey).toBeUndefined();
+  });
+
+  it("renders follow-ups and their grading note in the saved review", () => {
+    const report = sampleReport();
+    report.evaluation.exchanges[0].followUps = [
+      { question: "What would change that plan?", answer: "A change in cooperation." },
+    ];
+    const markdown = buildInterviewMarkdown(report);
+    expect(markdown).toContain("**Examiner follow-up**");
+    expect(markdown).toContain("What would change that plan?");
+    expect(markdown).toContain("One follow-up was");
+    expect(markdown.match(/^### Question /gm)).toHaveLength(6);
   });
 
   it("renders feedback and spoken model answers in the saved review", () => {
@@ -374,6 +566,33 @@ function sampleReport(): StoredInterviewReport {
         score: 3,
       })),
     },
+  };
+}
+
+function sampleCheatsheet() {
+  return {
+    headline: "Commit to a position in your first sentence, then justify it.",
+    answerSpine: [
+      { move: "Commit", whatToSay: "Name your working diagnosis or chosen action first." },
+      { move: "Justify", whatToSay: "Tie it to the findings you were given." },
+      { move: "Close", whatToSay: "State follow-up and what would change the plan." },
+    ],
+    questionPatterns: [
+      {
+        questionType: "Opening assessment question",
+        howToOpen: "State what you would do first and why.",
+        mustCover: ["A committed first step", "The reason it comes first"],
+        commonPitfall: "You listed options without choosing one.",
+      },
+    ],
+    phrasesToBorrow: [
+      { dimension: "Commit to a position", phrase: "My working diagnosis is..." },
+      { dimension: "Raise safety unprompted", phrase: "Before I start, I would check..." },
+    ],
+    drills: [
+      "Answer three questions aloud, committing in the first sentence.",
+      "Rehearse raising safety before the examiner asks for it.",
+    ],
   };
 }
 

@@ -68,7 +68,8 @@ Options:
   --cafe-noise-percent <0-40>  Mix synthesized background chatter into input
   --voice <name>     macOS system voice used by say (default: Samantha)
   --rate <wpm>       Speech rate passed to say (default: 175)
-  --timeout-ms <ms>  Whole-session timeout (default: 300000)
+  --timeout-ms <ms>  Whole-session timeout (default: 600000)
+  --max-follow-ups <n>  Probes answered per question before failing (default: 4)
   --help             Show this help
 
 The script reads INTERVIEWER_WS_URL and DEVICE_TOKEN when both are set.
@@ -84,7 +85,10 @@ function parseArguments(argv) {
     cafeNoisePercent: 0,
     voice: "Samantha",
     rate: 175,
-    timeoutMs: 300_000,
+    timeoutMs: 600_000,
+    // The worker forces the exchange to advance after four probes; a fifth
+    // means that enforcement is broken and the exam would never reach six.
+    maxFollowUps: 4,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -98,6 +102,7 @@ function parseArguments(argv) {
     else if (argument === "--turns") options.turns = Number(value);
     else if (argument === "--pause-ms") options.pauseMs = Number(value);
     else if (argument === "--commit-delay-ms") options.commitDelayMs = Number(value);
+    else if (argument === "--max-follow-ups") options.maxFollowUps = Number(value);
     else if (argument === "--cafe-noise-percent") options.cafeNoisePercent = Number(value);
     else if (argument === "--voice") options.voice = value;
     else if (argument === "--rate") options.rate = Number(value);
@@ -181,6 +186,44 @@ async function synthesizeAnswers(options, temporaryDirectory) {
   return answers;
 }
 
+// Elaborations for examiner probes. They are deliberately generic: the point
+// is to keep the exam moving and exercise the follow-up path, not to model a
+// strong candidate. Reused in order, then the last one repeats.
+const followUpAnswers = [
+  "To be specific, I would commit to that plan for this child, and I would explain the risks, benefits, and alternatives to the parent before starting, and confirm consent.",
+  "For safety I would review the medical history and contraindications first, monitor throughout, and I would review the patient afterward and escalate if the situation changed.",
+];
+
+async function synthesizeFollowUps(options, temporaryDirectory) {
+  const parts = [];
+  for (const [index, line] of followUpAnswers.entries()) {
+    const base = path.join(temporaryDirectory, `follow-up-${index + 1}`);
+    const aiff = `${base}.aiff`;
+    const wav = `${base}.wav`;
+    await execFileAsync("say", [
+      "-v",
+      options.voice,
+      "-r",
+      String(options.rate),
+      "-o",
+      aiff,
+      line,
+    ]);
+    await execFileAsync("afconvert", [
+      "-f",
+      "WAVE",
+      "-d",
+      `LEI16@${sampleRate}`,
+      "-c",
+      "1",
+      aiff,
+      wav,
+    ]);
+    parts.push(wavPcm(fs.readFileSync(wav)));
+  }
+  return parts;
+}
+
 async function synthesizeReadiness(options, temporaryDirectory) {
   const aiff = path.join(temporaryDirectory, "readiness.aiff");
   const wav = path.join(temporaryDirectory, "readiness.wav");
@@ -255,7 +298,7 @@ function wait(durationMs) {
   return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
-async function simulate(options, answers, readiness, settings, cafeNoise) {
+async function simulate(options, answers, followUps, readiness, settings, cafeNoise) {
   const startedAt = Date.now();
   const log = (event, details = {}) => {
     console.log(JSON.stringify({ elapsedMs: Date.now() - startedAt, event, ...details }));
@@ -266,6 +309,10 @@ async function simulate(options, answers, readiness, settings, cafeNoise) {
   let questionNumber = 0;
   let phase = "idle";
   let answersStarted = 0;
+  // Probes the examiner asked on the question currently open, and across the
+  // whole run. The examiner prompt caps probes at two per skillset.
+  let followUpsOnCurrentQuestion = 0;
+  const followUpsPerQuestion = [];
   let candidateStreaming = false;
   let stopCandidateAudio = false;
   let finished = false;
@@ -304,6 +351,10 @@ async function simulate(options, answers, readiness, settings, cafeNoise) {
       ...result,
       commitsSent,
       prematureStops,
+      followUps: {
+        total: followUpsPerQuestion.reduce((sum, count) => sum + count, followUpsOnCurrentQuestion),
+        perQuestion: [...followUpsPerQuestion, followUpsOnCurrentQuestion].slice(1),
+      },
       candidateTranscripts,
       readinessTranscripts,
       openingTurns,
@@ -360,6 +411,29 @@ async function simulate(options, answers, readiness, settings, cafeNoise) {
     candidateStreaming = false;
   };
 
+  /** Answers an examiner probe: one utterance, then commit. */
+  const sendFollowUp = async () => {
+    candidateStreaming = true;
+    stopCandidateAudio = false;
+    const index = Math.min(followUpsOnCurrentQuestion, followUps.length - 1);
+    followUpsOnCurrentQuestion += 1;
+    log("candidate_follow_up_started", {
+      question: questionNumber,
+      followUp: followUpsOnCurrentQuestion,
+    });
+    await sendPcm(followUps[index]);
+    if (!stopCandidateAudio) await sendPcm(silence(options.commitDelayMs));
+    if (!stopCandidateAudio && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "commit_turn" }));
+      commitsSent += 1;
+      log("candidate_follow_up_committed", {
+        question: questionNumber,
+        followUp: followUpsOnCurrentQuestion,
+      });
+    }
+    candidateStreaming = false;
+  };
+
   const sendReadiness = async () => {
     candidateStreaming = true;
     stopCandidateAudio = false;
@@ -375,20 +449,33 @@ async function simulate(options, answers, readiness, settings, cafeNoise) {
   };
 
   const maybeStartAnswer = () => {
-    if (
-      finished ||
-      candidateStreaming ||
-      phase !== "interviewing" ||
-      questionNumber !== answersStarted + 1
-    ) {
+    if (finished || candidateStreaming || phase !== "interviewing") return;
+    // The examiner probed instead of advancing: the question number has not
+    // moved even though this answer is already in. Answer the probe, otherwise
+    // both sides wait for each other until the run times out.
+    if (answersStarted > 0 && questionNumber === answersStarted) {
+      assert(
+        followUpsOnCurrentQuestion < options.maxFollowUps,
+        "Examiner exceeded the follow-up cap on one question; the prompt allows four probes per skillset",
+        {
+          question: questionNumber,
+          followUps: followUpsOnCurrentQuestion,
+          maxFollowUps: options.maxFollowUps,
+        },
+      );
+      void sendFollowUp().catch(rejectRun);
       return;
     }
+    if (questionNumber !== answersStarted + 1) return;
     if (answersStarted >= options.turns) {
       finish({ answersSimulated: answersStarted, stoppedBeforeQuestion: questionNumber });
       return;
     }
     const answerIndex = answersStarted;
     answersStarted += 1;
+    // The previous question closed; start counting probes again.
+    followUpsPerQuestion.push(followUpsOnCurrentQuestion);
+    followUpsOnCurrentQuestion = 0;
     void sendAnswer(answerIndex).catch(rejectRun);
   };
 
@@ -547,13 +634,14 @@ async function main() {
         voice: options.voice,
       }),
     );
-    const [answers, readiness, settings, cafeNoise] = await Promise.all([
+    const [answers, followUps, readiness, settings, cafeNoise] = await Promise.all([
       synthesizeAnswers(options, temporaryDirectory),
+      synthesizeFollowUps(options, temporaryDirectory),
       synthesizeReadiness(options, temporaryDirectory),
       interviewerSettings(),
       synthesizeCafeNoise(options, temporaryDirectory),
     ]);
-    const result = await simulate(options, answers, readiness, settings, cafeNoise);
+    const result = await simulate(options, answers, followUps, readiness, settings, cafeNoise);
     const openingSummary = result.openingTurns.map((turn, index) => ({
       index,
       audioBytes: turn.audio.bytes,

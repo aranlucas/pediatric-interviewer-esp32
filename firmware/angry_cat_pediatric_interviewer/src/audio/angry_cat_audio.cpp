@@ -1,5 +1,16 @@
 #include "angry_cat_audio.h"
 
+constexpr uint8_t AngryCatAudio::kVolumeNumerators[];
+
+void AngryCatAudio::setVolumeStep(uint8_t step) {
+  volumeStep_ = step > kLoudestVolumeStep ? kLoudestVolumeStep : step;
+}
+
+uint8_t AngryCatAudio::cycleVolumeStep() {
+  volumeStep_ = volumeStep_ >= kLoudestVolumeStep ? 0 : volumeStep_ + 1;
+  return volumeStep_;
+}
+
 #if defined(ANGRY_CAT_SIMULATOR)
 
 #include <AngryCatSimulator.h>
@@ -49,7 +60,6 @@ constexpr int kI2sWordSelect = 15;
 // uses the same full-duplex clock and Gemini resamples the 24 kHz input.
 constexpr uint32_t kVoiceSampleRate = 24000;
 constexpr uint8_t kCodecVolume80Percent = 0xCB;
-constexpr uint8_t kPlayerVolume = 3;
 constexpr size_t kPcmSamplesPerFrame = 480;
 constexpr uint8_t kPlaybackPrimeFrames = 5;
 constexpr int16_t kSilentStereoFrame[kPcmSamplesPerFrame * 2] = {};
@@ -141,12 +151,19 @@ bool AngryCatAudio::playPcm16(const uint8_t *data, size_t size) {
   int16_t stereo[kPcmSamplesPerFrame * 2];
   const int16_t *mono = reinterpret_cast<const int16_t *>(data);
   const size_t samples = size / sizeof(int16_t);
+  const uint8_t numerator = kVolumeNumerators[volumeStep_];
+  const bool unityGain = numerator >= kVolumeScaleDenominator;
   size_t offset = 0;
   while (offset < samples) {
     const size_t chunkSamples = min(kPcmSamplesPerFrame, samples - offset);
     for (size_t index = 0; index < chunkSamples; ++index) {
-      const int16_t speakerSample = static_cast<int16_t>(
-          static_cast<int32_t>(mono[offset + index]) * kPlayerVolume / 21);
+      // At the top step the sample is passed through rather than scaled, so
+      // the loudest setting cannot lose a bit to integer division.
+      const int16_t speakerSample =
+          unityGain ? mono[offset + index]
+                    : static_cast<int16_t>(
+                          static_cast<int32_t>(mono[offset + index]) *
+                          numerator / kVolumeScaleDenominator);
       stereo[index * 2] = speakerSample;
       stereo[index * 2 + 1] = speakerSample;
     }

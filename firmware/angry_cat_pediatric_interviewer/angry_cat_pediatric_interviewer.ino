@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
+#include <Preferences.h>
 #include <TCA9554.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
@@ -42,6 +43,17 @@ constexpr uint8_t kI2cStartupAttempts = 10;
 constexpr uint32_t kI2cStartupRetryMs = 100;
 constexpr uint32_t kLongPressMs = 2500;
 constexpr uint32_t kTouchReleaseDebounceMs = 100;
+// The only user button on this board is BOOT on GPIO0; RESET and PWR are wired
+// to the enable line and the power management IC and cannot be read in
+// software. It idles high through the SoC pull-up and reads LOW when pressed.
+constexpr int kBootButtonPin = 0;
+constexpr uint32_t kButtonDebounceMs = 40;
+// One button carries both actions, so a press is only a volume step once it is
+// released short of the hold threshold.
+constexpr uint32_t kButtonHoldMs = 1200;
+constexpr uint32_t kVolumeOverlayMs = 1500;
+constexpr char kSettingsNamespace[] = "angrycat";
+constexpr char kVolumeSettingKey[] = "volume";
 constexpr int kPetX = (kScreenWidth - kAngryCatFrameWidth) / 2;
 constexpr int kPetY = 8;
 
@@ -91,6 +103,14 @@ uint32_t touchStartedMs = 0;
 uint32_t lastTouchSeenMs = 0;
 TouchPoint touchStart;
 TouchPoint lastTouch;
+bool buttonPressed = false;
+bool buttonHoldHandled = false;
+uint32_t buttonChangedMs = 0;
+uint32_t buttonPressedMs = 0;
+uint32_t volumeOverlayUntilMs = 0;
+bool volumeOverlayShown = false;
+
+void handleLongPress();
 #if defined(ANGRY_CAT_SIMULATOR)
 uint8_t simulatedTouchFrames = 0;
 bool simulatorTopicCheckPending = false;
@@ -1083,6 +1103,78 @@ void handleSerial() {
   }
 }
 
+void loadVolumeStep() {
+  Preferences settings;
+  if (!settings.begin(kSettingsNamespace, true)) {
+    // No namespace yet on a fresh device; the default is already the loudest.
+    return;
+  }
+  audio.setVolumeStep(
+      settings.getUChar(kVolumeSettingKey, AngryCatAudio::kLoudestVolumeStep));
+  settings.end();
+}
+
+void saveVolumeStep(uint8_t step) {
+  Preferences settings;
+  if (!settings.begin(kSettingsNamespace, false))
+    return;
+  settings.putUChar(kVolumeSettingKey, step);
+  settings.end();
+}
+
+/**
+ * BOOT is the only readable button, so it carries both actions: a short press
+ * steps the volume and wrapping round to the quietest, and a hold runs the
+ * same reset the touchscreen long-press performs.
+ */
+void pollButton() {
+  const uint32_t now = millis();
+  const bool pressedNow = digitalRead(kBootButtonPin) == LOW;
+  if (pressedNow != buttonPressed && now - buttonChangedMs >= kButtonDebounceMs) {
+    buttonChangedMs = now;
+    buttonPressed = pressedNow;
+    if (pressedNow) {
+      buttonPressedMs = now;
+      buttonHoldHandled = false;
+    } else if (!buttonHoldHandled) {
+      const uint8_t step = audio.cycleVolumeStep();
+      saveVolumeStep(step);
+      volumeOverlayUntilMs = now + kVolumeOverlayMs;
+      screenDirty = true;
+      Serial.printf("Volume: step %u/%u\n", step + 1,
+                    AngryCatAudio::kVolumeStepCount);
+    }
+  }
+  if (buttonPressed && !buttonHoldHandled &&
+      now - buttonPressedMs >= kButtonHoldMs) {
+    buttonHoldHandled = true;
+    Serial.println("Button hold: reset");
+    handleLongPress();
+  }
+}
+
+/** Transient volume readout drawn over whatever view is on screen. */
+void drawVolumeOverlay() {
+  constexpr int kOverlayWidth = 200;
+  constexpr int kOverlayHeight = 54;
+  const int x = (kScreenWidth - kOverlayWidth) / 2;
+  const int y = kScreenHeight - kOverlayHeight - 24;
+  display.fillRoundRect(x, y, kOverlayWidth, kOverlayHeight, 14,
+                        RGB565(25, 31, 62));
+  drawCentered("VOLUME", kScreenWidth / 2, y + 16, 1, kSoftWhite);
+  constexpr int kPipWidth = 22;
+  constexpr int kPipGap = 6;
+  const int pipsWidth = AngryCatAudio::kVolumeStepCount * kPipWidth +
+                        (AngryCatAudio::kVolumeStepCount - 1) * kPipGap;
+  int pipX = (kScreenWidth - pipsWidth) / 2;
+  for (uint8_t index = 0; index < AngryCatAudio::kVolumeStepCount; ++index) {
+    display.fillRoundRect(pipX, y + 28, kPipWidth, 14, 4,
+                          index <= audio.volumeStep() ? kWhite
+                                                      : RGB565(60, 68, 104));
+    pipX += kPipWidth + kPipGap;
+  }
+}
+
 void handleLongPress() {
   if (appView == AppView::Interview) {
     returnToTopicsAfterStop = sessionActive || sessionTaskRunning.load();
@@ -1152,9 +1244,14 @@ void setup() {
       static_cast<unsigned long>(ESP.getPsramSize() / (1024 * 1024)));
   Serial.println("Touch controller: ready at 0x3B");
   const bool audioReady = audio.begin();
-  Serial.printf("Audio: %s; microphone: %s\n",
+  pinMode(kBootButtonPin, INPUT_PULLUP);
+  loadVolumeStep();
+  Serial.printf("Audio: %s; microphone: %s; volume step %u/%u\n",
                 audioReady ? "ES8311 ready" : "unavailable",
-                audio.isMicrophoneReady() ? "ready on GPIO 14" : "unavailable");
+                audio.isMicrophoneReady() ? "ready on GPIO 14" : "unavailable",
+                audio.volumeStep() + 1, AngryCatAudio::kVolumeStepCount);
+  Serial.printf("BOOT button on GPIO %d: press for volume, hold to reset\n",
+                kBootButtonPin);
   Serial.printf("Cloudflare interviewer: %s\n",
                 interviewer.isConfigured() ? "configured" : "not configured");
 
@@ -1217,6 +1314,7 @@ void loop() {
     Serial.println("SIM_TEST: event queue passed");
   }
 #endif
+  pollButton();
   TouchPoint point{};
   const uint32_t now = millis();
   const bool rawTouched = readTouch(point);
@@ -1304,8 +1402,21 @@ void loop() {
   if (released)
     longPressHandled = false;
 
+  // Clear the overlay once it expires; renderScreen redraws without it.
+  if (volumeOverlayShown && now >= volumeOverlayUntilMs) {
+    volumeOverlayShown = false;
+    screenDirty = true;
+  }
+
   if (screenDirty) {
     renderScreen();
+    if (now < volumeOverlayUntilMs) {
+      // renderScreen has already flushed; paint over the canvas and flush the
+      // overlay on top of it.
+      volumeOverlayShown = true;
+      drawVolumeOverlay();
+      flushDisplay();
+    }
   } else {
     updateAnimation();
   }
