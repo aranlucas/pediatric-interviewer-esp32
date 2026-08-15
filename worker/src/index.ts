@@ -15,6 +15,8 @@ type WorkerEnv = Env & {
   INTERVIEW_REPORTS: R2Bucket;
 };
 
+const DURABLE_OBJECT_ID_PATTERN = /^[0-9a-f]{64}$/i;
+
 const TOKEN_ENCODER = new TextEncoder();
 const REPORT_PATH_PREFIX = "/interviewer/reports/";
 const REPORT_PATH_PATTERN =
@@ -90,6 +92,24 @@ export default {
         })),
         models: pediatricInterviewerModels,
       });
+    }
+
+    if (request.method === "POST" && path === "/interviewer/recover-report") {
+      if (!(await verifyToken(request.headers.get("X-Device-Token"), env.DEVICE_TOKEN))) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const durableObjectId = request.headers.get("X-Durable-Object-Id") ?? "";
+      if (!DURABLE_OBJECT_ID_PATTERN.test(durableObjectId)) {
+        return json({ error: "invalid_durable_object_id" }, 400);
+      }
+      const id = env.PEDIATRIC_INTERVIEWER.idFromString(durableObjectId);
+      const stub = env.PEDIATRIC_INTERVIEWER.get(id);
+      return stub.fetch(
+        new Request("https://internal/recover-report", {
+          method: "POST",
+          headers: { "x-partykit-room": `recovery-${durableObjectId.slice(0, 8)}` },
+        }),
+      );
     }
 
     const routed = await routeAgentRequest(request, env, {

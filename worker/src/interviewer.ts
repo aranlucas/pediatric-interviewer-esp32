@@ -159,6 +159,23 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     return OPENING_HANDSHAKE_STAGES.has(this.openingStage);
   }
 
+  async onRequest(request: Request): Promise<Response> {
+    if (request.method !== "POST" || new URL(request.url).pathname !== "/recover-report") {
+      return new Response("Not found", { status: 404 });
+    }
+    if (
+      this.answerCount === 0 ||
+      !["interviewing", "evaluating", "evaluation_failed"].includes(this.state.phase)
+    ) {
+      return Response.json({ error: "no_interrupted_interview" }, { status: 409 });
+    }
+    const connection = { id: "recovery", send: () => undefined } as unknown as Connection;
+    this.device = connection;
+    this.updateInterview(connection, { phase: "evaluating" });
+    await this.finishInterview(connection);
+    return Response.json({ ok: this.state.phase === "complete", reportId: this.state.reportId });
+  }
+
   onConnect(connection: Connection): void {
     this.sendJSON(connection, { type: "welcome", protocol_version: 1 });
     this.sendStatus(connection, "idle");
@@ -174,8 +191,23 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     if (!parsed) return;
     if (parsed.type === "start_call") {
       void this.startLiveSession(connection, parsed.topic_id);
+    } else if (parsed.type === "recover_report") {
+      void this.recoverReport(connection);
     } else if (parsed.type === "end_call") {
       if (this.device?.id !== connection.id) return;
+      // Stopping the device is also a valid end-of-session boundary. Preserve
+      // any answers already persisted in the Durable Object and file an early
+      // report instead of silently discarding them with the Live connection.
+      if (this.state.phase === "interviewing" && this.answerCount > 0) {
+        const detachedConnection = {
+          id: "detached-report-recovery",
+          send: () => undefined,
+        } as unknown as Connection;
+        this.updateInterview(connection, { phase: "evaluating" });
+        this.closeLiveSession("device ended call");
+        void this.finishInterview(detachedConnection);
+        return;
+      }
       this.closeLiveSession("device ended call");
       this.sendStatus(connection, "idle");
     } else if (parsed.type === "commit_turn") {
@@ -375,6 +407,35 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     ++this.liveGeneration;
     this.releaseLiveResources();
     session?.close();
+  }
+
+  /**
+   * Replays evaluation for an interrupted interview without opening Gemini.
+   * This is intentionally a device-protocol escape hatch for recovering a
+   * report after a transport or UI interruption; it never resets exchanges.
+   */
+  private async recoverReport(connection: Connection): Promise<void> {
+    if (this.device || this.connecting) {
+      this.sendJSON(connection, {
+        type: "error",
+        message: "The interview is still connected; stop it before recovering the report.",
+      });
+      return;
+    }
+    if (
+      this.answerCount === 0 ||
+      !["interviewing", "evaluating", "evaluation_failed"].includes(this.state.phase)
+    ) {
+      this.sendJSON(connection, {
+        type: "error",
+        message: "No interrupted interview with saved answers is available.",
+      });
+      return;
+    }
+    this.device = connection;
+    this.updateInterview(connection, { phase: "evaluating" });
+    this.sendStatus(connection, "evaluating");
+    await this.finishInterview(connection);
   }
 
   private forwardAudio(connection: Connection, audio: ArrayBuffer): void {

@@ -6,6 +6,7 @@ const deviceMessageSchema = z.discriminatedUnion("type", [
     topic_id: z.string().max(64).optional(),
   }),
   z.object({ type: z.literal("end_call") }),
+  z.object({ type: z.literal("recover_report") }),
   z.object({ type: z.literal("commit_turn") }),
   z.object({
     type: z.literal("candidate_text"),
