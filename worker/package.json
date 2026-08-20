@@ -2,6 +2,7 @@
   "name": "angry-cat-worker",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@11.20.0",
   "type": "module",
   "scripts": {
     "check": "wrangler types --check && tsc --noEmit",
@@ -10,18 +11,19 @@
     "generate-types": "wrangler types",
     "simulate:interview": "node tools/simulate-interview.mjs",
     "simulate:suite": "node tools/simulate-suite.mjs",
+    "smoke:web": "node tools/smoke-web.mjs",
     "test": "vitest run"
   },
   "dependencies": {
-    "@google/genai": "^2.17.0",
-    "agents": "^0.20.1",
-    "ws": "^8.21.3",
+    "@google/genai": "^2.18.0",
+    "agents": "^0.21.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10",
-    "wrangler": "^4.123.0"
+    "vitest": "^4.1.11",
+    "wrangler": "^4.124.0",
+    "ws": "^8.21.3"
   }
 }

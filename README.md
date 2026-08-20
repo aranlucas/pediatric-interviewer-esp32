@@ -17,6 +17,12 @@ skill areas. The review opens automatically: swipe left or right between pages,
 tap to advance, or hold for 2.5 seconds to return to the topic menu. The complete
 JSON and Markdown reports remain privately stored in R2.
 
+The browser client in `web/` adds configurable setup: check one or more domains
+to create a coherent combo case, choose 3-10 questions, and select Easy,
+Standard, or Hard difficulty. The physical device intentionally keeps the sane
+single-topic, six-question, Standard defaults and does not add setup controls to
+the 3.5-inch screen.
+
 The menu uses the supplied ABPD-style domains verbatim, from Behavior Guidance
 through Elements of Pediatric Dental Practice. The interviewer gives only a brief neutral transition and
 does not score or invent clinical corrections. Review answers against the

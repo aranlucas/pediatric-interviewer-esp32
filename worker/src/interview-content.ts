@@ -3,12 +3,12 @@ export const ABPD_OCE_BLUEPRINT_URL =
 
 export type CognitiveLevel = "remember" | "understand_apply" | "analyze_evaluate";
 
-type Competency = {
+export type Competency = {
   skillset: string;
   cognitiveLevel: CognitiveLevel;
 };
 
-type TopicDefinition = {
+export type InterviewTopic = {
   id: string;
   label: string;
   blueprintWeight: number;
@@ -287,7 +287,7 @@ export const PEDIATRIC_TOPICS = [
       },
     ],
   },
-] as const satisfies readonly TopicDefinition[];
+] as const satisfies readonly InterviewTopic[];
 
 export type PediatricTopic = (typeof PEDIATRIC_TOPICS)[number];
 export type PediatricTopicId = PediatricTopic["id"];
@@ -299,4 +299,3 @@ export function findTopic(value: string | null | undefined): PediatricTopic {
 export function knownTopic(value: string | null | undefined): PediatricTopic | null {
   return PEDIATRIC_TOPICS.find((topic) => topic.id === value) ?? null;
 }
-

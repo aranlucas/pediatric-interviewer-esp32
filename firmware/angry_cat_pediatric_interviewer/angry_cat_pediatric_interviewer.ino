@@ -175,6 +175,7 @@ ScreenStatus screenStatus = ScreenStatus::Ready;
 AngryCatAnimation currentAnimation = AngryCatAnimation::Waving;
 uint8_t currentFrame = 0;
 uint8_t questionNumber = 0;
+uint8_t answeredQuestions = 0;
 uint8_t totalQuestions = 6;
 uint32_t lastFrameMs = 0;
 uint8_t selectedTopicIndex = 0;
@@ -631,6 +632,7 @@ void startInterview() {
   sessionActive = true;
   sessionTaskRunning.store(true);
   questionNumber = 0;
+  answeredQuestions = 0;
   reviewPage = 0;
   reviewLoading = false;
   savedReportId[0] = '\0';
@@ -686,8 +688,11 @@ void processInterviewerEvents() {
       setScreenStatus(ScreenStatus::Thinking, "ANSWER RECEIVED - PLEASE WAIT");
       break;
     case InterviewerEventType::Evaluating:
-      setScreenStatus(ScreenStatus::Evaluating,
-                      "EVALUATING 6 ANSWERS - SAVING TO R2");
+      snprintf(statusDetail, sizeof(statusDetail),
+               "EVALUATING %u OF %u ANSWERS - SAVING",
+               static_cast<unsigned>(answeredQuestions),
+               static_cast<unsigned>(totalQuestions));
+      setScreenStatus(ScreenStatus::Evaluating);
       break;
     case InterviewerEventType::Speaking:
       setScreenStatus(ScreenStatus::Speaking, "LISTEN - THEN ANSWER ALOUD");
@@ -707,6 +712,7 @@ void processInterviewerEvents() {
     }
     case InterviewerEventType::InterviewState:
       questionNumber = event.questionNumber;
+      answeredQuestions = event.answerCount;
       totalQuestions = event.totalQuestions;
       snprintf(currentDomain, sizeof(currentDomain), "%s", event.domain);
       if (event.text[0] != '\0') {
@@ -776,10 +782,19 @@ void processInterviewerEvents() {
       }
       reviewLoading = savedReportId[0] != '\0';
       snprintf(currentDomain, sizeof(currentDomain), "INTERVIEW COMPLETE");
-      snprintf(currentQuestion, sizeof(currentQuestion),
-               "Six questions complete. Your review was saved privately. "
-               "Loading report %.8s for this screen.",
-               savedReportId[0] == '\0' ? "pending" : savedReportId);
+      if (answeredQuestions >= totalQuestions) {
+        snprintf(currentQuestion, sizeof(currentQuestion),
+                 "Six questions complete. Your review was saved privately. "
+                 "Loading report %.8s for this screen.",
+                 savedReportId[0] == '\0' ? "pending" : savedReportId);
+      } else {
+        snprintf(currentQuestion, sizeof(currentQuestion),
+                 "Interview ended after %u of %u answered questions. Your "
+                 "partial review was saved privately as %.8s.",
+                 static_cast<unsigned>(answeredQuestions),
+                 static_cast<unsigned>(totalQuestions),
+                 savedReportId[0] == '\0' ? "pending" : savedReportId);
+      }
       setScreenStatus(ScreenStatus::Complete,
                       reviewLoading ? "LOADING REVIEW FROM R2"
                                     : "TAP TO CHOOSE ANOTHER TOPIC");
@@ -1130,7 +1145,8 @@ void saveVolumeStep(uint8_t step) {
 void pollButton() {
   const uint32_t now = millis();
   const bool pressedNow = digitalRead(kBootButtonPin) == LOW;
-  if (pressedNow != buttonPressed && now - buttonChangedMs >= kButtonDebounceMs) {
+  if (pressedNow != buttonPressed &&
+      now - buttonChangedMs >= kButtonDebounceMs) {
     buttonChangedMs = now;
     buttonPressed = pressedNow;
     if (pressedNow) {

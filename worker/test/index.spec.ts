@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PEDIATRIC_TOPICS } from "../src/interview-content";
 import {
+  buildInterviewTopic,
+  DEFAULT_INTERVIEW_DIFFICULTY,
+  DEFAULT_INTERVIEW_QUESTION_COUNT,
+  resolveInterviewConfiguration,
+} from "../src/interview-config";
+import {
   buildCheatsheetMarkdown,
   buildInterviewCheatsheet,
   buildInterviewMarkdown,
@@ -14,20 +20,72 @@ import {
 } from "../src/interview-report";
 import { isResponseComplete, shouldEndTurn } from "../src/turn-completion";
 import {
-  END_INTERVIEW_TOOL,
+  appendBoundedTranscript,
+  isBoundedProviderAudio,
+  isValidPcm16Input,
+  liveReconnectDelayMs,
+  MAX_INPUT_PCM_BYTES,
+  MAX_INPUT_PCM_BYTES_PER_SECOND,
+  PcmInputRateGuard,
+} from "../src/live-session-lifecycle";
+import {
   GEMINI_LIVE_MODEL,
   geminiLiveConfig,
   geminiOpeningTurn,
+  geminiReconnectTurn,
   geminiReplayForAudioTurn,
-  geminiReadinessTurn,
   geminiTextTurn,
+  isValidOpeningCasePresentation,
+  splitOpeningCaseReadiness,
+  turnDispositionToolOutput,
   TURN_DISPOSITION_TOOL,
 } from "../src/gemini-live-protocol";
 import { openingPresentationForDisplay, questionForDisplay } from "../src/interview-display";
+import {
+  cloneInterviewExchanges,
+  finalizeInterviewReport,
+} from "../src/interview-finalization";
 import { parseInterviewerDeviceMessage } from "../src/interviewer-protocol";
+import {
+  decodeOpeningSpeech,
+  GEMINI_TTS_MODEL,
+  openingSpeechInteraction,
+  OPENING_TTS_REQUEST_OPTIONS,
+} from "../src/opening-speech";
+import {
+  GEMINI_OPENING_CASE_MODEL,
+  openingCaseInteraction,
+  openingCaseJsonSchema,
+  OPENING_CASE_REQUEST_OPTIONS,
+  parseOpeningCaseResponse,
+} from "../src/opening-case";
 import { resamplePcm16 } from "../src/pcm-audio";
+import {
+  CLOUDFLARE_TTS_MODEL,
+  CLOUDFLARE_TTS_SAMPLE_RATE,
+  synthesizeCloudflareSpeech,
+} from "../src/cloudflare-speech";
 
 afterEach(() => vi.restoreAllMocks());
+
+function pcm16Wav(pcm: Uint8Array, sampleRate = 24_000): Uint8Array {
+  const wav = Buffer.alloc(44 + pcm.byteLength);
+  wav.write("RIFF", 0, "ascii");
+  wav.writeUInt32LE(36 + pcm.byteLength, 4);
+  wav.write("WAVE", 8, "ascii");
+  wav.write("fmt ", 12, "ascii");
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36, "ascii");
+  wav.writeUInt32LE(pcm.byteLength, 40);
+  Buffer.from(pcm).copy(wav, 44);
+  return wav;
+}
 
 describe("Interviewer device display", () => {
   it("fits the generated presentation on screen while preserving its question", () => {
@@ -50,14 +108,99 @@ describe("Interviewer device display", () => {
 });
 
 describe("Pediatric oral-board interviewer", () => {
+  it("requests bounded raw PCM from the Cloudflare Workers AI binding", async () => {
+    const run = vi.fn().mockResolvedValue(
+      new Response(Uint8Array.from([1, 0, 2, 0]), {
+        headers: { "Content-Type": "audio/l16" },
+      }),
+    );
+
+    await expect(
+      synthesizeCloudflareSpeech({ run } as unknown as Ai, "Are you ready to begin?"),
+    ).resolves.toEqual({
+      pcm: Uint8Array.from([1, 0, 2, 0]),
+      sampleRate: CLOUDFLARE_TTS_SAMPLE_RATE,
+    });
+    expect(run).toHaveBeenCalledWith(
+      CLOUDFLARE_TTS_MODEL,
+      {
+        text: "Are you ready to begin?",
+        speaker: "orpheus",
+        encoding: "linear16",
+        container: "none",
+        sample_rate: 24_000,
+      },
+      expect.objectContaining({
+        returnRawResponse: true,
+        tags: ["angry-cat", "opening-tts"],
+      }),
+    );
+  });
+
+  it("rejects malformed Cloudflare PCM before device playback", async () => {
+    const run = vi.fn().mockResolvedValue(new Response(Uint8Array.from([1, 2, 3])));
+
+    await expect(
+      synthesizeCloudflareSpeech({ run } as unknown as Ai, "Synthetic speech"),
+    ).rejects.toThrow("invalid PCM16 audio");
+  });
+
+  it("builds a non-stored, bounded structured opening-case interaction", () => {
+    const interaction = openingCaseInteraction(PEDIATRIC_TOPICS[0], "standard");
+
+    expect(interaction).toMatchObject({
+      model: GEMINI_OPENING_CASE_MODEL,
+      store: false,
+      response_format: {
+        type: "text",
+        mime_type: "application/json",
+        schema: openingCaseJsonSchema,
+      },
+      generation_config: {
+        thinking_level: "minimal",
+        max_output_tokens: 256,
+      },
+    });
+    expect(interaction.input).toContain("Domain: Behavior Guidance");
+    expect(OPENING_CASE_REQUEST_OPTIONS).toEqual({ timeout: 20_000, maxRetries: 1 });
+  });
+
+  it("turns a semantically valid structured vignette into the runtime-owned case", () => {
+    expect(
+      parseOpeningCaseResponse(
+        JSON.stringify({
+          vignette:
+            "Here is your case. An anxious four-year-old child presents with intermittent lower molar pain, limited prior dental care, escalating distress in clinic, and a caregiver requesting completion of all necessary treatment today.",
+        }),
+      ),
+    ).toBe(
+      "Here is your case. An anxious four-year-old child presents with intermittent lower molar pain, limited prior dental care, escalating distress in clinic, and a caregiver requesting completion of all necessary treatment today.",
+    );
+  });
+
+  it("rejects schema-valid text that crosses the opening speech boundary", () => {
+    expect(() =>
+      parseOpeningCaseResponse(
+        JSON.stringify({
+          vignette:
+            "An anxious four-year-old child presents with intermittent lower molar pain and limited prior dental care. What is your initial assessment and management plan for this patient?",
+        }),
+      ),
+    ).toThrow("violated the spoken vignette boundary");
+    expect(() =>
+      parseOpeningCaseResponse(
+        JSON.stringify({
+          vignette:
+            "An anxious four-year-old child presents with intermittent lower molar pain, limited prior dental care, escalating distress in clinic, and a caregiver requesting treatment. Are you ready to begin.",
+        }),
+      ),
+    ).toThrow("violated the spoken vignette boundary");
+  });
+
   it("separates the case presentation from the readiness question", () => {
     expect(geminiOpeningTurn()).toEqual({
       turns:
-        'PRESENT_CASE. Say "Here is your case." Then present the opening vignette in at most 60 spoken words, without asking any question. End the response immediately after the vignette.',
-      turnComplete: true,
-    });
-    expect(geminiReadinessTurn()).toEqual({
-      turns: 'ASK_READINESS. Ask exactly, "Are you ready to begin?" Say nothing else.',
+        'PRESENT_CASE. Say "Here is your case." Then present the opening vignette in at most 60 spoken words, without asking any question. Do not say or append "Are you ready to begin?"; the runtime requests readiness separately. End the response immediately after the vignette.',
       turnComplete: true,
     });
     expect(geminiReplayForAudioTurn("Here is your case. A child presents with pain.")).toEqual({
@@ -65,6 +208,49 @@ describe("Pediatric oral-board interviewer", () => {
         "REPLAY_FOR_AUDIO. Speak exactly the following text and nothing else: Here is your case. A child presents with pain.",
       turnComplete: true,
     });
+  });
+
+  it("recognizes only the exact readiness suffix as a coalesced opening turn", () => {
+    expect(
+      splitOpeningCaseReadiness(
+        "Here is your case. A four-year-old presents with pain. Are you ready to begin?",
+      ),
+    ).toEqual({
+      caseText: "Here is your case. A four-year-old presents with pain.",
+      includesReadiness: true,
+    });
+    expect(
+      splitOpeningCaseReadiness(
+        "Here is your case. A four-year-old presents with pain. What is your assessment?",
+      ),
+    ).toEqual({
+      caseText:
+        "Here is your case. A four-year-old presents with pain. What is your assessment?",
+      includesReadiness: false,
+    });
+  });
+
+  it("requires a case marker and rejects clinical questions at the opening boundary", () => {
+    expect(
+      isValidOpeningCasePresentation(
+        "Here is your case. A four-year-old presents with pain and dental anxiety.",
+      ),
+    ).toBe(true);
+    expect(
+      isValidOpeningCasePresentation(
+        "Here is your case. A four-year-old presents with pain. Are you ready to begin?",
+      ),
+    ).toBe(true);
+    expect(
+      isValidOpeningCasePresentation(
+        "Based on what you observe, what are your initial thoughts?",
+      ),
+    ).toBe(false);
+    expect(
+      isValidOpeningCasePresentation(
+        "Here is your case. A child presents with pain. What is your diagnosis?",
+      ),
+    ).toBe(false);
   });
 
   it("marks a typed candidate answer as a complete Gemini client turn", () => {
@@ -80,6 +266,26 @@ describe("Pediatric oral-board interviewer", () => {
         JSON.stringify({ type: "start_call", topic_id: "pulp_therapy" }),
       ),
     ).toEqual({ type: "start_call", topic_id: "pulp_therapy" });
+    expect(
+      parseInterviewerDeviceMessage(
+        JSON.stringify({
+          type: "start_call",
+          topic_ids: ["pulp_therapy", "behavior_guidance"],
+          question_count: 8,
+          difficulty: "hard",
+        }),
+      ),
+    ).toEqual({
+      type: "start_call",
+      topic_ids: ["pulp_therapy", "behavior_guidance"],
+      question_count: 8,
+      difficulty: "hard",
+    });
+    expect(
+      parseInterviewerDeviceMessage(
+        JSON.stringify({ type: "start_call", question_count: 11, difficulty: "expert" }),
+      ),
+    ).toBeNull();
     expect(
       parseInterviewerDeviceMessage(
         JSON.stringify({ type: "candidate_text", text: "  I would reassess the child.  " }),
@@ -122,6 +328,43 @@ describe("Pediatric oral-board interviewer", () => {
     expect(config.responseModalities).toEqual(["AUDIO"]);
     expect(config.inputAudioTranscription).toEqual({});
     expect(config.outputAudioTranscription).toEqual({});
+    expect(config.contextWindowCompression).toEqual({ slidingWindow: {} });
+    expect(config.sessionResumption).toEqual({});
+    expect(
+      geminiLiveConfig(PEDIATRIC_TOPICS[0], { sessionResumptionHandle: "resume-token" })
+        .sessionResumption,
+    ).toEqual({ handle: "resume-token" });
+    const recoveryInstruction = String(
+      geminiLiveConfig(PEDIATRIC_TOPICS[0], {
+        recoveryContext: {
+          casePresentation: "A four-year-old presents with pain.",
+          currentQuestion: "How would you assess cooperation?",
+          persistedAnswerCount: 2,
+          plannedQuestionCount: 6,
+          awaitingReadinessConfirmation: false,
+        },
+      }).systemInstruction,
+    );
+    expect(recoveryInstruction).toContain("Do not generate or substitute a new case");
+    expect(recoveryInstruction).toContain("A four-year-old presents with pain");
+    expect(recoveryInstruction).toContain("persisted 2 of 6 scored exchanges");
+    expect(recoveryInstruction).toContain("not waiting for readiness confirmation");
+    expect(recoveryInstruction).toContain("<SILENT_RECOVERY_CONTEXT>");
+    expect(recoveryInstruction).toContain(
+      "Never introduce, quote, paraphrase, or read it aloud",
+    );
+    expect(recoveryInstruction).toContain(
+      "not a request to repeat the case merely because it discusses",
+    );
+    expect(recoveryInstruction).toContain(
+      "Repeat the case only when the candidate explicitly asks",
+    );
+    expect(recoveryInstruction).toContain(
+      "when a RESUME_INTERVIEW command explicitly directs you",
+    );
+    expect(String(config.systemInstruction)).toContain(
+      "runtime plays the fixed sentence",
+    );
     expect(config.thinkingConfig).toEqual({
       thinkingLevel: "MINIMAL",
     });
@@ -151,23 +394,6 @@ describe("Pediatric oral-board interviewer", () => {
               required: ["disposition"],
             }),
           }),
-          expect.objectContaining({
-            name: END_INTERVIEW_TOOL,
-            parametersJsonSchema: expect.objectContaining({
-              properties: {
-                reason: {
-                  type: "string",
-                  enum: [
-                    "candidate_requested",
-                    "candidate_unable_to_continue",
-                    "running_out_of_time",
-                    "examination_complete",
-                  ],
-                },
-              },
-              required: ["reason"],
-            }),
-          }),
         ],
       },
     ]);
@@ -179,6 +405,10 @@ describe("Pediatric oral-board interviewer", () => {
     expect(instruction).toContain(
       "never turn a probe into a checklist, a compound question, or a leading question",
     );
+    expect(instruction).toContain("The interview runtime, not you, is the authority");
+    expect(instruction).toContain("Never infer progress from the number of conversational turns");
+    expect(instruction).toContain('say exactly, "Hold the screen or use End interview to stop."');
+    expect(instruction).not.toContain("end_interview");
     expect(instruction).toContain(
       "give a brief internally consistent finding and let them continue",
     );
@@ -199,7 +429,10 @@ describe("Pediatric oral-board interviewer", () => {
     expect(instruction).toContain(
       "ask exactly one focused question with one primary decision target",
     );
-    expect(instruction).toContain('On ASK_READINESS, ask exactly, "Are you ready to begin?"');
+    expect(instruction).toContain(
+      'The runtime plays the fixed sentence "Are you ready to begin?" through deterministic TTS',
+    );
+    expect(instruction).not.toContain("On ASK_READINESS");
     expect(instruction).toContain(
       "reassesses risk, adapts the plan, and explains what would change",
     );
@@ -223,6 +456,71 @@ describe("Pediatric oral-board interviewer", () => {
     expect(instruction).not.toContain("state the topic, present the generated vignette");
     expect(instruction).not.toContain("medical advice");
     expect(instruction).not.toContain("A healthy four-year-old");
+  });
+
+  it("uses the persisted exchange count to direct every classified turn", () => {
+    expect(turnDispositionToolOutput("begin_first_question", 0)).toContain(
+      "Ask the first clinical question",
+    );
+    expect(turnDispositionToolOutput("advance_skillset", 3)).toContain(
+      "Ask clinical question 5",
+    );
+    expect(turnDispositionToolOutput("advance_skillset", 5)).toContain(
+      "scored exchange 6 of 6",
+    );
+    expect(turnDispositionToolOutput("advance_skillset", 5)).toContain("Ask no further question");
+    expect(turnDispositionToolOutput("probe_current_answer", 3)).toContain(
+      "this turn does not advance it",
+    );
+    expect(turnDispositionToolOutput("provide_case_information", 3)).toContain(
+      "this turn does not advance it",
+    );
+    expect(turnDispositionToolOutput("advance_skillset", 7, 8)).toContain(
+      "scored exchange 8 of 8",
+    );
+  });
+
+  it("keeps device defaults while accepting configurable combo interviews", () => {
+    expect(resolveInterviewConfiguration({ legacyTopicId: "pulp_therapy" })).toEqual({
+      topicIds: ["pulp_therapy"],
+      questionCount: DEFAULT_INTERVIEW_QUESTION_COUNT,
+      difficulty: DEFAULT_INTERVIEW_DIFFICULTY,
+    });
+
+    const configuration = resolveInterviewConfiguration({
+      topicIds: ["behavior_guidance", "pulp_therapy", "growth_development", "advocacy_education"],
+      questionCount: 3,
+      difficulty: "hard",
+    });
+    expect(configuration).toEqual({
+      topicIds: ["behavior_guidance", "pulp_therapy", "growth_development", "advocacy_education"],
+      questionCount: 4,
+      difficulty: "hard",
+    });
+    const combo = buildInterviewTopic(configuration!.topicIds);
+    expect(combo.id).toBe("combo");
+    expect(combo.label).toContain("Behavior Guidance + Pulp Therapy");
+    expect(combo.caseScope).toContain("one coherent pediatric patient scenario");
+    expect(combo.competencies.slice(0, 4).map((item) => item.skillset)).toEqual([
+      expect.stringContaining("Behavior Guidance:"),
+      expect.stringContaining("Pulp Therapy:"),
+      expect.stringContaining("Growth & Development:"),
+      expect.stringContaining("Advocacy and Education:"),
+    ]);
+  });
+
+  it("configures a hard combo case for the requested question target", () => {
+    const combo = buildInterviewTopic(["behavior_guidance", "pulp_therapy"]);
+    const instruction = String(
+      geminiLiveConfig(combo, { questionCount: 8, difficulty: "hard" }).systemInstruction,
+    );
+    expect(instruction).toContain("Combo: Behavior Guidance + Pulp Therapy");
+    expect(instruction).toContain("8-QUESTION PLAN");
+    expect(instruction).toContain("Level: hard");
+    expect(instruction).toContain("Count exactly 8 substantive candidate answers");
+    expect(
+      instruction.match(/^\d+\. .+\[(?:remember|understand_apply|analyze_evaluate)\]$/gm),
+    ).toHaveLength(8);
   });
 
   it("offers the ten requested oral-board study topics", () => {
@@ -251,8 +549,7 @@ describe("Pediatric oral-board interviewer", () => {
   it("grades a full exam, and a short one when the interview ended early", () => {
     const evaluation = sampleReport().evaluation;
     expect(interviewEvaluationSchema.parse(evaluation).exchanges).toHaveLength(6);
-    // An interview ended by the end_interview tool is still worth grading on
-    // whatever the candidate answered.
+    // An interview ended explicitly is still worth grading on whatever the candidate answered.
     expect(
       interviewEvaluationSchema.parse({
         ...evaluation,
@@ -265,7 +562,7 @@ describe("Pediatric oral-board interviewer", () => {
     expect(() =>
       interviewEvaluationSchema.parse({
         ...evaluation,
-        exchanges: [...evaluation.exchanges, evaluation.exchanges[0]],
+        exchanges: Array.from({ length: 11 }, () => evaluation.exchanges[0]),
       }),
     ).toThrow();
   });
@@ -290,18 +587,27 @@ describe("Pediatric oral-board interviewer", () => {
       "test-gemini-key",
       PEDIATRIC_TOPICS.find(({ id }) => id === "pulp_therapy")!,
       transcript,
+      8,
+      "hard",
     );
 
     expect(evaluation.exchanges).toHaveLength(3);
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-    // The model must not pad a short interview back up to six invented answers.
+    // The model must not pad a short interview back up to the configured target.
     expect(requestBody.generationConfig.responseJsonSchema.properties.exchanges).toMatchObject({
       minItems: 3,
       maxItems: 3,
     });
     expect(requestBody.systemInstruction.parts[0].text).toContain(
-      "This interview ended after 3 of 6 planned questions",
+      "This interview ended after 3 of 8 planned questions",
     );
+    expect(requestBody.systemInstruction.parts[0].text).toContain(
+      "configured difficulty was hard",
+    );
+    expect(JSON.parse(requestBody.contents[0].parts[0].text).configuration).toEqual({
+      questionCount: 8,
+      difficulty: "hard",
+    });
   });
 
   it("requests a structured Gemini review and preserves the recorded transcript", async () => {
@@ -333,10 +639,11 @@ describe("Pediatric oral-board interviewer", () => {
 
     expect(evaluation.exchanges[0]).toMatchObject(transcript[0]);
     const [requestUrl, requestInit] = fetchMock.mock.calls[0];
-    expect(String(requestUrl)).toContain("/models/gemini-3.1-flash-lite:generateContent");
+    expect(String(requestUrl)).toContain("/models/gemini-3.5-flash-lite:generateContent");
     expect(requestInit?.headers).toMatchObject({
       "x-goog-api-key": "test-gemini-key",
     });
+    expect(requestInit?.signal).toBeInstanceOf(AbortSignal);
     const requestBody = JSON.parse(String(requestInit?.body));
     expect(requestBody.generationConfig).toMatchObject({
       responseMimeType: "application/json",
@@ -349,6 +656,29 @@ describe("Pediatric oral-board interviewer", () => {
     const evaluationInput = JSON.parse(requestBody.contents[0].parts[0].text);
     expect(evaluationInput.topic.competencies).toHaveLength(6);
     expect(evaluationInput.topic.blueprintWeight).toBe(8);
+  });
+
+  it("rejects evaluator output that invents or drops transcript exchanges", async () => {
+    const report = sampleReport();
+    const transcript = report.evaluation.exchanges.map(({ question, answer }) => ({
+      question,
+      answer,
+    }));
+    const shortEvaluation = structuredClone(report.evaluation);
+    shortEvaluation.exchanges.pop();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        candidates: [{ content: { parts: [{ text: JSON.stringify(shortEvaluation) }] } }],
+      }),
+    );
+
+    await expect(
+      evaluateInterview(
+        "test-gemini-key",
+        PEDIATRIC_TOPICS.find(({ id }) => id === "pulp_therapy")!,
+        transcript,
+      ),
+    ).rejects.toThrow("returned 5 exchanges; expected 6");
   });
 
   it("sends examiner follow-ups to the evaluator and restores them verbatim", async () => {
@@ -505,7 +835,7 @@ describe("Pediatric oral-board interviewer", () => {
     });
   });
 
-  it("rolls back both report objects when either R2 write fails", async () => {
+  it("keeps successful deterministic writes in place for an idempotent retry", async () => {
     const report = sampleReport();
     const deleted: string[][] = [];
     const bucket = {
@@ -519,17 +849,86 @@ describe("Pediatric oral-board interviewer", () => {
     } as unknown as R2Bucket;
 
     await expect(storeInterviewReport(bucket, report)).rejects.toThrow("R2 unavailable");
-    expect(deleted).toEqual([[reportObjectKeys(report).json, reportObjectKeys(report).markdown]]);
+    expect(deleted).toEqual([]);
+  });
+
+  it("clones nested exchanges and finalizes one typed report snapshot", async () => {
+    const report = sampleReport();
+    const topic = buildInterviewTopic(["pulp_therapy"]);
+    const transcript = report.evaluation.exchanges.map(({ question, answer, followUps }) => ({
+      question,
+      answer,
+      ...(followUps ? { followUps } : {}),
+    }));
+    const source = [
+      {
+        question: "What is your first step?",
+        answer: "I would assess the child.",
+        followUps: [{ question: "Why?", answer: "To prioritize safety." }],
+      },
+    ];
+    const cloned = cloneInterviewExchanges(source);
+    cloned[0].followUps![0].answer = "Changed after snapshot.";
+    expect(source[0].followUps[0].answer).toBe("To prioritize safety.");
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(report.evaluation) }] } }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(sampleCheatsheet()) }] } }],
+        }),
+      );
+    const storedKeys: string[] = [];
+    const bucket = {
+      put: vi.fn(async (key: string) => {
+        storedKeys.push(key);
+      }),
+    } as unknown as R2Bucket;
+    const retry = async <T>(operation: (attempt: number) => Promise<T>): Promise<T> =>
+      operation(1);
+
+    const finalized = await finalizeInterviewReport(
+      {
+        apiKey: "test-gemini-key",
+        reportId: "report-snapshot",
+        sessionId: "session-snapshot",
+        interviewGeneration: "generation-snapshot",
+        topicIds: ["pulp_therapy"],
+        topic,
+        questionCount: 6,
+        difficulty: "standard",
+        exchanges: transcript,
+      },
+      bucket,
+      retry,
+    );
+
+    expect(finalized.evaluation.exchanges).toHaveLength(transcript.length);
+    expect(finalized.cheatsheet?.headline).toContain("Commit");
+    expect(storedKeys).toEqual([
+      "pediatric-oral-boards/reports/report-snapshot.json",
+      "pediatric-oral-boards/reports/report-snapshot.md",
+      "pediatric-oral-boards/reports/report-snapshot-cheatsheet.md",
+    ]);
   });
 });
 
 function sampleReport(): StoredInterviewReport {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     reportId: "report-123",
     sessionId: "esp32-12345678",
     generatedAt: "2026-08-12T23:00:00.000Z",
-    evaluatorModel: "gemini-3.1-flash-lite",
+    evaluatorModel: "gemini-3.5-flash-lite",
+    configuration: {
+      topicIds: ["pulp_therapy"],
+      questionCount: 6,
+      difficulty: "standard",
+    },
     topic: {
       id: "pulp_therapy",
       label: "Pulp Therapy",
@@ -615,7 +1014,7 @@ describe("Gemini Live turn boundaries", () => {
   });
 
   it("accepts generationComplete once the interview is under way", () => {
-    expect(shouldEndTurn({ generationComplete: true }, false)).toBe(true);
+    expect(shouldEndTurn({ generationComplete: true }, false)).toBe(false);
     expect(shouldEndTurn({ turnComplete: true }, false)).toBe(true);
   });
 
@@ -624,14 +1023,132 @@ describe("Gemini Live turn boundaries", () => {
     expect(shouldEndTurn({}, false)).toBe(false);
   });
 
-  it("is self-deduplicating only during the opening handshake", () => {
-    const pair = [{ generationComplete: true }, { turnComplete: true }];
-    // During the handshake the predicate alone ends the turn exactly once, so
-    // a stage transition cannot be driven twice by a single response.
-    expect(pair.filter((signal) => shouldEndTurn(signal, true))).toHaveLength(1);
-    // Afterwards both signals qualify. Deduplication is the caller's job via
-    // responseCompletionHandled; anything that re-arms that flag mid-response
-    // reintroduces the double-advance this module exists to prevent.
-    expect(pair.filter((signal) => shouldEndTurn(signal, false))).toHaveLength(2);
+  it("waits through generationComplete and late content for turnComplete", () => {
+    const stream = [
+      { generationComplete: true },
+      { text: "late audio/transcript content" },
+      { turnComplete: true },
+    ];
+    expect(stream.filter((signal) => shouldEndTurn(signal, false))).toHaveLength(1);
+    expect(shouldEndTurn(stream[0], true)).toBe(false);
+    expect(shouldEndTurn(stream[2], true)).toBe(true);
+  });
+});
+
+describe("Gemini opening speech fallback", () => {
+  it("accepts bounded mono WAV output from the current TTS model", () => {
+    const pcm = Uint8Array.from([1, 0, 2, 0]);
+    expect(GEMINI_TTS_MODEL).toBe("gemini-3.1-flash-tts-preview");
+    expect(
+      decodeOpeningSpeech({
+        channels: 1,
+        data: Buffer.from(pcm16Wav(pcm)).toString("base64"),
+        mime_type: "audio/wav",
+        sample_rate: 24_000,
+      }),
+    ).toEqual({ pcm, sampleRate: 24_000 });
+  });
+
+  it("accepts bounded raw L16 with or without response metadata", () => {
+    const pcm = Uint8Array.from([1, 0, 2, 0]);
+    expect(
+      decodeOpeningSpeech({
+        channels: 1,
+        data: Buffer.from(pcm).toString("base64"),
+        mime_type: "audio/l16",
+        sample_rate: 24_000,
+      }),
+    ).toEqual({ pcm, sampleRate: 24_000 });
+    expect(
+      decodeOpeningSpeech({
+        channels: 1,
+        data: Buffer.from(pcm).toString("base64"),
+      }),
+    ).toEqual({ pcm, sampleRate: 24_000 });
+    expect(
+      decodeOpeningSpeech({
+        channels: 1,
+        data: Buffer.from(pcm).toString("base64"),
+        mime_type: "audio/L16;codec=pcm;rate=24000;channels=1;bits=16",
+      }),
+    ).toEqual({ pcm, sampleRate: 24_000 });
+  });
+
+  it("requests private audio through the current Interactions contract", () => {
+    expect(openingSpeechInteraction("Here is your case.")).toEqual({
+      model: "gemini-3.1-flash-tts-preview",
+      input: "Here is your case.",
+      store: false,
+      response_format: {
+        type: "audio",
+      },
+      generation_config: {
+        speech_config: [{ voice: "Charon" }],
+      },
+    });
+    expect(OPENING_TTS_REQUEST_OPTIONS).toEqual({ timeout: 30_000, maxRetries: 1 });
+  });
+
+  it("rejects malformed or incompatible TTS output", () => {
+    const validData = Buffer.from([1, 0]).toString("base64");
+    expect(() => decodeOpeningSpeech(undefined)).toThrow(/no audio data/i);
+    expect(() =>
+      decodeOpeningSpeech({ data: validData, channels: 2, sample_rate: 24_000 }),
+    ).toThrow(/non-mono/i);
+    expect(() =>
+      decodeOpeningSpeech({ data: validData, mime_type: "audio/mp3", sample_rate: 24_000 }),
+    ).toThrow(/unexpected audio format/i);
+    expect(() =>
+      decodeOpeningSpeech({
+        data: Buffer.from([1]).toString("base64"),
+        mime_type: "audio/l16",
+        sample_rate: 24_000,
+      }),
+    ).toThrow(/invalid or oversized/i);
+  });
+});
+
+describe("Gemini Live lifecycle guards", () => {
+  it("validates bounded, even-length PCM16 input", () => {
+    expect(isValidPcm16Input(new ArrayBuffer(2))).toBe(true);
+    expect(isValidPcm16Input(new ArrayBuffer(0))).toBe(false);
+    expect(isValidPcm16Input(new ArrayBuffer(3))).toBe(false);
+    expect(isValidPcm16Input(new ArrayBuffer(MAX_INPUT_PCM_BYTES))).toBe(true);
+    expect(isValidPcm16Input(new ArrayBuffer(MAX_INPUT_PCM_BYTES + 2))).toBe(false);
+  });
+
+  it("bounds reconnect delay and gives a deterministic resume prompt", () => {
+    expect(liveReconnectDelayMs(1, 350)).toBe(350);
+    expect(liveReconnectDelayMs(99, 350)).toBe(1_400);
+    const turn = geminiReconnectTurn("Assess the airway", 2, 6).turns;
+    expect(turn).toContain("persisted 2 of 6");
+    expect(turn).toContain("already heard the persisted case and readiness prompt");
+    expect(turn).toContain("Speak only the single pending clinical question once");
+    expect(turn).toContain(
+      "<PENDING_CLINICAL_QUESTION>Assess the airway</PENDING_CLINICAL_QUESTION>",
+    );
+    expect(turn).toContain("Do not repeat or summarize the case");
+  });
+
+  it("allows real-time PCM jitter but rejects a one-second audio flood", () => {
+    const guard = new PcmInputRateGuard();
+    const frameBytes = 4_800;
+    const startedAt = 1_000;
+    const acceptedFrames = Math.floor(MAX_INPUT_PCM_BYTES_PER_SECOND / frameBytes);
+    for (let index = 0; index < acceptedFrames; index += 1) {
+      expect(guard.accept(frameBytes, startedAt + index)).toBe(true);
+    }
+    expect(guard.accept(frameBytes, startedAt + acceptedFrames)).toBe(false);
+    expect(guard.accept(frameBytes, startedAt + 1_001)).toBe(true);
+  });
+
+  it("bounds incremental transcripts and provider audio before decoding", () => {
+    expect(appendBoundedTranscript("abcd", "efgh", 6)).toBe("abcd e");
+    expect(appendBoundedTranscript("Here is", "your case.")).toBe("Here is your case.");
+    expect(appendBoundedTranscript("Here is your case", ".")).toBe("Here is your case.");
+    expect(appendBoundedTranscript("abcdef", "ignored", 6)).toBe("abcdef");
+    expect(isBoundedProviderAudio("AA==")).toBe(true);
+    expect(isBoundedProviderAudio("")).toBe(false);
+    expect(isBoundedProviderAudio("A".repeat(512 * 1024 + 1))).toBe(false);
   });
 });

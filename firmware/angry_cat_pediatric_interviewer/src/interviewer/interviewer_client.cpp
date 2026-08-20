@@ -62,6 +62,8 @@ constexpr uint8_t kSpeechStartFrames = 3;
 // answer such as "yes" is not swallowed before speech detection sees it.
 constexpr uint32_t kMicrophoneSettleMs = 120;
 constexpr uint32_t kAutomaticTurnSilenceMs = 5'000;
+constexpr uint8_t kDeviceQuestionCount = 6;
+constexpr char kDeviceDifficulty[] = "standard";
 constexpr uint32_t kReportConnectTimeoutMs = 10'000;
 constexpr uint32_t kReportResponseTimeoutMs = 15'000;
 constexpr int kMaximumReportBytes = 128 * 1024;
@@ -730,6 +732,7 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
       InterviewerEvent event;
       event.type = InterviewerEventType::InterviewState;
       event.questionNumber = constrain(document["questionNumber"] | 0, 0, 255);
+      event.answerCount = constrain(document["answerCount"] | 0, 0, 255);
       event.totalQuestions = constrain(document["totalQuestions"] | 6, 1, 255);
       snprintf(event.phase, sizeof(event.phase), "%s", document["phase"] | "");
       snprintf(event.domain, sizeof(event.domain), "%s",
@@ -820,7 +823,9 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
   startCall["type"] = "start_call";
   startCall["preferred_format"] = "pcm16";
   startCall["topic_id"] = topicId == nullptr ? "behavior_guidance" : topicId;
-  char startPayload[128];
+  startCall["question_count"] = kDeviceQuestionCount;
+  startCall["difficulty"] = kDeviceDifficulty;
+  char startPayload[192];
   serializeJson(startCall, startPayload, sizeof(startPayload));
   client.sendTXT(startPayload);
 

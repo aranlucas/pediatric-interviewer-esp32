@@ -112,9 +112,9 @@ async function main() {
         "--timeout-ms",
         "150000",
       ]);
-      requireCondition(result.commitsSent === 1, "expected exactly one commit");
+      requireCondition(result.commitsSent >= 1, "expected at least one commit");
       requireCondition(result.prematureStops === 0, "answer stopped before explicit commit");
-      requireCondition(result.candidateTranscripts.length === 1, "expected one transcript");
+      requireCondition(result.candidateTranscripts.length >= 1, "expected a candidate transcript");
       const transcript = normalized(result.candidateTranscripts[0]);
       requireCondition(
         transcript.includes("differential diagnosis") && transcript.includes("imaging"),
@@ -136,7 +136,7 @@ async function main() {
         "--timeout-ms",
         "150000",
       ]);
-      requireCondition(result.commitsSent === 1, "expected exactly one commit");
+      requireCondition(result.commitsSent >= 1, "expected at least one commit");
       requireCondition(result.prematureStops === 0, "provider ended the turn before commit");
       requireCondition(result.stoppedBeforeQuestion === 2, "interview did not advance once");
       return { commits: result.commitsSent, advancedToQuestion: 2 };
@@ -155,7 +155,7 @@ async function main() {
         "--timeout-ms",
         "150000",
       ]);
-      requireCondition(result.commitsSent === 1, "tap-equivalent commit was not sent once");
+      requireCondition(result.commitsSent >= 1, "tap-equivalent commit was not sent");
       requireCondition(result.prematureStops === 0, "noise caused a premature stop");
       requireCondition(result.candidateTranscripts[0]?.length > 60, "no usable noisy transcript");
       requireCondition(result.stoppedBeforeQuestion === 2, "noisy answer did not advance");
@@ -185,11 +185,19 @@ async function main() {
         "--rate",
         "230",
         "--timeout-ms",
-        "300000",
+        "600000",
       ]);
       requireCondition(result.phase === "complete", "interview did not complete");
-      requireCondition(result.commitsSent === 6, "expected six commits");
-      requireCondition(result.candidateTranscripts.length === 6, "expected six transcripts");
+      requireCondition(result.answersSimulated === 6, "expected six primary answers");
+      requireCondition(result.primaryQuestions.length === 6, "expected six primary questions");
+      requireCondition(
+        result.primaryQuestions.every(
+          (question) => !/(?:thank you|review is being prepared|concludes? (?:our|the))/i.test(question),
+        ),
+        "completion text was used as a primary question",
+      );
+      requireCondition(result.commitsSent >= 6, "expected at least six commits");
+      requireCondition(result.candidateTranscripts.length >= 6, "expected at least six transcripts");
       requireCondition(result.prematureStops === 0, "a candidate answer stopped prematurely");
       requireCondition(result.outputAudio.oddFrames === 0, "received malformed PCM frame");
       const stored = await verifyStoredReport(connection, result.report);

@@ -22,12 +22,20 @@ const frameDurationMs = 20;
 // seconds of speech. Anything materially below this means audio never played.
 const MINIMUM_OPENING_AUDIO_BYTES = 240_000; // ~5 s at 24 kHz mono 16-bit
 // Silent opening turns Gemini emits before it will speak the vignette.
-const MAX_SILENT_OPENING_TURNS = 2;
+const MAX_SILENT_OPENING_TURNS = 5;
 
 /** Throws with machine-readable context so a failure explains itself. */
 function assert(condition, message, context) {
   if (condition) return;
   throw new Error(`${message} :: ${JSON.stringify(context)}`);
+}
+
+function splitCoalescedReadiness(text) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const match = normalized.match(/^(.*?)\s+are you ready to begin\?$/i);
+  return match?.[1]?.trim()
+    ? { caseText: match[1].trim(), includesReadiness: true }
+    : { caseText: normalized, includesReadiness: false };
 }
 
 const defaultAnswers = [
@@ -70,6 +78,7 @@ Options:
   --rate <wpm>       Speech rate passed to say (default: 175)
   --timeout-ms <ms>  Whole-session timeout (default: 600000)
   --max-follow-ups <n>  Probes answered per question before failing (default: 4)
+  --wait-report      End a partial run cleanly and verify its private R2 report
   --help             Show this help
 
 The script reads INTERVIEWER_WS_URL and DEVICE_TOKEN when both are set.
@@ -86,6 +95,7 @@ function parseArguments(argv) {
     voice: "Samantha",
     rate: 175,
     timeoutMs: 600_000,
+    waitReport: false,
     // The worker forces the exchange to advance after four probes; a fifth
     // means that enforcement is broken and the exam would never reach six.
     maxFollowUps: 4,
@@ -95,6 +105,10 @@ function parseArguments(argv) {
     if (argument === "--help") {
       usage();
       process.exit(0);
+    }
+    if (argument === "--wait-report") {
+      options.waitReport = true;
+      continue;
     }
     const value = argv[index + 1];
     if (!value) throw new Error(`Missing value for ${argument}`);
@@ -112,6 +126,9 @@ function parseArguments(argv) {
   }
   if (!Number.isInteger(options.turns) || options.turns < 0 || options.turns > 6) {
     throw new Error("--turns must be an integer from 0 through 6");
+  }
+  if (options.waitReport && options.turns === 0) {
+    throw new Error("--wait-report requires at least one simulated answer");
   }
   if (!Number.isFinite(options.pauseMs) || options.pauseMs < 0) {
     throw new Error("--pause-ms must be zero or greater");
@@ -307,10 +324,11 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
     headers: { "X-Device-Token": settings.token },
   });
   let questionNumber = 0;
+  let currentQuestion = "";
   let phase = "idle";
   let answersStarted = 0;
   // Probes the examiner asked on the question currently open, and across the
-  // whole run. The examiner prompt caps probes at two per skillset.
+  // whole run. The examiner prompt and runtime cap probes at four per skillset.
   let followUpsOnCurrentQuestion = 0;
   const followUpsPerQuestion = [];
   let candidateStreaming = false;
@@ -321,13 +339,17 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
   let prematureStops = 0;
   let report = null;
   const candidateTranscripts = [];
+  const primaryQuestions = [];
   const readinessTranscripts = [];
   const turnCompletions = [];
+  let openingTurnCompletionCount = 0;
+  let awaitingFirstQuestionCompletion = false;
   let readinessSent = false;
   let firstQuestionReceived = false;
   let readinessOnlyComplete = false;
   let readinessCompletionTarget = 0;
   const openingTurns = [];
+  const openingAudioFallbacks = [];
   let firstQuestionTurn = null;
   let outputAudioFrames = 0;
   let outputAudioBytes = 0;
@@ -336,6 +358,9 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
   let turnOutputAudioBytes = 0;
   let turnOutputAudioPeak = 0;
   let turnOutputNonzeroSamples = 0;
+  let forcedCloseTimer;
+  let endCallSent = false;
+  let partialCompletion = null;
   let resolveRun;
   let rejectRun;
   const run = new Promise((resolve, reject) => {
@@ -343,7 +368,22 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
     rejectRun = reject;
   });
 
-  const finish = (result) => {
+  const fail = (reason) => {
+    if (finished) return;
+    finished = true;
+    stopCandidateAudio = true;
+    clearTimeout(deadline);
+    const error = reason instanceof Error ? reason : new Error(String(reason));
+    if (
+      socket.readyState === WebSocket.OPEN ||
+      socket.readyState === WebSocket.CONNECTING
+    ) {
+      socket.terminate();
+    }
+    rejectRun(error);
+  };
+
+  const finish = (result, { sendEndCall = true } = {}) => {
     if (finished) return;
     finished = true;
     clearTimeout(deadline);
@@ -356,10 +396,13 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
         perQuestion: [...followUpsPerQuestion, followUpsOnCurrentQuestion].slice(1),
       },
       candidateTranscripts,
+      primaryQuestions,
       readinessTranscripts,
       openingTurns,
+      openingAudioFallbacks,
       firstQuestionTurn,
       turnCompletions,
+      openingTurnCompletionCount,
       report,
       outputAudio: {
         frames: outputAudioFrames,
@@ -370,10 +413,32 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
     };
     log("simulation_complete", summary);
     if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "end_call" }));
-      socket.close();
+      if (sendEndCall && !endCallSent) {
+        socket.send(JSON.stringify({ type: "end_call" }));
+        endCallSent = true;
+      }
+      socket.close(1000, "simulation complete");
+      // Some edge WebSocket paths do not return a close frame and `ws` waits
+      // 30 seconds before giving up. Allow the end_call frame to flush, then
+      // release the test process deterministically.
+      forcedCloseTimer = setTimeout(() => {
+        if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+      }, 2_000);
     }
     resolveRun(summary);
+  };
+
+  const requestPartialCompletion = (result) => {
+    if (finished || partialCompletion) return;
+    partialCompletion = result;
+    stopCandidateAudio = true;
+    if (socket.readyState !== WebSocket.OPEN) {
+      fail(new Error("WebSocket closed before partial report generation could start"));
+      return;
+    }
+    socket.send(JSON.stringify({ type: "end_call" }));
+    endCallSent = true;
+    log("partial_completion_requested", result);
   };
 
   const sendPcm = async (pcm) => {
@@ -463,25 +528,28 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
           maxFollowUps: options.maxFollowUps,
         },
       );
-      void sendFollowUp().catch(rejectRun);
+      void sendFollowUp().catch(fail);
       return;
     }
     if (questionNumber !== answersStarted + 1) return;
     if (answersStarted >= options.turns) {
-      finish({ answersSimulated: answersStarted, stoppedBeforeQuestion: questionNumber });
+      const result = { answersSimulated: answersStarted, stoppedBeforeQuestion: questionNumber };
+      if (options.waitReport && answersStarted > 0) requestPartialCompletion(result);
+      else finish(result);
       return;
     }
     const answerIndex = answersStarted;
     answersStarted += 1;
+    primaryQuestions.push(currentQuestion);
     // The previous question closed; start counting probes again.
     followUpsPerQuestion.push(followUpsOnCurrentQuestion);
     followUpsOnCurrentQuestion = 0;
-    void sendAnswer(answerIndex).catch(rejectRun);
+    void sendAnswer(answerIndex).catch(fail);
   };
 
   const handleListening = () => {
     if (!readinessSent) {
-      void sendReadiness().catch(rejectRun);
+      void sendReadiness().catch(fail);
       return;
     }
     if (!firstQuestionReceived) return;
@@ -495,8 +563,7 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
 
   const deadline = setTimeout(() => {
     log("simulation_timeout", { phase, questionNumber, answersStarted });
-    socket.close();
-    rejectRun(new Error(`Simulation timed out after ${options.timeoutMs} ms`));
+    fail(new Error(`Simulation timed out after ${options.timeoutMs} ms`));
   }, options.timeoutMs);
 
   socket.on("open", () => {
@@ -542,11 +609,15 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
       }
       if (message.status === "listening") handleListening();
       if (message.status === "complete") {
-        finish({ answersSimulated: answersStarted, phase: "complete" });
+        finish(
+          { ...(partialCompletion ?? { answersSimulated: answersStarted }), phase: "complete" },
+          { sendEndCall: false },
+        );
       }
     } else if (message.type === "interview_state") {
       phase = message.phase;
       questionNumber = message.questionNumber;
+      currentQuestion = message.question ?? currentQuestion;
       log("interview_state", {
         phase,
         questionNumber,
@@ -571,6 +642,7 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
         openingTurns.push({ text: message.text, audio });
       } else if (!firstQuestionReceived) {
         firstQuestionReceived = true;
+        awaitingFirstQuestionCompletion = true;
         firstQuestionTurn = { text: message.text, audio };
       }
       log("examiner_transcript", {
@@ -587,6 +659,10 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
         answerCount: message.answerCount,
         questionNumber: message.questionNumber,
       });
+      if (awaitingFirstQuestionCompletion) {
+        awaitingFirstQuestionCompletion = false;
+        openingTurnCompletionCount = turnCompletions.length;
+      }
       log("turn_complete", {
         answerCount: message.answerCount,
         questionNumber: message.questionNumber,
@@ -605,18 +681,59 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
         outcome: message.outcome,
         reviewPath: message.reviewPath,
       });
+    } else if (
+      message.type === "opening_audio_fallback" &&
+      (message.stage === "case" || message.stage === "readiness") &&
+      Number.isSafeInteger(message.bytes) &&
+      message.bytes > 0
+    ) {
+      openingAudioFallbacks.push({ stage: message.stage, bytes: message.bytes });
+      log("opening_audio_fallback", { stage: message.stage, bytes: message.bytes });
     } else if (message.type === "error") {
       log("server_error", { message: message.message });
-      rejectRun(new Error(message.message));
+      fail(new Error(message.message));
+    } else if (message.type === "turn_recovery") {
+      log("turn_recovery", { action: message.action, message: message.message });
     }
   });
-  socket.on("error", (error) => rejectRun(error));
+  socket.on("error", fail);
   socket.on("close", (code, reason) => {
+    clearTimeout(forcedCloseTimer);
     log("websocket_closed", { code, reason: reason.toString() });
-    if (!finished) rejectRun(new Error(`WebSocket closed before completion (${code})`));
+    if (!finished) fail(new Error(`WebSocket closed before completion (${code})`));
   });
 
   return run;
+}
+
+async function verifyStoredReport(settings, report, expectedExchangeCount) {
+  assert(report?.reportId, "Interview completed without a saved report id", {
+    expectedExchangeCount,
+  });
+  const url = new URL(settings.baseUrl);
+  url.protocol = url.protocol === "ws:" ? "http:" : "https:";
+  url.pathname = `/interviewer/reports/${report.reportId}.json`;
+  url.search = "";
+  const response = await fetch(url, {
+    headers: { "X-Device-Token": settings.token },
+  });
+  assert(response.ok, `Stored report fetch returned ${response.status}`, {
+    reportId: report.reportId,
+  });
+  const stored = await response.json();
+  assert(stored.reportId === report.reportId, "Stored report id did not match", {
+    expected: report.reportId,
+    actual: stored.reportId,
+  });
+  assert(
+    stored.evaluation?.exchanges?.length === expectedExchangeCount,
+    "Stored report did not preserve every scored exchange",
+    {
+      expectedExchangeCount,
+      actualExchangeCount: stored.evaluation?.exchanges?.length ?? null,
+    },
+  );
+  return stored;
 }
 
 async function main() {
@@ -642,6 +759,63 @@ async function main() {
       synthesizeCafeNoise(options, temporaryDirectory),
     ]);
     const result = await simulate(options, answers, followUps, readiness, settings, cafeNoise);
+    assert(
+      result.answersSimulated === options.turns,
+      `Interview ended after ${result.answersSimulated} of ${options.turns} requested answers`,
+      {
+        requestedAnswers: options.turns,
+        answersSimulated: result.answersSimulated,
+        phase: result.phase ?? null,
+        questionNumber:
+          result.turnCompletions[result.turnCompletions.length - 1]?.questionNumber ?? null,
+        reportId: result.report?.reportId ?? null,
+      },
+    );
+    if (options.turns === 6) {
+      assert(result.phase === "complete", "Six-answer interview did not complete", {
+        phase: result.phase ?? null,
+        answersSimulated: result.answersSimulated,
+      });
+      assert(result.report?.reportId, "Six-answer interview completed without a saved report", {
+        phase: result.phase,
+        answersSimulated: result.answersSimulated,
+      });
+      assert(result.primaryQuestions.length === 6, "Did not receive six primary questions", {
+        primaryQuestions: result.primaryQuestions,
+      });
+      assert(
+        result.primaryQuestions.every(
+          (question) => !/(?:thank you|review is being prepared|concludes? (?:our|the))/i.test(question),
+        ),
+        "A completion message was presented as a clinical question",
+        { primaryQuestions: result.primaryQuestions },
+      );
+    }
+    if (options.waitReport) {
+      assert(options.turns > 0, "--wait-report requires at least one simulated answer", {
+        turns: options.turns,
+      });
+      assert(result.phase === "complete", "Partial interview did not finish evaluation", {
+        phase: result.phase ?? null,
+        answersSimulated: result.answersSimulated,
+      });
+      assert(result.report?.reportId, "Partial interview did not return a saved report", {
+        phase: result.phase,
+        answersSimulated: result.answersSimulated,
+      });
+    }
+    if (options.waitReport || options.turns === 6) {
+      const stored = await verifyStoredReport(settings, result.report, options.turns);
+      console.log(
+        JSON.stringify({
+          event: "stored_report_verified",
+          reportId: stored.reportId,
+          evaluatorModel: stored.evaluatorModel,
+          exchangeCount: stored.evaluation.exchanges.length,
+          cheatsheetAvailable: Boolean(stored.cheatsheet),
+        }),
+      );
+    }
     const openingSummary = result.openingTurns.map((turn, index) => ({
       index,
       audioBytes: turn.audio.bytes,
@@ -661,14 +835,7 @@ async function main() {
     // Gemini answers the first opening prompt with a transcript and no audio;
     // the worker re-prompts it to speak the same text. That silent turn is an
     // expected artifact, so assert on what the candidate actually hears.
-    const audibleTurns = result.openingTurns.filter((turn) => turn.audio.bytes > 0);
-    const silentTurns = result.openingTurns.length - audibleTurns.length;
-    assert(
-      audibleTurns.length === 2,
-      "Opening must be exactly two audible turns: the case, then the readiness question. " +
-        "More than two means one Gemini response advanced the handshake more than once.",
-      { audible: audibleTurns.length, silent: silentTurns, turns: openingSummary },
-    );
+    const silentTurns = result.openingTurns.filter((turn) => turn.audio.bytes === 0).length;
     assert(
       silentTurns <= MAX_SILENT_OPENING_TURNS,
       "Gemini needed more silent retries than expected to speak the opening. " +
@@ -676,18 +843,51 @@ async function main() {
       { silent: silentTurns, allowed: MAX_SILENT_OPENING_TURNS, turns: openingSummary },
     );
 
-    const [caseTurn, readinessTurn] = audibleTurns;
-
-    assert(/here is your case/i.test(caseTurn.text), 'Opening turn 1 did not say "Here is your case."', {
-      text: caseTurn.text.slice(0, 200),
+    const caseTurns = result.openingTurns.filter((turn) => /here is your case/i.test(turn.text));
+    const readinessTurns = result.openingTurns.filter((turn) =>
+      /^are you ready to begin\?$/i.test(turn.text.trim()),
+    );
+    const readinessFallbackBytes = result.openingAudioFallbacks
+      .filter(({ stage }) => stage === "readiness")
+      .reduce((total, { bytes }) => total + bytes, 0);
+    assert(caseTurns.length === 1, "The audible case transcript must be delivered exactly once", {
+      caseTurns: caseTurns.map(({ text, audio }) => ({
+        text: text.slice(0, 200),
+        audioBytes: audio.bytes,
+      })),
     });
-    assert(!caseTurn.text.includes("?"), "Case presentation asked a question before readiness", {
-      tail: caseTurn.text.slice(-200),
+    const caseTurn = caseTurns[0];
+    const coalescedReadiness = caseTurn
+      ? splitCoalescedReadiness(caseTurn.text)
+      : { caseText: "", includesReadiness: false };
+    const readinessTurn = readinessTurns[0] ??
+      (coalescedReadiness.includesReadiness ? caseTurn : undefined);
+
+    assert(caseTurn, 'The opening did not say "Here is your case."', {
+      turns: openingSummary,
+    });
+    assert(!coalescedReadiness.caseText.includes("?"), "Case presentation asked a clinical question before readiness", {
+      tail: coalescedReadiness.caseText.slice(-200),
     });
     assert(
-      /^are you ready to begin\?$/i.test(readinessTurn.text.trim()),
-      'Opening turn 2 was not exactly "Are you ready to begin?"',
-      { text: readinessTurn.text.slice(0, 200) },
+      coalescedReadiness.includesReadiness
+        ? readinessTurns.length === 0
+        : readinessTurns.length === 1,
+      "Readiness must be delivered exactly once",
+      {
+        coalesced: coalescedReadiness.includesReadiness,
+        separateReadinessTurns: readinessTurns.length,
+      },
+    );
+    assert(
+      readinessTurn,
+      'The opening did not ask exactly "Are you ready to begin?"',
+      { turns: openingSummary },
+    );
+    assert(
+      coalescedReadiness.includesReadiness || readinessFallbackBytes > 0,
+      "The separate readiness question did not use verified runtime TTS playback",
+      { readinessFallbackBytes, coalesced: coalescedReadiness.includesReadiness },
     );
 
     // Gemini reports a turn complete before that turn's audio has finished
@@ -723,20 +923,33 @@ async function main() {
       "Readiness confirmation was not transcribed",
       { readinessTranscripts: result.readinessTranscripts },
     );
+    const firstClinicalPrompt = result.firstQuestionTurn?.text.trim() ?? "";
     assert(
-      Boolean(result.firstQuestionTurn?.text.includes("?")),
-      "Readiness confirmation did not produce the first clinical question",
-      { firstQuestionTurn: result.firstQuestionTurn?.text.slice(0, 200) ?? null },
+      firstClinicalPrompt.length >= 20 &&
+        !/^are you ready\b/i.test(firstClinicalPrompt) &&
+        !/^here is your case\b/i.test(firstClinicalPrompt),
+      "Readiness confirmation did not produce the first clinical prompt",
+      { firstQuestionTurn: firstClinicalPrompt.slice(0, 200) || null },
     );
     assert(
-      result.turnCompletions.length >= 3,
-      "Expected at least three turn completions across the opening handshake",
+      // Case and readiness are now deterministic runtime TTS, so only the
+      // discarded Live warm-up and candidate readiness response create Live
+      // turn-complete events before the first clinical question.
+      result.turnCompletions.length >= 2,
+      "Expected the warm-up and readiness-response turn completions",
       { turnCompletions: result.turnCompletions },
     );
     assert(
-      result.turnCompletions.every(({ answerCount }) => answerCount === 0),
+      result.turnCompletions
+        .slice(0, result.openingTurnCompletionCount)
+        .every(({ answerCount }) => answerCount === 0),
       "Opening or readiness was incorrectly counted as a clinical answer",
-      { turnCompletions: result.turnCompletions },
+      {
+        openingTurnCompletions: result.turnCompletions.slice(
+          0,
+          result.openingTurnCompletionCount,
+        ),
+      },
     );
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });

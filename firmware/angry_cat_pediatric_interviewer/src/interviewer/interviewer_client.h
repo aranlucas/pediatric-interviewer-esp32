@@ -57,6 +57,7 @@ struct DeviceInterviewReport {
 struct InterviewerEvent {
   InterviewerEventType type = InterviewerEventType::Connected;
   uint8_t questionNumber = 0;
+  uint8_t answerCount = 0;
   uint8_t totalQuestions = 6;
   uint32_t latencyMs = 0;
   char phase[16] = {};
