@@ -567,6 +567,23 @@ describe("Pediatric oral-board interviewer", () => {
     ).toThrow();
   });
 
+  it("accepts descriptive skillset labels longer than 120 characters", () => {
+    const evaluation = structuredClone(sampleReport().evaluation);
+    const descriptiveSkillset =
+      "Assessment and management across clinical findings, caregiver communication, patient safety, informed consent, follow-up, and escalation planning";
+    expect(descriptiveSkillset.length).toBeGreaterThan(120);
+    evaluation.scoreSummary[1] = {
+      ...evaluation.scoreSummary[0],
+      skillset: descriptiveSkillset,
+    };
+    evaluation.exchanges[1].skillset = descriptiveSkillset;
+
+    const parsed = interviewEvaluationSchema.parse(evaluation);
+
+    expect(parsed.scoreSummary[1].skillset).toBe(descriptiveSkillset);
+    expect(parsed.exchanges[1].skillset).toBe(descriptiveSkillset);
+  });
+
   it("pins the response schema to the number of exchanges actually answered", async () => {
     const report = sampleReport();
     const transcript = report.evaluation.exchanges.slice(0, 3).map(({ question, answer }) => ({

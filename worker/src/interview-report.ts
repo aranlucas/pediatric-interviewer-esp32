@@ -72,7 +72,7 @@ export const interviewExchangeSchema = z.object({
 export const evaluatedExchangeSchema = interviewExchangeSchema.extend({
   feedback: z.string().min(1).max(2_000),
   idealResponse: z.string().min(1).max(4_000),
-  skillset: z.string().min(1).max(120),
+  skillset: z.string().min(1),
   skill: skillSchema,
   score: z.number().int().min(1).max(3),
 });
@@ -83,7 +83,7 @@ export const interviewEvaluationSchema = z.object({
   scoreSummary: z
     .array(
       z.object({
-        skillset: z.string().min(1).max(120),
+        skillset: z.string().min(1),
         skill: skillSchema,
         score: z.number().int().min(1).max(3),
         rationale: z.string().min(1).max(1_000),
