@@ -1,4 +1,5 @@
 import { routeAgentRequest } from "agents";
+import { Hono } from "hono";
 
 import {
   interviewerLobbyKind,
@@ -10,9 +11,8 @@ import { workerLog } from "./log";
 type WorkerEnv = Env;
 
 const DURABLE_OBJECT_ID_PATTERN = /^[0-9a-f]{64}$/i;
-const REPORT_PATH_PREFIX = "/interviewer/reports/";
-const REPORT_PATH_PATTERN =
-  /^\/interviewer\/reports\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(-cheatsheet)?\.(json|md)$/i;
+const REPORT_ARTIFACT_PATTERN =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(-cheatsheet)?\.(json|md)$/i;
 const SECURITY_HEADERS = {
   "Cache-Control": "no-store",
   "X-Content-Type-Options": "nosniff",
@@ -68,7 +68,13 @@ async function verifyDeviceToken(provided: string | null, expected: string): Pro
     crypto.subtle.digest("SHA-256", encoder.encode(provided)),
     crypto.subtle.digest("SHA-256", encoder.encode(expected)),
   ]);
-  return crypto.subtle.timingSafeEqual(providedHash, expectedHash);
+  const providedBytes = new Uint8Array(providedHash);
+  const expectedBytes = new Uint8Array(expectedHash);
+  let difference = 0;
+  for (let index = 0; index < expectedBytes.length; index += 1) {
+    difference |= providedBytes[index] ^ expectedBytes[index];
+  }
+  return difference === 0;
 }
 
 async function allowConnectionAttempt(env: WorkerEnv, key: string): Promise<boolean> {
@@ -120,121 +126,124 @@ async function authorizedReport(
   return { object: await env.INTERVIEW_REPORTS.get(key) };
 }
 
-export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
-    const url = new URL(request.url);
-    const path = url.pathname;
+const app = new Hono<{ Bindings: WorkerEnv }>();
 
-    const reportMatch =
-      request.method === "GET" && path.startsWith(REPORT_PATH_PREFIX)
-        ? REPORT_PATH_PATTERN.exec(path)
-        : null;
-    if (reportMatch) {
-      const [, rawReportId, cheatsheetSuffix, rawFormat] = reportMatch;
-      const reportId = rawReportId.toLowerCase();
-      const format = rawFormat.toLowerCase();
-      // The cheat sheet is markdown only; there is no JSON variant of it.
-      if (cheatsheetSuffix && format !== "md") {
-        return errorResponse("report_not_found", 404);
+function healthResponse(): Response {
+  return json({
+    ok: true,
+    protocolVersion: 2,
+    capabilities: {
+      deviceWebSocket: true,
+      signedWebWebSocket: true,
+      privateReports: true,
+      reportRecovery: true,
+    },
+  });
+}
+
+app.get("/health", healthResponse);
+app.get("/interviewer/health", healthResponse);
+
+app.get("/interviewer/reports/:artifact", async (context) => {
+  const reportMatch = REPORT_ARTIFACT_PATTERN.exec(context.req.param("artifact"));
+  if (!reportMatch) return errorResponse("report_not_found", 404);
+
+  const [, rawReportId, cheatsheetSuffix, rawFormat] = reportMatch;
+  const reportId = rawReportId.toLowerCase();
+  const format = rawFormat.toLowerCase();
+  // The cheat sheet is markdown only; there is no JSON variant of it.
+  if (cheatsheetSuffix && format !== "md") {
+    return errorResponse("report_not_found", 404);
+  }
+  const suffix = cheatsheetSuffix ? "-cheatsheet" : "";
+  const key = `pediatric-oral-boards/reports/${reportId}${suffix}.${format}`;
+  const access = await authorizedReport(context.req.raw, context.env, key);
+  if (!access) return unauthorizedResponse();
+  if (!access.object) return errorResponse("report_not_found", 404);
+
+  const headers = new Headers({
+    "Content-Disposition": `attachment; filename="pediatric-oral-boards-${reportId}${suffix}.${format}"`,
+    ETag: access.object.httpEtag,
+  });
+  access.object.writeHttpMetadata(headers);
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("X-Content-Type-Options", "nosniff");
+  return new Response(access.object.body, { headers });
+});
+
+app.post("/interviewer/recover-report", async (context) => {
+  const request = context.req.raw;
+  const env = context.env;
+  if (!(await verifyDeviceToken(requestDeviceHeaderToken(request), env.DEVICE_TOKEN))) {
+    return unauthorizedResponse();
+  }
+  const durableObjectId = request.headers.get("X-Durable-Object-Id") ?? "";
+  if (!DURABLE_OBJECT_ID_PATTERN.test(durableObjectId)) {
+    return errorResponse("invalid_durable_object_id", 400);
+  }
+  const id = env.PEDIATRIC_INTERVIEWER.idFromString(durableObjectId);
+  const stub = env.PEDIATRIC_INTERVIEWER.get(id);
+  return stub.fetch(
+    new Request("https://internal/recover-report", {
+      method: "POST",
+      headers: { "x-partykit-room": `recovery-${durableObjectId.slice(0, 8)}` },
+    }),
+  );
+});
+
+app.notFound(async (context) => {
+  const request = context.req.raw;
+  const env = context.env;
+  const routed = await routeAgentRequest(request, env, {
+    onBeforeRequest: async (agentRequest, lobby) => {
+      if (!supportedInterviewerLobby(lobby)) {
+        return errorResponse("not_found", 404);
       }
-      const suffix = cheatsheetSuffix ? "-cheatsheet" : "";
-      const key = `pediatric-oral-boards/reports/${reportId}${suffix}.${format}`;
-      const access = await authorizedReport(request, env, key);
-      if (!access) return unauthorizedResponse();
-      if (!access.object) return errorResponse("report_not_found", 404);
-
-      const headers = new Headers({
-        "Content-Disposition": `attachment; filename="pediatric-oral-boards-${reportId}${suffix}.${format}"`,
-        ETag: access.object.httpEtag,
-      });
-      access.object.writeHttpMetadata(headers);
-      headers.set("Cache-Control", "private, no-store");
-      headers.set("X-Content-Type-Options", "nosniff");
-      return new Response(access.object.body, { headers });
-    }
-
-    if (request.method === "GET" && (path === "/health" || path === "/interviewer/health")) {
-      return json({
-        ok: true,
-        protocolVersion: 2,
-        capabilities: {
-          deviceWebSocket: true,
-          signedWebWebSocket: true,
-          privateReports: true,
-          reportRecovery: true,
-        },
-      });
-    }
-
-    if (request.method === "POST" && path === "/interviewer/recover-report") {
-      if (!(await verifyDeviceToken(requestDeviceHeaderToken(request), env.DEVICE_TOKEN))) {
-        return unauthorizedResponse();
+      // PartyServer otherwise forwards ordinary HTTP requests into the DO.
+      // Reject before it can wake the object; only WebSocket upgrades enter
+      // onBeforeConnect below.
+      if (agentRequest.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        return errorResponse("websocket_upgrade_required", 426, {
+          Upgrade: "websocket",
+        });
       }
-      const durableObjectId = request.headers.get("X-Durable-Object-Id") ?? "";
-      if (!DURABLE_OBJECT_ID_PATTERN.test(durableObjectId)) {
-        return errorResponse("invalid_durable_object_id", 400);
+    },
+    onBeforeConnect: async (upgradeRequest, lobby) => {
+      if (!supportedInterviewerLobby(lobby)) {
+        return errorResponse("not_found", 404);
       }
-      const id = env.PEDIATRIC_INTERVIEWER.idFromString(durableObjectId);
-      const stub = env.PEDIATRIC_INTERVIEWER.get(id);
-      return stub.fetch(
-        new Request("https://internal/recover-report", {
-          method: "POST",
-          headers: { "x-partykit-room": `recovery-${durableObjectId.slice(0, 8)}` },
-        }),
-      );
-    }
 
-    const routed = await routeAgentRequest(request, env, {
-      onBeforeRequest: async (agentRequest, lobby) => {
-        if (!supportedInterviewerLobby(lobby)) {
-          return errorResponse("not_found", 404);
-        }
-        // PartyServer otherwise forwards ordinary HTTP requests into the DO.
-        // Reject before it can wake the object; only WebSocket upgrades enter
-        // onBeforeConnect below.
-        if (agentRequest.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-          return errorResponse("websocket_upgrade_required", 426, {
-            Upgrade: "websocket",
-          });
-        }
-      },
-      onBeforeConnect: async (upgradeRequest, lobby) => {
-        if (!supportedInterviewerLobby(lobby)) {
-          return errorResponse("not_found", 404);
-        }
+      const ip = clientIp(upgradeRequest);
+      if (!(await allowConnectionAttempt(env, `ip:${ip}`))) {
+        return errorResponse("rate_limited", 429, { "Retry-After": "60" });
+      }
 
-        const ip = clientIp(upgradeRequest);
-        if (!(await allowConnectionAttempt(env, `ip:${ip}`))) {
+      const kind = interviewerLobbyKind(lobby.name);
+      if (kind === "web") {
+        if (!isAllowedWebOrigin(upgradeRequest.headers.get("Origin"), env.WEB_ORIGINS)) {
+          return errorResponse("origin_not_allowed", 403);
+        }
+        const claims = await verifyWebToken(requestQueryToken(upgradeRequest), env.WEB_TOKEN_SECRET, {
+          scope: "connect",
+          subject: lobby.name,
+        });
+        if (!claims) return unauthorizedResponse();
+        if (!(await allowConnectionAttempt(env, `subject:${claims.sub}`))) {
           return errorResponse("rate_limited", 429, { "Retry-After": "60" });
         }
+        return;
+      }
 
-        const kind = interviewerLobbyKind(lobby.name);
-        if (kind === "web") {
-          if (!isAllowedWebOrigin(upgradeRequest.headers.get("Origin"), env.WEB_ORIGINS)) {
-            return errorResponse("origin_not_allowed", 403);
-          }
-          const claims = await verifyWebToken(requestQueryToken(upgradeRequest), env.WEB_TOKEN_SECRET, {
-            scope: "connect",
-            subject: lobby.name,
-          });
-          if (!claims) return unauthorizedResponse();
-          if (!(await allowConnectionAttempt(env, `subject:${claims.sub}`))) {
-            return errorResponse("rate_limited", 429, { "Retry-After": "60" });
-          }
-          return;
-        }
+      // Preserve the device protocol while allowing browser-incompatible
+      // clients to use the query token. HTTP routes remain header-only.
+      const deviceToken =
+        requestQueryToken(upgradeRequest) ?? requestDeviceHeaderToken(upgradeRequest);
+      if (!(await verifyDeviceToken(deviceToken, env.DEVICE_TOKEN))) {
+        return unauthorizedResponse();
+      }
+    },
+  });
+  return routed ?? errorResponse("not_found", 404);
+});
 
-        // Preserve the device protocol while allowing browser-incompatible
-        // clients to use the query token. HTTP routes remain header-only.
-        const deviceToken =
-          requestQueryToken(upgradeRequest) ?? requestDeviceHeaderToken(upgradeRequest);
-        if (!(await verifyDeviceToken(deviceToken, env.DEVICE_TOKEN))) {
-          return unauthorizedResponse();
-        }
-      },
-    });
-    if (routed) return routed;
-
-    return errorResponse("not_found", 404);
-  },
-} satisfies ExportedHandler<WorkerEnv>;
+export default app;

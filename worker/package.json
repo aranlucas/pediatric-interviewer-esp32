@@ -17,6 +17,7 @@
   "dependencies": {
     "@google/genai": "^2.18.0",
     "agents": "^0.21.0",
+    "hono": "^4.13.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {

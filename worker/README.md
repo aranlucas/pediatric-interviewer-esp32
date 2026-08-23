@@ -4,7 +4,9 @@ This directory contains the Cloudflare Worker backend for the pediatric
 dentistry oral-board interviewer. It uses one Cloudflare Agents Durable Object
 (`PediatricInterviewer`) per interview session. The Durable Object persists
 interview state and exchanges in SQLite, keeps the Gemini Live transport alive
-while provider work is running, and stores completed reviews in private R2.
+while provider work is running, and stores completed reviews in private R2. A
+typed Hono app owns the Worker's HTTP routing and delegates unmatched Agent SDK
+WebSocket requests to `routeAgentRequest`.
 
 The Worker has two clients:
 

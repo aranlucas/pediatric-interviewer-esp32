@@ -46,24 +46,60 @@ beforeEach(() => {
 });
 
 describe("Worker edge contract", () => {
-  it("keeps public health minimal and non-cacheable", async () => {
+  it.each(["/health", "/interviewer/health"])(
+    "keeps public health minimal and non-cacheable at %s",
+    async (path) => {
+      const response = await worker.fetch(
+        new Request(`https://worker.example${path}`),
+        testEnv(),
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(routeAgentRequest).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        protocolVersion: 2,
+        capabilities: {
+          deviceWebSocket: true,
+          signedWebWebSocket: true,
+          privateReports: true,
+          reportRecovery: true,
+        },
+      });
+    },
+  );
+
+  it("routes authenticated report recovery through the Durable Object binding", async () => {
+    const durableObjectId = "a".repeat(64);
+    const fetch = vi.fn().mockResolvedValue(new Response("recovered"));
+    const idFromString = vi.fn().mockReturnValue({});
+    const get = vi.fn().mockReturnValue({ fetch });
+    const env = {
+      ...testEnv(),
+      PEDIATRIC_INTERVIEWER: { idFromString, get },
+    } as unknown as Env;
+
     const response = await worker.fetch(
-      new Request("https://worker.example/health"),
-      testEnv(),
+      new Request("https://worker.example/interviewer/recover-report", {
+        method: "POST",
+        headers: {
+          "X-Device-Token": DEVICE_TOKEN,
+          "X-Durable-Object-Id": durableObjectId,
+        },
+      }),
+      env,
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      protocolVersion: 2,
-      capabilities: {
-        deviceWebSocket: true,
-        signedWebWebSocket: true,
-        privateReports: true,
-        reportRecovery: true,
-      },
-    });
+    await expect(response.text()).resolves.toBe("recovered");
+    expect(idFromString).toHaveBeenCalledWith(durableObjectId);
+    expect(fetch).toHaveBeenCalledOnce();
+    const internalRequest = fetch.mock.calls[0]?.[0] as Request;
+    expect(internalRequest.method).toBe("POST");
+    expect(internalRequest.url).toBe("https://internal/recover-report");
+    expect(internalRequest.headers.get("x-partykit-room")).toBe("recovery-aaaaaaaa");
+    expect(routeAgentRequest).not.toHaveBeenCalled();
   });
 
   it("ignores static device credentials in report query strings", async () => {

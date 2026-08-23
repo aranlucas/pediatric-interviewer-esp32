@@ -14,6 +14,9 @@ importers:
       agents:
         specifier: ^0.21.0
         version: 0.21.0(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260820.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(ai@7.0.64(zod@4.4.3))(react@19.2.8)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(yaml@2.9.0))(zod@4.4.3)
+      hono:
+        specifier: ^4.13.3
+        version: 4.13.3
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1458,6 +1461,10 @@ packages:
 
   hono@4.13.2:
     resolution: {integrity: sha512-JydRilDRkYBQMt9qR9U92mXxmbGqsqSn/IKOrh4e7/gEbn+0zSr8igTu0obwJoNGN4sez28DIql7FBHWydoJpA==}
+    engines: {node: '>=16.9.0'}
+
+  hono@4.13.3:
+    resolution: {integrity: sha512-r8AO2mYHoLxSHkgafNeC/BXyb2vWRxD3jem4Ts+ptav8oTG5FIRifAjuJEmZI4bSvvc2ns0GxmIYiZnHqN3mMw==}
     engines: {node: '>=16.9.0'}
 
   http-errors@2.0.1:
@@ -3271,6 +3278,8 @@ snapshots:
       function-bind: 1.1.2
 
   hono@4.13.2: {}
+
+  hono@4.13.3: {}
 
   http-errors@2.0.1:
     dependencies:
