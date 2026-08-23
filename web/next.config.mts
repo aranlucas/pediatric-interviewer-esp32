@@ -22,6 +22,8 @@ const localAgent = ["localhost", "127.0.0.1", "[::1]"].includes(agentUrl.hostnam
 const agentConnectSources = localAgent
   ? `http://${agentHost} ws://${agentHost}`
   : `https://${agentHost} wss://${agentHost}`;
+const developmentScriptSources =
+  process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : "";
 
 const securityHeaders = [
   { key: "Content-Security-Policy", value: [
@@ -34,7 +36,7 @@ const securityHeaders = [
     "object-src 'none'",
     "frame-ancestors 'none'",
     "form-action 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    `script-src 'self' 'unsafe-inline'${developmentScriptSources}`,
     "style-src 'self' 'unsafe-inline'",
     "worker-src 'self' blob:",
   ].join("; ") },

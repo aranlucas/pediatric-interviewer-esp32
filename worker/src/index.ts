@@ -5,6 +5,7 @@ import {
   isAllowedWebOrigin,
   verifyWebToken,
 } from "./web-token";
+import { workerLog } from "./log";
 
 type WorkerEnv = Env;
 
@@ -77,12 +78,9 @@ async function allowConnectionAttempt(env: WorkerEnv, key: string): Promise<bool
   } catch (error) {
     // A rate-limit binding outage should not turn an otherwise healthy Worker
     // into a total outage. Keep the failure visible without logging secrets.
-    console.error(
-      JSON.stringify({
-        event: "connection_rate_limit_error",
-        error: String(error).slice(0, 160),
-      }),
-    );
+    workerLog("error", "connection_rate_limit_error", {
+      error: String(error).slice(0, 160),
+    });
     return true;
   }
 }

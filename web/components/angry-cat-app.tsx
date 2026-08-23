@@ -40,6 +40,8 @@ import {
   type InterviewStatus,
   QUESTION_COUNT_OPTIONS,
   questionCountForSelection,
+  shouldCaptureInterviewAudio,
+  statusAfterRejectedTextAnswer,
   statusCopy,
   TOPICS,
   type TopicId,
@@ -157,6 +159,8 @@ function InterviewExperience({
   const audioRef = useRef<BrowserInterviewAudio | undefined>(undefined);
   const transcriptId = useRef(0);
   const statusRef = useRef<InterviewStatus>("idle");
+  const serverStatusRef = useRef<InterviewStatus>("idle");
+  const textComposerOpenRef = useRef(false);
   const stateRef = useRef<InterviewState>(EMPTY_STATE);
   const hadConnectionRef = useRef(false);
   const recoveryPendingRef = useRef(false);
@@ -167,6 +171,12 @@ function InterviewExperience({
   const updateStatus = useCallback((next: InterviewStatus) => {
     statusRef.current = next;
     setStatus(next);
+  }, []);
+
+  const updateTextComposerOpen = useCallback((open: boolean) => {
+    textComposerOpenRef.current = open;
+    setTextComposerOpen(open);
+    audioRef.current?.setListening(shouldCaptureInterviewAudio(statusRef.current, open));
   }, []);
 
   const sendJson = useCallback((message: Record<string, unknown>): boolean => {
@@ -200,7 +210,7 @@ function InterviewExperience({
     audioRef.current = new BrowserInterviewAudio({
       onCaptureUnavailable: () => {
         setAudioAvailable(false);
-        setTextComposerOpen(true);
+        updateTextComposerOpen(true);
         setError("Microphone disconnected. Continue with typed answers; reconnect it before your next interview.");
       },
       onLevel: setLevel,
@@ -253,9 +263,10 @@ function InterviewExperience({
         if (message.type === "status" && typeof message.status === "string") {
           if (!INTERVIEW_STATUSES.has(message.status as InterviewStatus)) return;
           const next = message.status as InterviewStatus;
+          serverStatusRef.current = next;
           if (next !== "error") setError("");
           updateStatus(next);
-          audioRef.current?.setListening(next === "listening");
+          audioRef.current?.setListening(shouldCaptureInterviewAudio(next, textComposerOpenRef.current));
           if (next === "complete") setView("review");
         } else if (message.type === "playback_interrupt") {
           audioRef.current?.interruptPlayback();
@@ -277,13 +288,19 @@ function InterviewExperience({
             ),
           );
         } else if (message.type === "candidate_text_ack" && message.accepted === false) {
+          const next = statusAfterRejectedTextAnswer(
+            serverStatusRef.current,
+            statusRef.current,
+          );
+          updateStatus(next);
+          updateTextComposerOpen(true);
           setError("The typed answer arrived outside the listening window. Please try again.");
         }
       } catch {
         // The Agents SDK also sends its own protocol messages through this socket.
       }
     },
-    [appendTranscript, handleAudioFrame, updateStatus],
+    [appendTranscript, handleAudioFrame, updateStatus, updateTextComposerOpen],
   );
 
   const agentQuery = useMemo(() => ({ token: sessionToken }), [sessionToken]);
@@ -319,7 +336,9 @@ function InterviewExperience({
         // A transient socket loss should not turn a live interview into a report.
         // Preserve the current status and let the Worker restore the active turn.
         setError("Connection restored. Continuing your interview…");
-        audioRef.current?.setListening(statusRef.current === "listening");
+        audioRef.current?.setListening(
+          shouldCaptureInterviewAudio(statusRef.current, textComposerOpenRef.current),
+        );
       } else {
         setError("");
       }
@@ -473,7 +492,7 @@ function InterviewExperience({
       setWakeLockWarning("");
       setTranscript([]);
       setReviewPage(0);
-      setTextComposerOpen(false);
+      updateTextComposerOpen(false);
       setView("interview");
       updateStatus("thinking");
       let microphoneReady = false;
@@ -481,12 +500,12 @@ function InterviewExperience({
         microphoneReady = (await audioRef.current?.start(sendAudio)) ?? false;
         setAudioAvailable(microphoneReady);
         if (!microphoneReady) {
-          setTextComposerOpen(true);
+          updateTextComposerOpen(true);
           setError("Microphone access was unavailable. You can still listen and type answers.");
         }
       } catch {
         setAudioAvailable(false);
-        setTextComposerOpen(true);
+        updateTextComposerOpen(true);
         setError("Browser audio is unavailable. Continue with typed answers and live captions.");
       }
       if (generation !== startGenerationRef.current || !startingRef.current) return;
@@ -509,7 +528,17 @@ function InterviewExperience({
       setStarting(false);
       if (!microphoneReady) audioRef.current?.setListening(false);
     },
-    [connected, difficulty, interviewRunning, questionCount, selectedTopics, sendAudio, sendJson, updateStatus],
+    [
+      connected,
+      difficulty,
+      interviewRunning,
+      questionCount,
+      selectedTopics,
+      sendAudio,
+      sendJson,
+      updateStatus,
+      updateTextComposerOpen,
+    ],
   );
 
   const endInterview = useCallback(() => {
@@ -571,10 +600,10 @@ function InterviewExperience({
         return;
       }
       setTypedAnswer("");
-      setTextComposerOpen(false);
       updateStatus("thinking");
+      updateTextComposerOpen(false);
     },
-    [sendJson, typedAnswer, updateStatus],
+    [sendJson, typedAnswer, updateStatus, updateTextComposerOpen],
   );
 
   const retryConnection = useCallback(() => {
@@ -695,6 +724,10 @@ function InterviewExperience({
             question target.
           </span>
         </div>
+        <a className="reports-hub-link" href="/reports">
+          <ClipboardCheck size={18} aria-hidden="true" />
+          Browse completed reports
+        </a>
       </aside>
 
       <section
@@ -850,7 +883,9 @@ function InterviewExperience({
                 icon={MessageCircleMore}
                 label="Type answer"
                 active={textComposerOpen}
-                onClick={() => setTextComposerOpen((open) => !open)}
+                onClick={() =>
+                  updateTextComposerOpen(!textComposerOpenRef.current)
+                }
               />
               <ControlButton
                 icon={Captions}

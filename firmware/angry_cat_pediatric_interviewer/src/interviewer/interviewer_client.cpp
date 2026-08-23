@@ -793,6 +793,7 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
   client.beginSslWithClientKey(host.c_str(), 443, path.c_str(),
                                kPediatricInterviewerRootCa, nullptr, nullptr,
                                "");
+  client.enableHeartbeat(15000, 5000, 2);
   const uint32_t connectStartedMs = millis();
   while (!connected && !failed &&
          millis() - connectStartedMs < kCallStartupTimeoutMs) {
@@ -818,7 +819,6 @@ bool InterviewerClient::runSession(AngryCatAudio &audio, const char *topicId,
               "Could not start the audio playback task.");
     return false;
   }
-  client.sendTXT("{\"type\":\"hello\",\"protocol_version\":1}");
   JsonDocument startCall;
   startCall["type"] = "start_call";
   startCall["preferred_format"] = "pcm16";

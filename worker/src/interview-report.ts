@@ -12,6 +12,7 @@ import {
   type InterviewTopic,
   type PediatricTopicId,
 } from "./interview-content";
+import { workerLog } from "./log";
 
 /** Legacy/device default. Individual web sessions can override this value. */
 export const INTERVIEW_QUESTION_COUNT = DEFAULT_INTERVIEW_QUESTION_COUNT;
@@ -286,14 +287,11 @@ async function geminiGenerateContent(apiKey: string, body: unknown, operation: s
     const bodyText = await readBoundedResponse(response, GEMINI_ERROR_MAX_BYTES).catch(
       () => "upstream error body unavailable",
     );
-    console.error(
-      JSON.stringify({
-        event: "gemini_http_error",
-        operation,
-        status: response.status,
-        detail: bodyText.slice(0, 300),
-      }),
-    );
+    workerLog("error", "gemini_http_error", {
+      operation,
+      status: response.status,
+      detail: bodyText.slice(0, 300),
+    });
     const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
     throw new GeminiProviderError(operation, response.status, retryable);
   }

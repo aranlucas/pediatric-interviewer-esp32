@@ -32,6 +32,20 @@ describe("web HMAC session tokens", () => {
     await expect(verifyAccessToken(token, "wrong-secret", "connect", NOW)).resolves.toBeNull();
   });
 
+  it("keeps the reports-admin scope separate from room-scoped report access", async () => {
+    const token = await createAccessToken(SECRET, {
+      v: 1,
+      sub: "reports-admin",
+      exp: NOW + 90,
+      scope: "reports_admin",
+    });
+
+    await expect(verifyAccessToken(token, SECRET, "reports_admin", NOW)).resolves.toMatchObject({
+      sub: "reports-admin",
+    });
+    await expect(verifyAccessToken(token, SECRET, "report", NOW)).resolves.toBeNull();
+  });
+
   it("rejects expired tokens", async () => {
     const token = await createAccessToken(SECRET, {
       v: 1,

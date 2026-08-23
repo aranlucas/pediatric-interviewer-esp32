@@ -43,6 +43,24 @@ describe("BrowserInterviewAudio microphone gating", () => {
     expect(track.enabled).toBe(false);
   });
 
+  it("does not open an audio turn until speech is detected", () => {
+    const { audio } = audioWithTrack();
+    const send = vi.fn();
+    const internals = audio as unknown as {
+      send: (data: ArrayBuffer) => void;
+      handleCapture: (data: { pcm: ArrayBuffer; level: number }) => void;
+    };
+    internals.send = send;
+    audio.setListening(true);
+
+    internals.handleCapture({ pcm: new ArrayBuffer(2), level: 0 });
+    expect(send).not.toHaveBeenCalled();
+
+    internals.handleCapture({ pcm: new ArrayBuffer(2), level: 0.03 });
+    internals.handleCapture({ pcm: new ArrayBuffer(2), level: 0 });
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the microphone disabled while muted", () => {
     const { audio, track } = audioWithTrack();
 

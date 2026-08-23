@@ -43,10 +43,9 @@ export async function GET(
   }
   const env = rawEnv as ReportEnv;
   const secret = env.WEB_TOKEN_SECRET;
+  if (!secret?.trim()) return json({ error: "report_auth_not_configured" }, 503);
   const reportToken = getCookie(request.headers.get("cookie"), REPORT_TOKEN_COOKIE);
-  const reportPayload = secret?.trim()
-    ? await verifyAccessToken(reportToken, secret, "report")
-    : null;
+  const reportPayload = await verifyAccessToken(reportToken, secret, "report");
   if (!reportPayload || !isWebRoom(reportPayload.sub)) {
     return json({ error: "unauthorized" }, 401);
   }

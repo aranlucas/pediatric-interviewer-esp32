@@ -5,8 +5,18 @@
   "compatibility_date": "2026-08-15",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "secrets": {
-    "required": ["WEB_TOKEN_SECRET"]
+    "required": ["WEB_TOKEN_SECRET", "REPORTS_ADMIN_SECRET"]
   },
+  "vars": {
+    "REPORTS_TIMEZONE": "America/Los_Angeles"
+  },
+  "r2_buckets": [
+    {
+      "binding": "INTERVIEW_REPORTS",
+      "bucket_name": "pediatric-oral-boards-reports",
+      "remote": true
+    }
+  ],
   "services": [
     {
       "binding": "INTERVIEWER_SERVICE",

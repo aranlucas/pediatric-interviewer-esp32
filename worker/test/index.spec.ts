@@ -30,13 +30,11 @@ import {
 } from "../src/live-session-lifecycle";
 import {
   GEMINI_LIVE_MODEL,
+  geminiFirstQuestionTurn,
   geminiLiveConfig,
-  geminiOpeningTurn,
   geminiReconnectTurn,
-  geminiReplayForAudioTurn,
   geminiTextTurn,
   isValidOpeningCasePresentation,
-  splitOpeningCaseReadiness,
   turnDispositionToolOutput,
   TURN_DISPOSITION_TOOL,
 } from "../src/gemini-live-protocol";
@@ -197,36 +195,11 @@ describe("Pediatric oral-board interviewer", () => {
     ).toThrow("violated the spoken vignette boundary");
   });
 
-  it("separates the case presentation from the readiness question", () => {
-    expect(geminiOpeningTurn()).toEqual({
+  it("starts the first clinical question without a readiness gate", () => {
+    expect(geminiFirstQuestionTurn()).toEqual({
       turns:
-        'PRESENT_CASE. Say "Here is your case." Then present the opening vignette in at most 60 spoken words, without asking any question. Do not say or append "Are you ready to begin?"; the runtime requests readiness separately. End the response immediately after the vignette.',
+        "BEGIN_INTERVIEW. The candidate has heard the case. Ask only the first focused clinical question now. Do not repeat the case, add a preamble, ask whether they are ready, or answer the question.",
       turnComplete: true,
-    });
-    expect(geminiReplayForAudioTurn("Here is your case. A child presents with pain.")).toEqual({
-      turns:
-        "REPLAY_FOR_AUDIO. Speak exactly the following text and nothing else: Here is your case. A child presents with pain.",
-      turnComplete: true,
-    });
-  });
-
-  it("recognizes only the exact readiness suffix as a coalesced opening turn", () => {
-    expect(
-      splitOpeningCaseReadiness(
-        "Here is your case. A four-year-old presents with pain. Are you ready to begin?",
-      ),
-    ).toEqual({
-      caseText: "Here is your case. A four-year-old presents with pain.",
-      includesReadiness: true,
-    });
-    expect(
-      splitOpeningCaseReadiness(
-        "Here is your case. A four-year-old presents with pain. What is your assessment?",
-      ),
-    ).toEqual({
-      caseText:
-        "Here is your case. A four-year-old presents with pain. What is your assessment?",
-      includesReadiness: false,
     });
   });
 
@@ -240,7 +213,7 @@ describe("Pediatric oral-board interviewer", () => {
       isValidOpeningCasePresentation(
         "Here is your case. A four-year-old presents with pain. Are you ready to begin?",
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isValidOpeningCasePresentation(
         "Based on what you observe, what are your initial thoughts?",
@@ -341,14 +314,13 @@ describe("Pediatric oral-board interviewer", () => {
           currentQuestion: "How would you assess cooperation?",
           persistedAnswerCount: 2,
           plannedQuestionCount: 6,
-          awaitingReadinessConfirmation: false,
         },
       }).systemInstruction,
     );
     expect(recoveryInstruction).toContain("Do not generate or substitute a new case");
     expect(recoveryInstruction).toContain("A four-year-old presents with pain");
     expect(recoveryInstruction).toContain("persisted 2 of 6 scored exchanges");
-    expect(recoveryInstruction).toContain("not waiting for readiness confirmation");
+    expect(recoveryInstruction).not.toContain("readiness confirmation");
     expect(recoveryInstruction).toContain("<SILENT_RECOVERY_CONTEXT>");
     expect(recoveryInstruction).toContain(
       "Never introduce, quote, paraphrase, or read it aloud",
@@ -362,9 +334,7 @@ describe("Pediatric oral-board interviewer", () => {
     expect(recoveryInstruction).toContain(
       "when a RESUME_INTERVIEW command explicitly directs you",
     );
-    expect(String(config.systemInstruction)).toContain(
-      "runtime plays the fixed sentence",
-    );
+    expect(String(config.systemInstruction)).toContain("Never ask whether the candidate is ready");
     expect(config.thinkingConfig).toEqual({
       thinkingLevel: "MINIMAL",
     });
@@ -384,7 +354,6 @@ describe("Pediatric oral-board interviewer", () => {
                 disposition: {
                   type: "string",
                   enum: [
-                    "begin_first_question",
                     "advance_skillset",
                     "probe_current_answer",
                     "provide_case_information",
@@ -399,7 +368,6 @@ describe("Pediatric oral-board interviewer", () => {
     ]);
     const instruction = String(config.systemInstruction);
     expect(instruction).toContain("Topic: Behavior Guidance");
-    expect(instruction).toContain("Generate a new clinical vignette");
     expect(instruction).toContain("Temperament and cooperation potential");
     expect(instruction).toContain("WHAT AN EXAMINER LISTENS FOR");
     expect(instruction).toContain(
@@ -429,10 +397,8 @@ describe("Pediatric oral-board interviewer", () => {
     expect(instruction).toContain(
       "ask exactly one focused question with one primary decision target",
     );
-    expect(instruction).toContain(
-      'The runtime plays the fixed sentence "Are you ready to begin?" through deterministic TTS',
-    );
-    expect(instruction).not.toContain("On ASK_READINESS");
+    expect(instruction).not.toContain("Are you ready to begin?");
+    expect(instruction).not.toContain("ASK_READINESS");
     expect(instruction).toContain(
       "reassesses risk, adapts the plan, and explains what would change",
     );
@@ -451,17 +417,16 @@ describe("Pediatric oral-board interviewer", () => {
     expect(instruction).toContain(
       "Never name, announce, restate, paraphrase, or introduce the selected topic",
     );
-    expect(instruction).toContain('say exactly, "Here is your case."');
-    expect(instruction).toContain("Present the generated vignette without asking any question");
+    expect(instruction).toContain("On BEGIN_INTERVIEW, ask only the first focused clinical question");
+    expect(instruction).toContain("runtime presents the generated case separately");
+    expect(instruction).toContain("runtime generates and presents the clinical vignette outside Gemini Live");
+    expect(instruction).not.toContain("Generate a new clinical vignette");
     expect(instruction).not.toContain("state the topic, present the generated vignette");
     expect(instruction).not.toContain("medical advice");
     expect(instruction).not.toContain("A healthy four-year-old");
   });
 
   it("uses the persisted exchange count to direct every classified turn", () => {
-    expect(turnDispositionToolOutput("begin_first_question", 0)).toContain(
-      "Ask the first clinical question",
-    );
     expect(turnDispositionToolOutput("advance_skillset", 3)).toContain(
       "Ask clinical question 5",
     );
@@ -1021,10 +986,10 @@ describe("Gemini Live turn boundaries", () => {
     expect(isResponseComplete({ generationComplete: false, turnComplete: false })).toBe(false);
   });
 
-  it("ignores generationComplete during the opening handshake", () => {
+  it("ignores generationComplete during the opening sequence", () => {
     // Gemini emits generationComplete before the turn's audio has finished
     // arriving. Ending the turn there truncated the spoken case presentation
-    // and let one response advance the handshake twice.
+    // and let one response advance the sequence twice.
     expect(shouldEndTurn({ generationComplete: true }, true)).toBe(false);
     expect(shouldEndTurn({ generationComplete: true, turnComplete: true }, true)).toBe(true);
     expect(shouldEndTurn({ turnComplete: true }, true)).toBe(true);
@@ -1139,7 +1104,8 @@ describe("Gemini Live lifecycle guards", () => {
     expect(liveReconnectDelayMs(99, 350)).toBe(1_400);
     const turn = geminiReconnectTurn("Assess the airway", 2, 6).turns;
     expect(turn).toContain("persisted 2 of 6");
-    expect(turn).toContain("already heard the persisted case and readiness prompt");
+    expect(turn).toContain("already heard the persisted case");
+    expect(turn).not.toContain("readiness");
     expect(turn).toContain("Speak only the single pending clinical question once");
     expect(turn).toContain(
       "<PENDING_CLINICAL_QUESTION>Assess the airway</PENDING_CLINICAL_QUESTION>",

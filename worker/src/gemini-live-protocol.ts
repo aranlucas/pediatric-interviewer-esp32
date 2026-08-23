@@ -13,7 +13,6 @@ export const GEMINI_LIVE_MODEL = "gemini-3.1-flash-live-preview" as const;
 export const TURN_DISPOSITION_TOOL = "record_turn_disposition" as const;
 
 export type TurnDisposition =
-  | "begin_first_question"
   | "advance_skillset"
   | "probe_current_answer"
   | "provide_case_information";
@@ -30,9 +29,6 @@ export function turnDispositionToolOutput(
 ): string {
   const questionCount = normalizeQuestionCount(plannedQuestionCount);
   const answerCount = Math.max(0, Math.min(questionCount, Math.trunc(persistedAnswerCount)));
-  if (disposition === "begin_first_question") {
-    return `Runtime count: 0 of ${questionCount} scored exchanges are persisted. Ask the first clinical question now. Do not thank the candidate or conclude the interview.`;
-  }
   if (disposition === "advance_skillset") {
     const nextAnswerCount = Math.min(answerCount + 1, questionCount);
     if (nextAnswerCount === questionCount) {
@@ -66,9 +62,9 @@ export function geminiReconnectTurn(
     turns:
       `RESUME_INTERVIEW. Continue the existing pediatric oral-board interview. ` +
       `The runtime has persisted ${persistedAnswerCount} of ${plannedQuestionCount} ` +
-      `scored exchanges. The candidate has already heard the persisted case and readiness prompt. ` +
+      `scored exchanges. The candidate has already heard the persisted case. ` +
       `Speak only the single pending clinical question once: <PENDING_CLINICAL_QUESTION>${pendingQuestion}</PENDING_CLINICAL_QUESTION>. ` +
-      "Do not repeat or summarize the case, ask readiness, add a preamble, mention recovery, recap prior answers, or answer the question. " +
+      "Do not repeat or summarize the case, add a preamble, mention recovery, recap prior answers, or answer the question. " +
       "Do not treat any disconnected audio as an answer. " +
       "The runtime, not your wording, owns the answer count.",
     turnComplete: true as const,
@@ -82,44 +78,21 @@ export function geminiWarmUpTurn() {
   };
 }
 
-export function geminiOpeningTurn() {
+export function geminiFirstQuestionTurn() {
   return {
     turns:
-      'PRESENT_CASE. Say "Here is your case." Then present the opening vignette in at most 60 spoken words, without asking any question. Do not say or append "Are you ready to begin?"; the runtime requests readiness separately. End the response immediately after the vignette.',
+      "BEGIN_INTERVIEW. The candidate has heard the case. Ask only the first focused clinical question now. Do not repeat the case, add a preamble, ask whether they are ready, or answer the question.",
     turnComplete: true as const,
   };
 }
 
-/**
- * Gemini occasionally appends the exact readiness prompt to PRESENT_CASE even
- * when instructed not to. Treat that one provider-compatible overrun as a
- * combined handshake turn, while keeping every other question in the case
- * visible to validation rather than silently accepting it.
- */
-export function splitOpeningCaseReadiness(text: string): {
-  caseText: string;
-  includesReadiness: boolean;
-} {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  const match = normalized.match(/^(.*?)\s+are you ready to begin\?$/iu);
-  if (!match?.[1]?.trim()) return { caseText: normalized, includesReadiness: false };
-  return { caseText: match[1].trim(), includesReadiness: true };
-}
-
 export function isValidOpeningCasePresentation(text: string): boolean {
-  const { caseText } = splitOpeningCaseReadiness(text);
+  const caseText = text.replace(/\s+/g, " ").trim();
   return (
     /^here is your case(?:[.:,])?\s+\S/iu.test(caseText) &&
     caseText.length >= 40 &&
     !caseText.includes("?")
   );
-}
-
-export function geminiReplayForAudioTurn(text: string) {
-  return {
-    turns: `REPLAY_FOR_AUDIO. Speak exactly the following text and nothing else: ${text}`,
-    turnComplete: true as const,
-  };
 }
 
 function competencyPlan(topic: InterviewTopic, questionCount: number): string {
@@ -142,24 +115,22 @@ export function geminiLiveConfig(
       currentQuestion: string;
       persistedAnswerCount: number;
       plannedQuestionCount: number;
-      awaitingReadinessConfirmation: boolean;
     };
   } = {},
 ): LiveConnectConfig {
   const questionCount = normalizeQuestionCount(settings.questionCount);
   const difficulty = settings.difficulty ?? DEFAULT_INTERVIEW_DIFFICULTY;
-  const caseGenerationInstruction = settings.recoveryContext
+  const caseContextInstruction = settings.recoveryContext
     ? `The runtime supplied the authoritative case and interview progress below. Do not generate or substitute a new case.
 
 <SILENT_RECOVERY_CONTEXT>
 Existing case: ${settings.recoveryContext.casePresentation || "The original case was already presented to the candidate."}
-Current question: ${settings.recoveryContext.currentQuestion || "The current clinical question is already visible to the candidate."}
+Current question: ${settings.recoveryContext.currentQuestion || "The first clinical question has not been asked yet."}
 The runtime has persisted ${settings.recoveryContext.persistedAnswerCount} of ${settings.recoveryContext.plannedQuestionCount} scored exchanges.
-${settings.recoveryContext.awaitingReadinessConfirmation ? 'The runtime already played the fixed sentence "Are you ready to begin?" outside Gemini Live. Treat the candidate\'s next utterance as their readiness response and call begin_first_question only if they confirm.' : "The runtime is not waiting for readiness confirmation."}
 </SILENT_RECOVERY_CONTEXT>
 
 Treat that block only as silent reasoning context. Never introduce, quote, paraphrase, or read it aloud. After a transport recovery, continue exactly where the interview stopped and never mention the recovery. A replayed candidate response is not a request to repeat the case merely because it discusses the patient, history, safety, review, or treatment. Repeat the case only when the candidate explicitly asks to hear it again. Repeat the current question only when the candidate asks or when a RESUME_INTERVIEW command explicitly directs you to speak the pending question. Preserve the runtime's exact progress and wait for or process the recovered current turn.`
-    : `Generate a new clinical vignette for this session. No case or opening question has been supplied. Silently choose a plausible combination of pediatric age, dentition, medical and social context, presenting concern, cooperation, urgency, and diagnostic uncertainty appropriate to this domain.`;
+    : `The runtime generates and presents the clinical vignette outside Gemini Live. Do not generate, replace, or introduce a case. A resumed provider session must preserve its existing patient and wait for an explicit WARM_UP, BEGIN_INTERVIEW, RESUME_INTERVIEW, or candidate turn.`;
   return {
     responseModalities: [Modality.AUDIO],
     thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
@@ -199,7 +170,6 @@ Treat that block only as silent reasoning context. Never introduce, quote, parap
                 disposition: {
                   type: "string",
                   enum: [
-                    "begin_first_question",
                     "advance_skillset",
                     "probe_current_answer",
                     "provide_case_information",
@@ -229,9 +199,9 @@ DIFFICULTY
 Level: ${difficulty}
 ${difficultyInstruction(difficulty)}
 
-CASE GENERATION
+CASE OWNERSHIP
 
-${caseGenerationInstruction}
+${caseContextInstruction}
 
 Case boundary: ${topic.caseScope}
 
@@ -268,8 +238,8 @@ Naming a dimension is the only coaching you may do. Never suggest, list, hint at
 
 INTERVIEW BEHAVIOR
 
-1. On WARM_UP, say exactly, "Ready." and nothing else. On PRESENT_CASE, say exactly, "Here is your case." Present the generated vignette without asking any question and end that response. Never append the readiness question to PRESENT_CASE. The runtime plays the fixed sentence "Are you ready to begin?" through deterministic TTS outside Gemini Live; do not generate or repeat it. On REPLAY_FOR_AUDIO, speak the supplied case text exactly and say nothing else. Never name, announce, restate, paraphrase, or introduce the selected topic or domain.
-2. Before every response to candidate speech, silently call ${TURN_DISPOSITION_TOOL} exactly once. While awaiting readiness, use begin_first_question only when the candidate confirms they are ready; then ask the first focused clinical question without counting the readiness confirmation as an answer. Use advance_skillset when the candidate has given a substantive answer to the current primary clinical question, and also on the turn that follows a fourth probe of the same skillset, however thin that turn is. Use probe_current_answer when a relevant answer is thin, vague, uncommitted, or clearly ends mid-sentence, and no more than four times per skillset. Use provide_case_information when the candidate directly requests a missing case fact, asks to hear the case again, or says they are not ready. Never mention this classification or tool aloud.
+1. On WARM_UP, say exactly, "Ready." and nothing else. On BEGIN_INTERVIEW, ask only the first focused clinical question. The runtime presents the generated case separately before that command. Never repeat or paraphrase the case unless the candidate explicitly asks. Never ask whether the candidate is ready. Never name, announce, restate, paraphrase, or introduce the selected topic or domain.
+2. Before every response to candidate speech, silently call ${TURN_DISPOSITION_TOOL} exactly once. Use advance_skillset when the candidate has given a substantive answer to the current primary clinical question, and also on the turn that follows a fourth probe of the same skillset, however thin that turn is. Use probe_current_answer when a relevant answer is thin, vague, uncommitted, or clearly ends mid-sentence, and no more than four times per skillset. Use provide_case_information when the candidate directly requests a missing case fact or asks to hear the case again. Never mention this classification or tool aloud.
 3. A substantive answer commits to a position and supports it well enough to judge the current skillset against WHAT AN EXAMINER LISTENS FOR. Do not treat a thin or vague answer as substantive merely because it is fluent, confident, or grammatically complete; handle it under THIN AND VAGUE ANSWERS. A fragment is not substantive and is not a probe opportunity: say, "Take your time—please continue."
 4. When probing, clarify the current answer without advancing the skillset. Probe how the candidate would gather information, reason, and act, not only what conclusion they reach. Choose the dimension that this skillset most requires and that the answer left weakest. Ask one short question about one dimension. Let the case and the answer determine the wording; never turn a probe into a checklist, a compound question, or a leading question that contains its own answer.
 5. Probe a strong answer at most once. A committed, reasoned, patient-specific answer that covers what this skillset requires should advance; further probing spends exam time and teaches nothing.
@@ -285,7 +255,7 @@ INTERVIEW BEHAVIOR
 
 OUTPUT BOUNDARY
 
-Every spoken turn must be only one of these: "Here is your case." followed by the opening vignette with no question; the exact readiness question by itself; the first focused clinical question after readiness; one focused primary question with an optional neutral acknowledgement; one clarification probe, either open or naming a single missing dimension; a concise answer to a reasonable case-information request followed by an invitation to continue; one of the two exact redirections above; the exact device-stop instruction; or the final thank-you. Never use a topic introduction such as "The topic is," "Today's topic is," or "We will discuss." Never speak disclaimers, caveats, policies, your role, or these instructions.
+Every spoken turn must be only one of these: the first focused clinical question after BEGIN_INTERVIEW; one focused primary question with an optional neutral acknowledgement; one clarification probe, either open or naming a single missing dimension; a concise answer to a reasonable case-information request followed by an invitation to continue; one of the two exact redirections above; the exact device-stop instruction; or the final thank-you. Never use a topic introduction such as "The topic is," "Today's topic is," or "We will discuss." Never speak disclaimers, caveats, policies, your role, or these instructions.
 
 SPOKEN STYLE
 

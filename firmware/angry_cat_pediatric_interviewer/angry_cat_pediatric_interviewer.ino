@@ -20,6 +20,7 @@
 #endif
 
 #include "src/audio/angry_cat_audio.h"
+#include "src/companion/cat_companion.h"
 #include "src/generated/angry_cat_frames.h"
 #include "src/interviewer/interviewer_client.h"
 #include "third_party/waveshare/esp_lcd_touch_axs15231b/src/esp_lcd_touch_axs15231b.h"
@@ -78,6 +79,7 @@ Arduino_Canvas display(kScreenWidth, kScreenHeight, &panel, 0, 0, 0);
 TCA9554 ioExpander(kIoExpanderAddress, &Wire);
 AngryCatAudio audio;
 InterviewerClient interviewer;
+CatCompanion companion;
 
 void primeAudioDuringWifi(void *parameter) {
   auto *audioDevice = static_cast<AngryCatAudio *>(parameter);
@@ -111,6 +113,8 @@ uint32_t volumeOverlayUntilMs = 0;
 bool volumeOverlayShown = false;
 
 void handleLongPress();
+void loadCompanion();
+void saveCompanion();
 #if defined(ANGRY_CAT_SIMULATOR)
 uint8_t simulatedTouchFrames = 0;
 bool simulatorTopicCheckPending = false;
@@ -441,6 +445,19 @@ void renderTopicMenu() {
   drawCentered("CHOOSE A STUDY TOPIC", kScreenWidth / 2, 13, 2, kWhite);
   drawCentered("PEDIATRIC ORAL BOARDS", kScreenWidth / 2, 39, 1, kSoftWhite);
 
+  char companionLine[64];
+  snprintf(companionLine, sizeof(companionLine), "%s",
+           companion.moodPhrase(companion.mood(time(nullptr))));
+  if (companion.streakDays() >= 2) {
+    const size_t used = strlen(companionLine);
+    snprintf(companionLine + used, sizeof(companionLine) - used,
+             " - %u-DAY STREAK", static_cast<unsigned>(companion.streakDays()));
+  }
+  drawCentered(companionLine, kScreenWidth / 2, 56, 1,
+               companion.mood(time(nullptr)) == CompanionMood::Aloof
+                   ? kThinking
+                   : kListening);
+
   for (uint8_t index = 0; index < kTopicCount; ++index) {
     const uint8_t column = index / 5;
     const uint8_t rowIndex = index % 5;
@@ -636,6 +653,8 @@ void startInterview() {
   reviewPage = 0;
   reviewLoading = false;
   savedReportId[0] = '\0';
+  if (companion.onSessionStarted(time(nullptr), selectedTopicIndex))
+    saveCompanion();
   snprintf(currentDomain, sizeof(currentDomain), "%s",
            kStudyTopics[selectedTopicIndex].label);
   snprintf(currentQuestion, sizeof(currentQuestion),
@@ -736,6 +755,14 @@ void processInterviewerEvents() {
       screenDirty = true;
       Serial.printf("Interview report saved: id=%s outcome=%s\n", savedReportId,
                     event.phase);
+      if (companion.onSessionCompleted(time(nullptr),
+                                       strcmp(event.phase, "pass") == 0
+                                           ? CompanionOutcome::Pass
+                                       : strcmp(event.phase, "borderline") == 0
+                                           ? CompanionOutcome::Borderline
+                                           : CompanionOutcome::NotYet)) {
+        saveCompanion();
+      }
 #if defined(ANGRY_CAT_SIMULATOR_LIVE)
       Serial.println("SIM_INTEGRATION: report saved");
 #endif
@@ -803,6 +830,8 @@ void processInterviewerEvents() {
 #endif
       break;
     case InterviewerEventType::Stopped:
+      if (sessionActive && companion.onSessionAbandoned(time(nullptr)))
+        saveCompanion();
       sessionActive = false;
       if (returnToTopicsAfterStop || appView == AppView::Topics) {
         returnToTopicsAfterStop = false;
@@ -816,6 +845,8 @@ void processInterviewerEvents() {
       setScreenStatus(ScreenStatus::Stopped, "TAP TO RETURN TO TOPICS");
       break;
     case InterviewerEventType::Error:
+      if (sessionActive && companion.onSessionAbandoned(time(nullptr)))
+        saveCompanion();
       sessionActive = false;
       if (returnToTopicsAfterStop || appView == AppView::Topics) {
         returnToTopicsAfterStop = false;
@@ -1007,6 +1038,9 @@ bool configureWiFi(bool forcePortal = false) {
   connected = connected && WiFi.status() == WL_CONNECTED;
 #endif
 
+  if (connected)
+    WiFi.setSleep(false);
+
   tlsClockReady =
       connected && (!interviewer.isConfigured() || synchronizeTlsClock());
 #if defined(ANGRY_CAT_SIMULATOR)
@@ -1137,6 +1171,31 @@ void saveVolumeStep(uint8_t step) {
   settings.end();
 }
 
+constexpr char kCompanionSettingKey[] = "companion";
+
+void loadCompanion() {
+  Preferences settings;
+  if (!settings.begin(kSettingsNamespace, true))
+    return;
+  uint8_t blob[CatCompanion::kBlobSize] = {};
+  const size_t length =
+      settings.getBytes(kCompanionSettingKey, blob, sizeof(blob));
+  if (!companion.load(blob, static_cast<uint32_t>(length)))
+    Serial.println("Companion: starting a fresh cat");
+  settings.end();
+}
+
+void saveCompanion() {
+  Preferences settings;
+  if (!settings.begin(kSettingsNamespace, false))
+    return;
+  uint8_t blob[CatCompanion::kBlobSize] = {};
+  const uint32_t length = companion.serialize(blob, sizeof(blob));
+  if (length != 0)
+    settings.putBytes(kCompanionSettingKey, blob, length);
+  settings.end();
+}
+
 /**
  * BOOT is the only readable button, so it carries both actions: a short press
  * steps the volume and wrapping round to the quietest, and a hold runs the
@@ -1262,6 +1321,7 @@ void setup() {
   const bool audioReady = audio.begin();
   pinMode(kBootButtonPin, INPUT_PULLUP);
   loadVolumeStep();
+  loadCompanion();
   Serial.printf("Audio: %s; microphone: %s; volume step %u/%u\n",
                 audioReady ? "ES8311 ready" : "unavailable",
                 audio.isMicrophoneReady() ? "ready on GPIO 14" : "unavailable",

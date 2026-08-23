@@ -134,6 +134,10 @@ export class BrowserInterviewAudio {
       this.callbacks.onLevel(Math.min(1, level * 8));
     }
     if (!this.captureEnabled || this.muted) return;
+    // Do not open a provider audio turn for ambient silence. Besides wasting
+    // bandwidth, an empty audio turn prevents the candidate from switching to
+    // the typed-answer fallback while the interviewer is listening.
+    if (!this.heardSpeech && level < SPEECH_LEVEL) return;
     this.send?.(pcm);
     if (level >= SPEECH_LEVEL) {
       this.heardSpeech = true;

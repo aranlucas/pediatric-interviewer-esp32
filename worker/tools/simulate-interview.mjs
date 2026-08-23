@@ -18,24 +18,14 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const sampleRate = 24_000;
 const pcmFrameBytes = 960;
 const frameDurationMs = 20;
-// The opening (vignette, readiness question, first clinical question) is many
+// The opening (vignette and first clinical question) is many
 // seconds of speech. Anything materially below this means audio never played.
 const MINIMUM_OPENING_AUDIO_BYTES = 240_000; // ~5 s at 24 kHz mono 16-bit
-// Silent opening turns Gemini emits before it will speak the vignette.
-const MAX_SILENT_OPENING_TURNS = 5;
 
 /** Throws with machine-readable context so a failure explains itself. */
 function assert(condition, message, context) {
   if (condition) return;
   throw new Error(`${message} :: ${JSON.stringify(context)}`);
-}
-
-function splitCoalescedReadiness(text) {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  const match = normalized.match(/^(.*?)\s+are you ready to begin\?$/i);
-  return match?.[1]?.trim()
-    ? { caseText: match[1].trim(), includesReadiness: true }
-    : { caseText: normalized, includesReadiness: false };
 }
 
 const defaultAnswers = [
@@ -70,7 +60,7 @@ function usage() {
 
 Options:
   --topic <id>       Topic id sent to the examiner (default: behavior_guidance)
-  --turns <0-6>      Number of candidate answers to simulate; 0 tests readiness only (default: 6)
+  --turns <0-6>      Number of candidate answers to simulate; 0 tests opening only (default: 6)
   --pause-ms <ms>    Thinking pause between answer halves (default: 2000)
   --commit-delay-ms <ms>  Silence after an answer before explicit commit (default: 500)
   --cafe-noise-percent <0-40>  Mix synthesized background chatter into input
@@ -241,31 +231,6 @@ async function synthesizeFollowUps(options, temporaryDirectory) {
   return parts;
 }
 
-async function synthesizeReadiness(options, temporaryDirectory) {
-  const aiff = path.join(temporaryDirectory, "readiness.aiff");
-  const wav = path.join(temporaryDirectory, "readiness.wav");
-  await execFileAsync("say", [
-    "-v",
-    options.voice,
-    "-r",
-    String(options.rate),
-    "-o",
-    aiff,
-    "Yes, I am ready to begin.",
-  ]);
-  await execFileAsync("afconvert", [
-    "-f",
-    "WAVE",
-    "-d",
-    `LEI16@${sampleRate}`,
-    "-c",
-    "1",
-    aiff,
-    wav,
-  ]);
-  return wavPcm(fs.readFileSync(wav));
-}
-
 async function synthesizeCafeNoise(options, temporaryDirectory) {
   if (options.cafeNoisePercent === 0) return null;
   const aiff = path.join(temporaryDirectory, "cafe-chatter.aiff");
@@ -315,7 +280,7 @@ function wait(durationMs) {
   return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
-async function simulate(options, answers, followUps, readiness, settings, cafeNoise) {
+async function simulate(options, answers, followUps, settings, cafeNoise) {
   const startedAt = Date.now();
   const log = (event, details = {}) => {
     console.log(JSON.stringify({ elapsedMs: Date.now() - startedAt, event, ...details }));
@@ -340,14 +305,12 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
   let report = null;
   const candidateTranscripts = [];
   const primaryQuestions = [];
-  const readinessTranscripts = [];
   const turnCompletions = [];
   let openingTurnCompletionCount = 0;
   let awaitingFirstQuestionCompletion = false;
-  let readinessSent = false;
   let firstQuestionReceived = false;
-  let readinessOnlyComplete = false;
-  let readinessCompletionTarget = 0;
+  let openingOnlyComplete = false;
+  let openingCompletionTarget = 0;
   const openingTurns = [];
   const openingAudioFallbacks = [];
   let firstQuestionTurn = null;
@@ -397,7 +360,6 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
       },
       candidateTranscripts,
       primaryQuestions,
-      readinessTranscripts,
       openingTurns,
       openingAudioFallbacks,
       firstQuestionTurn,
@@ -499,20 +461,6 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
     candidateStreaming = false;
   };
 
-  const sendReadiness = async () => {
-    candidateStreaming = true;
-    stopCandidateAudio = false;
-    readinessSent = true;
-    log("candidate_readiness_started");
-    await sendPcm(readiness);
-    if (!stopCandidateAudio) await sendPcm(silence(options.commitDelayMs));
-    if (!stopCandidateAudio && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "commit_turn" }));
-      log("candidate_readiness_committed");
-    }
-    candidateStreaming = false;
-  };
-
   const maybeStartAnswer = () => {
     if (finished || candidateStreaming || phase !== "interviewing") return;
     // The examiner probed instead of advancing: the question number has not
@@ -548,14 +496,10 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
   };
 
   const handleListening = () => {
-    if (!readinessSent) {
-      void sendReadiness().catch(fail);
-      return;
-    }
     if (!firstQuestionReceived) return;
     if (options.turns === 0) {
-      readinessOnlyComplete = true;
-      readinessCompletionTarget = turnCompletions.length + 1;
+      openingOnlyComplete = true;
+      openingCompletionTarget = turnCompletions.length + 1;
       return;
     }
     maybeStartAnswer();
@@ -625,25 +569,20 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
         question: message.question,
       });
     } else if (message.type === "transcript" && message.role === "user") {
-      if (/^yes\b/i.test(message.text.trim())) {
-        readinessTranscripts.push(message.text);
-        log("candidate_readiness_transcript", { text: message.text });
-      } else {
-        candidateTranscripts.push(message.text);
-        log("candidate_transcript", { text: message.text });
-      }
+      candidateTranscripts.push(message.text);
+      log("candidate_transcript", { text: message.text });
     } else if (message.type === "transcript_end" && message.role === "assistant") {
       const audio = {
         bytes: turnOutputAudioBytes,
         peak: turnOutputAudioPeak,
         nonzeroSamples: turnOutputNonzeroSamples,
       };
-      if (!readinessSent) {
-        openingTurns.push({ text: message.text, audio });
-      } else if (!firstQuestionReceived) {
+      if (!firstQuestionReceived && message.text.includes("?")) {
         firstQuestionReceived = true;
         awaitingFirstQuestionCompletion = true;
         firstQuestionTurn = { text: message.text, audio };
+      } else if (!firstQuestionReceived) {
+        openingTurns.push({ text: message.text, audio });
       }
       log("examiner_transcript", {
         text: message.text,
@@ -667,7 +606,7 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
         answerCount: message.answerCount,
         questionNumber: message.questionNumber,
       });
-      if (readinessOnlyComplete && turnCompletions.length >= readinessCompletionTarget) {
+      if (openingOnlyComplete && turnCompletions.length >= openingCompletionTarget) {
         finish({ answersSimulated: 0, stoppedBeforeQuestion: questionNumber });
       }
     } else if (message.type === "interview_report") {
@@ -683,7 +622,7 @@ async function simulate(options, answers, followUps, readiness, settings, cafeNo
       });
     } else if (
       message.type === "opening_audio_fallback" &&
-      (message.stage === "case" || message.stage === "readiness") &&
+      (message.stage === "case" || message.stage === "first_question") &&
       Number.isSafeInteger(message.bytes) &&
       message.bytes > 0
     ) {
@@ -751,14 +690,13 @@ async function main() {
         voice: options.voice,
       }),
     );
-    const [answers, followUps, readiness, settings, cafeNoise] = await Promise.all([
+    const [answers, followUps, settings, cafeNoise] = await Promise.all([
       synthesizeAnswers(options, temporaryDirectory),
       synthesizeFollowUps(options, temporaryDirectory),
-      synthesizeReadiness(options, temporaryDirectory),
       interviewerSettings(),
       synthesizeCafeNoise(options, temporaryDirectory),
     ]);
-    const result = await simulate(options, answers, followUps, readiness, settings, cafeNoise);
+    const result = await simulate(options, answers, followUps, settings, cafeNoise);
     assert(
       result.answersSimulated === options.turns,
       `Interview ended after ${result.answersSimulated} of ${options.turns} requested answers`,
@@ -832,23 +770,9 @@ async function main() {
       }),
     );
 
-    // Gemini answers the first opening prompt with a transcript and no audio;
-    // the worker re-prompts it to speak the same text. That silent turn is an
-    // expected artifact, so assert on what the candidate actually hears.
-    const silentTurns = result.openingTurns.filter((turn) => turn.audio.bytes === 0).length;
-    assert(
-      silentTurns <= MAX_SILENT_OPENING_TURNS,
-      "Gemini needed more silent retries than expected to speak the opening. " +
-        "Above this the candidate waits noticeably before hearing the vignette.",
-      { silent: silentTurns, allowed: MAX_SILENT_OPENING_TURNS, turns: openingSummary },
-    );
-
     const caseTurns = result.openingTurns.filter((turn) => /here is your case/i.test(turn.text));
-    const readinessTurns = result.openingTurns.filter((turn) =>
-      /^are you ready to begin\?$/i.test(turn.text.trim()),
-    );
-    const readinessFallbackBytes = result.openingAudioFallbacks
-      .filter(({ stage }) => stage === "readiness")
+    const caseFallbackBytes = result.openingAudioFallbacks
+      .filter(({ stage }) => stage === "case")
       .reduce((total, { bytes }) => total + bytes, 0);
     assert(caseTurns.length === 1, "The audible case transcript must be delivered exactly once", {
       caseTurns: caseTurns.map(({ text, audio }) => ({
@@ -857,37 +781,16 @@ async function main() {
       })),
     });
     const caseTurn = caseTurns[0];
-    const coalescedReadiness = caseTurn
-      ? splitCoalescedReadiness(caseTurn.text)
-      : { caseText: "", includesReadiness: false };
-    const readinessTurn = readinessTurns[0] ??
-      (coalescedReadiness.includesReadiness ? caseTurn : undefined);
-
     assert(caseTurn, 'The opening did not say "Here is your case."', {
       turns: openingSummary,
     });
-    assert(!coalescedReadiness.caseText.includes("?"), "Case presentation asked a clinical question before readiness", {
-      tail: coalescedReadiness.caseText.slice(-200),
+    assert(!caseTurn.text.includes("?"), "Case presentation included a clinical question", {
+      tail: caseTurn.text.slice(-200),
     });
     assert(
-      coalescedReadiness.includesReadiness
-        ? readinessTurns.length === 0
-        : readinessTurns.length === 1,
-      "Readiness must be delivered exactly once",
-      {
-        coalesced: coalescedReadiness.includesReadiness,
-        separateReadinessTurns: readinessTurns.length,
-      },
-    );
-    assert(
-      readinessTurn,
-      'The opening did not ask exactly "Are you ready to begin?"',
-      { turns: openingSummary },
-    );
-    assert(
-      coalescedReadiness.includesReadiness || readinessFallbackBytes > 0,
-      "The separate readiness question did not use verified runtime TTS playback",
-      { readinessFallbackBytes, coalesced: coalescedReadiness.includesReadiness },
+      caseFallbackBytes > 0,
+      "The persisted case did not use verified runtime speech playback",
+      { caseFallbackBytes, fallbacks: result.openingAudioFallbacks },
     );
 
     // Gemini reports a turn complete before that turn's audio has finished
@@ -918,32 +821,34 @@ async function main() {
       openingAudioBytes,
     });
 
-    assert(
-      result.readinessTranscripts.some((text) => /^yes\b/i.test(text.trim())),
-      "Readiness confirmation was not transcribed",
-      { readinessTranscripts: result.readinessTranscripts },
-    );
     const firstClinicalPrompt = result.firstQuestionTurn?.text.trim() ?? "";
     assert(
       firstClinicalPrompt.length >= 20 &&
+        firstClinicalPrompt.includes("?") &&
         !/^are you ready\b/i.test(firstClinicalPrompt) &&
         !/^here is your case\b/i.test(firstClinicalPrompt),
-      "Readiness confirmation did not produce the first clinical prompt",
+      "The opening did not transition directly to a valid first clinical prompt",
       { firstQuestionTurn: firstClinicalPrompt.slice(0, 200) || null },
     );
     assert(
-      // Case and readiness are now deterministic runtime TTS, so only the
-      // discarded Live warm-up and candidate readiness response create Live
-      // turn-complete events before the first clinical question.
+      ![...result.openingTurns.map(({ text }) => text), firstClinicalPrompt].some((text) =>
+        /are you ready to begin/i.test(text),
+      ),
+      "The removed readiness gate was spoken during the opening",
+      { turns: openingSummary, firstClinicalPrompt },
+    );
+    assert(
+      // The discarded Live warm-up and the first-question response both
+      // complete before the candidate's first scored answer.
       result.turnCompletions.length >= 2,
-      "Expected the warm-up and readiness-response turn completions",
+      "Expected the warm-up and first-question turn completions",
       { turnCompletions: result.turnCompletions },
     );
     assert(
       result.turnCompletions
         .slice(0, result.openingTurnCompletionCount)
         .every(({ answerCount }) => answerCount === 0),
-      "Opening or readiness was incorrectly counted as a clinical answer",
+      "Opening sequence was incorrectly counted as a clinical answer",
       {
         openingTurnCompletions: result.turnCompletions.slice(
           0,

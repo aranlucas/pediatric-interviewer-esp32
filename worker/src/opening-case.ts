@@ -6,6 +6,7 @@ import {
 } from "./interview-config";
 import { type InterviewTopic } from "./interview-content";
 import { isValidOpeningCasePresentation } from "./gemini-live-protocol";
+import { workerLog } from "./log";
 
 /** Stable, low-latency structured-output model used before the Live session. */
 export const GEMINI_OPENING_CASE_MODEL = "gemini-3.5-flash-lite" as const;
@@ -52,7 +53,7 @@ export function openingCaseInteraction(
       `Write ${MIN_VIGNETTE_WORDS} to ${MAX_VIGNETTE_WORDS} spoken words. ` +
       "Start with the child's age and presenting situation. Include only facts a candidate would reasonably receive at presentation. " +
       "Do not reveal the diagnosis, hidden findings, ideal plan, or answer. Do not ask a question. " +
-      'Do not include "Here is your case" or "Are you ready to begin"; the runtime adds those exact boundaries.',
+      'Do not include "Here is your case" or "Are you ready to begin"; the runtime adds the case introduction and intentionally has no readiness gate.',
     response_format: {
       type: "text" as const,
       mime_type: "application/json" as const,
@@ -131,13 +132,10 @@ export async function generateOpeningCase(
       return parseOpeningCaseResponse(interaction.output_text);
     } catch (error) {
       lastError = error;
-      console.warn(
-        JSON.stringify({
-          event: "gemini_opening_case_retry",
-          attempt,
-          reason: error instanceof Error ? error.message.slice(0, 160) : "unknown failure",
-        }),
-      );
+      workerLog("warn", "gemini_opening_case_retry", {
+        attempt,
+        reason: error instanceof Error ? error.message.slice(0, 160) : "unknown failure",
+      });
     }
   }
   throw new Error("Gemini could not generate a valid opening case.", { cause: lastError });

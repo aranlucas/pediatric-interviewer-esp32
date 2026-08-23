@@ -79,6 +79,7 @@ export type InterviewState = {
   openingStage?:
     | "warming_up"
     | "presenting_case"
+    | "asking_first_question"
     | "asking_readiness"
     | "awaiting_confirmation"
     | "complete";
@@ -142,6 +143,20 @@ export function statusCopy(
         detail: `Choose topics and settings to begin a ${questionCount}-question interview.`,
       };
   }
+}
+
+export function statusAfterRejectedTextAnswer(
+  serverStatus: InterviewStatus,
+  currentStatus: InterviewStatus,
+): InterviewStatus {
+  return currentStatus === "thinking" ? serverStatus : currentStatus;
+}
+
+export function shouldCaptureInterviewAudio(
+  status: InterviewStatus,
+  textComposerOpen: boolean,
+): boolean {
+  return status === "listening" && !textComposerOpen;
 }
 
 export function interviewKeepsScreenAwake(status: InterviewStatus): boolean {

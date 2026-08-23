@@ -7,6 +7,8 @@ import {
   interviewKeepsScreenAwake,
   outcomeLabel,
   questionCountForSelection,
+  shouldCaptureInterviewAudio,
+  statusAfterRejectedTextAnswer,
   statusCopy,
   TOPICS,
   topicSelectionLabel,
@@ -56,5 +58,18 @@ describe("interview helpers", () => {
     expect(interviewKeepsScreenAwake("idle")).toBe(false);
     expect(interviewKeepsScreenAwake("complete")).toBe(false);
     expect(interviewKeepsScreenAwake("error")).toBe(false);
+  });
+
+  it("restores authoritative server status after a rejected typed answer", () => {
+    expect(statusAfterRejectedTextAnswer("speaking", "thinking")).toBe("speaking");
+    expect(statusAfterRejectedTextAnswer("listening", "thinking")).toBe("listening");
+    expect(statusAfterRejectedTextAnswer("listening", "evaluating")).toBe("evaluating");
+  });
+
+  it("never captures microphone audio while the typed-answer composer is open", () => {
+    expect(shouldCaptureInterviewAudio("listening", false)).toBe(true);
+    expect(shouldCaptureInterviewAudio("listening", true)).toBe(false);
+    expect(shouldCaptureInterviewAudio("thinking", false)).toBe(false);
+    expect(shouldCaptureInterviewAudio("speaking", false)).toBe(false);
   });
 });

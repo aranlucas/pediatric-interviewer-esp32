@@ -15,6 +15,7 @@ import {
   type StoredInterviewReport,
 } from "./interview-report";
 import type { InterviewDifficulty } from "./interview-config";
+import { workerLog } from "./log";
 
 export type InterviewFinalizationSnapshot = {
   apiKey: string;
@@ -97,13 +98,10 @@ export async function finalizeInterviewReport(
       },
     );
   } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "cheatsheet_generation_failed",
-        reportId: snapshot.reportId,
-        error: String(error).slice(0, 200),
-      }),
-    );
+    workerLog("error", "cheatsheet_generation_failed", {
+      reportId: snapshot.reportId,
+      error: String(error).slice(0, 200),
+    });
   }
 
   const report: StoredInterviewReport = {

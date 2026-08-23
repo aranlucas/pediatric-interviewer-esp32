@@ -52,5 +52,10 @@
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
+    "logs": {
+      // WebSocket invocation rows are always titled "message" by Cloudflare.
+      // Keep the app's structured lifecycle/error logs without that noise.
+      "invocation_logs": false,
+    },
   },
 }

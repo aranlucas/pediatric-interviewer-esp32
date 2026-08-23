@@ -48,8 +48,8 @@ Gemini Live uses `gemini-3.1-flash-live-preview` through `@google/genai`:
   automatic activity detection disabled;
 - a schema-constrained case authored by stable `gemini-3.5-flash-lite`,
   semantically validated and persisted before playback; exact case audio is
-  prewarmed in parallel with the cold-session Live warm-up, followed by the
-  fixed readiness boundary and focused questions;
+  prewarmed in parallel with the cold-session Live warm-up, followed directly
+  by the first focused clinical question;
 - post-setup scripted prompts and typed candidate turns sent through current
   Live realtime text input rather than initial-history client content;
 - generation-scoped session resumption with the provider handle kept in
@@ -77,23 +77,20 @@ Provider message processing is exception-contained: a malformed Live payload
 or any SDK message/error/close callback failure enters the owned reconnect path
 instead of tearing down the candidate socket.
 
-The case and fixed readiness sentence are spoken through bounded Cloudflare
-Workers AI using `@cf/deepgram/aura-2-en` as raw 24 kHz PCM16. The separately
-validated `gemini-3.1-flash-tts-preview` Interactions path is a provider
-fallback. Live system and recovery instructions declare those deterministic
-external boundaries, so the Worker does not inject unsupported model-role
-history mid-session and Live cannot own their wording. New sessions therefore
-deliver exactly one persisted case and exactly one readiness prompt. The older
-Live-generated opening path remains only for a legacy in-progress Durable
-Object that has no persisted case.
+The persisted case is spoken through bounded Cloudflare Workers AI using
+`@cf/deepgram/aura-2-en` as raw 24 kHz PCM16. The separately validated
+`gemini-3.1-flash-tts-preview` Interactions path is a provider fallback. Gemini
+Live then asks the first clinical question directly; there is no candidate
+readiness gate. Live system and recovery instructions declare that runtime-owned
+case boundary, so the Worker does not inject unsupported model-role history
+mid-session and Live cannot replace or repeat the case.
 
 The opening stage, exact presented case, and any partially completed
 question/answer/probe exchange are also persisted. On a Durable Object wake,
 the Worker invalidates process-bound provider handles and reconstructs the exact
-opening, readiness, or unanswered active-probe context through the fresh
-session instruction without playing an already-delivered readiness prompt a
-second time. Silent recovery context is never a presentation command, and a
-fresh-session replay speaks only the authoritative pending clinical prompt. If
+opening or unanswered active-probe context through the fresh session instruction.
+Silent recovery context is never a presentation command, and a fresh-session
+replay speaks only the authoritative pending clinical prompt. If
 the client disappears during opening playback, the durable stage and exact case
 are kept for replay after reconnect instead of resetting the interview to idle.
 If interruption ends the interview during a probe, that answered partial

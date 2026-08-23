@@ -5,6 +5,8 @@ export type BrowserSessionToken = {
 
 const pendingRequests = new Map<string, Promise<BrowserSessionToken>>();
 
+const SESSION_HANDSHAKE_TIMEOUT_MS = 10_000;
+
 class SessionSetupError extends Error {}
 
 /**
@@ -28,6 +30,7 @@ export function requestBrowserSessionToken(
         method: "POST",
         cache: "no-store",
         credentials: "same-origin",
+        signal: AbortSignal.timeout(SESSION_HANDSHAKE_TIMEOUT_MS),
       },
     ))
     .then(async (response) => {

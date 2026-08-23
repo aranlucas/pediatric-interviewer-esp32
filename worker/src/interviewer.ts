@@ -53,18 +53,16 @@ import {
 } from "./opening-case";
 import {
   GEMINI_LIVE_MODEL,
+  geminiFirstQuestionTurn,
   geminiLiveConfig,
-  geminiOpeningTurn,
   geminiReconnectTurn,
-  geminiReplayForAudioTurn,
   geminiWarmUpTurn,
-  isValidOpeningCasePresentation,
-  splitOpeningCaseReadiness,
   turnDispositionToolOutput,
   TURN_DISPOSITION_TOOL,
   type TurnDisposition,
 } from "./gemini-live-protocol";
 import { decodeBase64, encodeBase64, PcmFramer, resamplePcm16 } from "./pcm-audio";
+import { workerLog, type WorkerLogLevel } from "./log";
 
 export { PEDIATRIC_TOPICS };
 
@@ -76,7 +74,6 @@ const GEMINI_OUTPUT_SAMPLE_RATE = 24_000;
 // five chunks per message while preserving Gemini's native 24 kHz mono stream.
 export const OUTPUT_PCM_FRAME_BYTES = 4_800;
 const MAX_OPENING_AUDIO_RETRIES = 1;
-const MAX_OPENING_CONTENT_RETRIES = 2;
 const MAX_LIVE_RECONNECT_ATTEMPTS = 3;
 const LIVE_RECONNECT_DELAY_MS = 1_000;
 const CLIENT_RECONNECT_GRACE_MS = 20_000;
@@ -87,15 +84,14 @@ const MAX_REPLAYABLE_CANDIDATE_AUDIO_BYTES = 4_320_000;
 const PCM16_BYTES_PER_SECOND = DEVICE_SAMPLE_RATE * 2;
 
 /**
- * The opening handshake runs as one linear sequence: a throwaway warm-up turn,
- * the generated case presentation, the readiness question, then the candidate's
- * confirmation. Only after the confirmation is the interview under way.
+ * The opening sequence is runtime-owned: absorb the Live cold-start turn,
+ * play the prevalidated case, then ask the first clinical question. There is
+ * no model-owned readiness gate between the case and scored interview.
  */
 export type OpeningStage =
   | "warming_up"
   | "presenting_case"
-  | "asking_readiness"
-  | "awaiting_confirmation"
+  | "asking_first_question"
   | "complete";
 
 type OpeningPlaybackResult = "played" | "failed" | "stale" | "unavailable";
@@ -128,14 +124,13 @@ type DeferredTransportFailure = {
   reason: string;
 };
 
-const OPENING_HANDSHAKE_STAGES: ReadonlySet<OpeningStage> = new Set([
+const OPENING_SEQUENCE_STAGES: ReadonlySet<OpeningStage> = new Set([
   "warming_up",
   "presenting_case",
-  "asking_readiness",
+  "asking_first_question",
 ]);
 const OPENING_STAGES: ReadonlySet<OpeningStage> = new Set([
-  ...OPENING_HANDSHAKE_STAGES,
-  "awaiting_confirmation",
+  ...OPENING_SEQUENCE_STAGES,
   "complete",
 ]);
 
@@ -253,14 +248,11 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   private awaitingToolContinuation = false;
   private openingStage: OpeningStage = "complete";
   private openingAudioRetryCount = 0;
-  private openingContentRetryCount = 0;
   private openingCaseText = "";
   private openingCaseSpeechText = "";
   private openingCaseSpeech?: OpeningSpeech;
   private openingCaseSpeechPromise?: Promise<OpeningSpeech>;
   private lastOpeningTranscript = "";
-  private readinessSpeech?: OpeningSpeech;
-  private readinessSpeechPromise?: Promise<OpeningSpeech>;
   private pendingQuestion = "";
   private pendingAnswer = "";
   private pendingFollowUps: InterviewFollowUp[] = [];
@@ -291,12 +283,20 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   }
 
   private durableOpeningStage(): OpeningStage {
-    if (this.state.openingStage && OPENING_STAGES.has(this.state.openingStage)) {
-      return this.state.openingStage;
+    const persistedStage = this.state.openingStage as string | undefined;
+    if (persistedStage && OPENING_STAGES.has(persistedStage as OpeningStage)) {
+      return persistedStage as OpeningStage;
     }
     if (this.hasSavedCandidateWork) return "complete";
-    if (/are you ready to begin\??\s*$/iu.test(this.state.currentQuestion)) {
-      return "awaiting_confirmation";
+    // Migrate sessions persisted by the removed readiness handshake. They have
+    // a durable case but no scored work, so the only safe next action is to ask
+    // the first clinical question.
+    if (
+      persistedStage === "asking_readiness" ||
+      persistedStage === "awaiting_confirmation" ||
+      /are you ready to begin\??\s*$/iu.test(this.state.currentQuestion)
+    ) {
+      return "asking_first_question";
     }
     if (/generating a new oral-board vignette/iu.test(this.state.currentQuestion)) {
       return "warming_up";
@@ -419,8 +419,25 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     return Math.min(this.answerCount + 1, this.plannedQuestionCount);
   }
 
-  private get openingHandshakeInProgress(): boolean {
-    return OPENING_HANDSHAKE_STAGES.has(this.openingStage);
+  private get openingSequenceInProgress(): boolean {
+    return OPENING_SEQUENCE_STAGES.has(this.openingStage);
+  }
+
+  /** Adds the durable progress needed to understand any lifecycle record. */
+  private log(
+    level: WorkerLogLevel,
+    event: string,
+    fields: Record<string, unknown> = {},
+  ): void {
+    workerLog(level, event, {
+      interviewGeneration: this.currentInterviewGeneration(),
+      phase: this.state.phase,
+      openingStage: this.openingStage,
+      answerCount: this.answerCount,
+      questionNumber: this.questionNumber,
+      questionCount: this.plannedQuestionCount,
+      ...fields,
+    });
   }
 
   private currentInterviewGeneration(): string | undefined {
@@ -472,9 +489,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       return rows[0]?.resumption_handle || undefined;
     } catch (error) {
       this.resumptionHandleUsable = false;
-      console.error(
-        JSON.stringify({ event: "live_metadata_read_failed", error: String(error).slice(0, 160) }),
-      );
+      this.log("error", "live_metadata_read_failed", {
+        error: String(error).slice(0, 160),
+      });
       return undefined;
     }
   }
@@ -491,9 +508,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       return true;
     } catch (error) {
       this.resumptionHandleUsable = false;
-      console.error(
-        JSON.stringify({ event: "live_metadata_write_failed", error: String(error).slice(0, 160) }),
-      );
+      this.log("error", "live_metadata_write_failed", {
+        error: String(error).slice(0, 160),
+      });
       return false;
     }
   }
@@ -512,9 +529,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       return true;
     } catch (error) {
       this.resumptionHandleUsable = false;
-      console.error(
-        JSON.stringify({ event: "live_metadata_clear_failed", error: String(error).slice(0, 160) }),
-      );
+      this.log("error", "live_metadata_clear_failed", {
+        error: String(error).slice(0, 160),
+      });
       return false;
     }
   }
@@ -542,12 +559,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
 
   private runProtected(operation: () => Promise<void>, event: string): void {
     void this.keepAliveWhile(operation).catch((error) => {
-      console.error(
-        JSON.stringify({
-          event,
-          error: String(error).slice(0, 240),
-        }),
-      );
+      this.log("error", event, { error: String(error).slice(0, 240) });
     });
   }
 
@@ -655,13 +667,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         return;
       }
       const target = this.device;
-      console.error(
-        JSON.stringify({
-          event: "gemini_response_timeout",
-          turnKind: pending.kind,
-          timeoutMs: PROVIDER_RESPONSE_TIMEOUT_MS,
-        }),
-      );
+      this.log("error", "gemini_response_timeout", {
+        turnKind: pending.kind,
+        timeoutMs: PROVIDER_RESPONSE_TIMEOUT_MS,
+      });
       this.sendJSON(target, { type: "playback_interrupt" });
       this.sendJSON(target, {
         type: "turn_recovery",
@@ -765,13 +774,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     }
     if (!sent) return false;
     this.armProviderResponseDeadline(pending, generation);
-    console.log(
-      JSON.stringify({
-        event: "gemini_turn_replayed",
-        turnKind: pending.kind,
-        audioBytes: pending.kind === "candidate_audio" ? pending.bytes : undefined,
-      }),
-    );
+    this.log("info", "gemini_turn_replayed", {
+      turnKind: pending.kind,
+      audioBytes: pending.kind === "candidate_audio" ? pending.bytes : undefined,
+    });
     return true;
   }
 
@@ -835,13 +841,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       connection.send(payload);
       return true;
     } catch (error) {
-      console.error(
-        JSON.stringify({
-          event: "device_send_failed",
-          connectionId: connection.id,
-          error: String(error).slice(0, 160),
-        }),
-      );
+      this.log("error", "device_send_failed", {
+        connectionId: connection.id,
+        error: String(error).slice(0, 160),
+      });
       this.markDeviceDisconnected(connection);
       return false;
     }
@@ -857,13 +860,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       send(session);
       return true;
     } catch (error) {
-      console.error(
-        JSON.stringify({
-          event: "gemini_send_failed",
-          operation,
-          error: String(error).slice(0, 200),
-        }),
-      );
+      this.log("error", "gemini_send_failed", {
+        operation,
+        error: String(error).slice(0, 200),
+      });
       this.handleGeminiTransportFailure(this.device, this.liveGeneration, operation);
       return false;
     }
@@ -912,13 +912,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     const promise = this.keepAliveWhile(() => this.reconnectGemini(task))
       .catch((error) => {
         if (!this.isReconnectTaskCurrent(task)) return;
-        console.error(
-          JSON.stringify({
-            event: "gemini_reconnect_exhausted",
-            reason: task.reason.slice(0, 100),
-            error: String(error).slice(0, 220),
-          }),
-        );
+        this.log("error", "gemini_reconnect_exhausted", {
+          reason: task.reason.slice(0, 100),
+          error: String(error).slice(0, 220),
+        });
         this.finalizeAfterLiveFailure(task.connection, "Gemini Live reconnect failed");
       })
       .finally(() => {
@@ -973,8 +970,12 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     // close after this callback; its close event must not tear down this live
     // session or steal the completion notification from the new client.
     this.claimConnection(connection);
-    if (this.state.phase === "interviewing" && this.openingStage !== "complete") {
-      this.prewarmReadinessSpeech();
+    if (
+      this.state.phase === "interviewing" &&
+      this.openingStage === "presenting_case" &&
+      this.openingCaseText
+    ) {
+      this.prewarmOpeningCaseSpeech(this.openingCaseText);
     }
     this.resyncConnection(connection);
     if (this.state.phase === "interviewing" && !this.gemini) {
@@ -1057,7 +1058,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   }
 
   /**
-   * Drives the next scripted turn of the opening handshake. Re-arms the
+   * Drives the next scripted turn of the opening sequence. Re-arms the
    * completion guard so Gemini's reply to this prompt is treated as a new turn.
    */
   private askGemini(connection: Connection, turn: { turns: string; turnComplete: true }): void {
@@ -1076,10 +1077,12 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     generation: number,
   ): Promise<void> {
     if (!this.openingCaseText) {
-      // Legacy durable sessions created before structured case generation
-      // have no persisted case. Retain the bounded Live path only for those
-      // already-in-progress sessions.
-      this.askGemini(connection, geminiOpeningTurn());
+      this.failOpening(
+        connection,
+        generation,
+        "missing opening case",
+        "The saved case was unavailable. Please restart the interview.",
+      );
       return;
     }
     const playback = await this.playOpeningSpeechFallback(
@@ -1100,11 +1103,11 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     const target = this.device ?? connection;
     this.sendAssistantTranscript(target, this.openingCaseText);
     this.updateInterview(target, {
-      openingStage: "asking_readiness",
+      openingStage: "asking_first_question",
       casePresentation: this.openingCaseText,
       currentQuestion: openingPresentationForDisplay(this.openingCaseText),
     });
-    await this.presentReadinessPrompt(target, generation);
+    this.askGemini(target, geminiFirstQuestionTurn());
   }
 
   /** Replays the exact durable checkpoint when a provider handle is unavailable. */
@@ -1120,18 +1123,8 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       );
       return;
     }
-    if (this.openingStage === "asking_readiness") {
-      this.runProtected(
-        () => this.presentReadinessPrompt(connection, this.liveGeneration),
-        "readiness_prompt_failed",
-      );
-      return;
-    }
-    if (this.openingStage === "awaiting_confirmation") {
-      // This stage is persisted only after the complete prompt was delivered.
-      // The recovery system instruction supplies the readiness boundary; do
-      // not replay it to the candidate or send model-role history mid-session.
-      this.sendStatus(connection, "listening");
+    if (this.openingStage === "asking_first_question") {
+      this.askGemini(connection, geminiFirstQuestionTurn());
       return;
     }
     this.askGemini(
@@ -1168,7 +1161,6 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       currentQuestion: string;
       persistedAnswerCount: number;
       plannedQuestionCount: number;
-      awaitingReadinessConfirmation: boolean;
     },
   ): Promise<Session> {
     const ai = new GoogleGenAI({ apiKey: this.env.GEMINI_API_KEY });
@@ -1185,25 +1177,19 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
           this.handleGeminiMessageSafely(message, generation, connection),
         onerror: (event) => {
           this.runGeminiCallbackSafely("error", generation, connection, () => {
-            console.error(
-              JSON.stringify({
-                event: "gemini_live_error",
-                error: String(event.error ?? event.message).slice(0, 200),
-              }),
-            );
+            this.log("error", "gemini_live_error", {
+              error: String(event.error ?? event.message).slice(0, 200),
+            });
             this.handleGeminiTransportFailure(connection, generation, "sdk_error");
           });
         },
         onclose: (event) => {
           this.runGeminiCallbackSafely("close", generation, connection, () => {
-            console.error(
-              JSON.stringify({
-                event: "gemini_live_close",
-                code: event.code,
-                reason: event.reason,
-                clean: event.wasClean,
-              }),
-            );
+            this.log("warn", "gemini_live_close", {
+              code: event.code,
+              reason: event.reason,
+              clean: event.wasClean,
+            });
             if (this.closingGemini) return;
             this.handleGeminiTransportFailure(
               connection ?? this.device,
@@ -1262,7 +1248,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     this.releaseKeepAlive?.();
     this.releaseKeepAlive = undefined;
     this.closingGemini = true;
-    console.error(JSON.stringify({ event: "gemini_live_reconnect", reason: reason.slice(0, 120) }));
+    this.log("warn", "gemini_live_reconnect", { reason: reason.slice(0, 120) });
     try {
       session?.close();
     } catch {
@@ -1306,12 +1292,12 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         ? undefined
         : {
             casePresentation: this.openingCaseText.slice(0, 4_000),
-            currentQuestion: this.authoritativeRecoveryQuestion().slice(0, 4_000),
+            currentQuestion:
+              this.openingStage === "complete"
+                ? this.authoritativeRecoveryQuestion().slice(0, 4_000)
+                : "",
             persistedAnswerCount: this.answerCount,
             plannedQuestionCount: this.plannedQuestionCount,
-            awaitingReadinessConfirmation:
-              this.openingStage === "asking_readiness" ||
-              this.openingStage === "awaiting_confirmation",
           };
       this.connecting = true;
       this.reconnectConnectingTask = task;
@@ -1354,7 +1340,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         this.reconnectAttempts = 0;
         if (target) this.resyncConnection(target);
         this.pendingReconnect = undefined;
-        console.log(JSON.stringify({ event: "gemini_reconnected", reason: task.reason.slice(0, 100), resumed: Boolean(handle) }));
+        this.log("info", "gemini_reconnected", {
+          reason: task.reason.slice(0, 100),
+          resumed: Boolean(handle),
+        });
         return;
       } catch (error) {
         if (!this.isReconnectTaskCurrent(task)) return;
@@ -1473,10 +1462,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       cheatsheetAvailable: false,
       evaluation: undefined,
     });
-    // Readiness is fixed copy. Generate it alongside the warm-up and case so
-    // its preview-model latency is hidden behind speech the candidate already
-    // expects, while retaining exact deterministic playback at the boundary.
-    this.prewarmReadinessSpeech();
+    this.log("info", "interview_started", {
+      topicIds: configuration.topicIds,
+      difficulty: configuration.difficulty,
+    });
     try {
       this.releaseKeepAlive = await this.keepAlive();
       // Generate the clinical content through a schema-constrained text model
@@ -1503,6 +1492,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         casePresentation: openingCaseText,
         currentQuestion: openingPresentationForDisplay(openingCaseText),
       });
+      this.log("info", "opening_case_ready", {
+        characters: openingCaseText.length,
+      });
       if (this.device?.id !== connection.id) return;
       await this.openGeminiSession(
         connection,
@@ -1512,13 +1504,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         undefined,
         {
           casePresentation: openingCaseText,
-          currentQuestion: `${openingCaseText} Are you ready to begin?`,
+          currentQuestion: "",
           persistedAnswerCount: 0,
           plannedQuestionCount: configuration.questionCount,
-          // The model sees the candidate only after the runtime has played the
-          // exact readiness prompt, so configure that future input boundary up
-          // front instead of injecting model-role history mid-session.
-          awaitingReadinessConfirmation: true,
         },
       );
       if (generation !== this.liveGeneration || this.device?.id !== connection.id) return;
@@ -1530,12 +1518,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       this.askGemini(connection, geminiWarmUpTurn());
     } catch (error) {
       if (generation !== this.liveGeneration) return;
-      console.error(
-        JSON.stringify({
-          event: "gemini_live_start_failed",
-          error: String(error).slice(0, 240),
-        }),
-      );
+      this.log("error", "gemini_live_start_failed", {
+        error: String(error).slice(0, 240),
+      });
       this.closeGeminiSession("Gemini Live startup failed", true);
       this.sendJSON(connection, {
         type: "error",
@@ -1565,7 +1550,6 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     this.resetLiveBuffers();
     this.openingStage = "complete";
     this.openingAudioRetryCount = 0;
-    this.openingContentRetryCount = 0;
     this.openingCaseText = "";
     this.openingCaseSpeechText = "";
     this.openingCaseSpeech = undefined;
@@ -1598,7 +1582,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     this.turnFinalizationGeneration = undefined;
     this.deferredTransportFailure = undefined;
     this.closingGemini = true;
-    console.log(`Closing Gemini Live session: ${reason.slice(0, 100)}`);
+    this.log("info", "gemini_live_closed", { reason: reason.slice(0, 100) });
     const session = this.gemini;
     this.gemini = undefined;
     ++this.liveGeneration;
@@ -1684,22 +1668,20 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       return;
     }
     if (!isValidPcm16Input(audio)) {
-      console.warn(
-        JSON.stringify({ event: "invalid_pcm_frame", connectionId: connection.id, bytes: audio.byteLength }),
-      );
+      this.log("warn", "invalid_pcm_frame", {
+        connectionId: connection.id,
+        bytes: audio.byteLength,
+      });
       return;
     }
     if (!this.inputAudioRate.accept(audio.byteLength)) {
       const now = Date.now();
       if (now - this.lastPcmRateLimitLogAt >= 1_000) {
         this.lastPcmRateLimitLogAt = now;
-        console.warn(
-          JSON.stringify({
-            event: "pcm_rate_limited",
-            connectionId: connection.id,
-            bytes: audio.byteLength,
-          }),
-        );
+        this.log("warn", "pcm_rate_limited", {
+          connectionId: connection.id,
+          bytes: audio.byteLength,
+        });
       }
       return;
     }
@@ -1772,9 +1754,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
             ? "gemini_not_connected"
             : this.lastStatus !== "listening"
               ? "interviewer_not_listening"
-              : this.candidateActivityStarted
-                ? "audio_turn_active"
-                : null;
+              : null;
     if (rejectionReason) {
       this.sendJSON(connection, {
         type: "candidate_text_ack",
@@ -1791,9 +1771,15 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     this.turnDisposition = "advance_skillset";
     this.awaitingToolContinuation = false;
     this.inputTranscript = text;
+    const replacesAudioTurn = this.candidateActivityStarted;
+    this.candidateActivityStarted = false;
     const pending = this.beginCandidateTextTurn(text);
     if (!this.safeGeminiSend(gemini, "candidate_text", (session) => {
       session.sendRealtimeInput({ text });
+      // Realtime text received while manual audio activity is open belongs to
+      // that same candidate turn. Close it after the text so Gemini produces
+      // one response instead of leaving the ambient microphone turn active.
+      if (replacesAudioTurn) session.sendRealtimeInput({ activityEnd: {} });
     })) {
       this.sendJSON(connection, {
         type: "candidate_text_ack",
@@ -1823,12 +1809,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       }
     }
     if (message.goAway) {
-      console.warn(
-        JSON.stringify({
-          event: "gemini_live_go_away",
-          timeLeft: message.goAway.timeLeft,
-        }),
-      );
+      this.log("warn", "gemini_live_go_away", {
+        timeLeft: message.goAway.timeLeft,
+      });
       this.handleGeminiTransportFailure(
         this.device,
         generation,
@@ -1847,7 +1830,6 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         if (call.name === TURN_DISPOSITION_TOOL) {
           const disposition = call.args?.disposition;
           if (
-            disposition === "begin_first_question" ||
             disposition === "advance_skillset" ||
             disposition === "probe_current_answer" ||
             disposition === "provide_case_information"
@@ -1858,14 +1840,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
               this.pendingFollowUps.length >= MAX_FOLLOW_UPS_PER_EXCHANGE - 1;
             this.turnDisposition = probeCapReached ? "advance_skillset" : disposition;
             if (probeCapReached) {
-              console.log(
-                JSON.stringify({
-                  event: "probe_limit_reached",
-                  questionNumber: this.questionNumber,
-                  completedFollowUps: this.pendingFollowUps.length,
-                  answeringFinalFollowUp: true,
-                }),
-              );
+              this.log("info", "probe_limit_reached", {
+                completedFollowUps: this.pendingFollowUps.length,
+                answeringFinalFollowUp: true,
+              });
             }
             output = turnDispositionToolOutput(
               this.turnDisposition,
@@ -1889,12 +1867,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     if (message.toolCallCancellation) {
       this.refreshProviderResponseDeadline(generation);
       this.awaitingToolContinuation = false;
-      console.warn(
-        JSON.stringify({
-          event: "gemini_tool_call_cancelled",
-          ids: message.toolCallCancellation.ids,
-        }),
-      );
+      this.log("warn", "gemini_tool_call_cancelled", {
+        ids: message.toolCallCancellation.ids,
+      });
     }
     const content = message.serverContent;
     if (!content) return;
@@ -1909,33 +1884,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     ) {
       this.refreshProviderResponseDeadline(generation);
     }
-    {
-      console.log(
-        JSON.stringify({
-          event: "gemini_server_content",
-          stage: this.openingStage,
-          parts: parts.length,
-          audioParts: parts.filter((part) => part.inlineData?.data).length,
-          audioBytes: parts.reduce(
-            (total, part) => total + (part.inlineData?.data?.length ?? 0),
-            0,
-          ),
-          mimeTypes: [...new Set(parts.map((part) => part.inlineData?.mimeType ?? "none"))],
-          textParts: parts.filter((part) => part.text).length,
-          outputTranscriptionChars: content.outputTranscription?.text?.length ?? 0,
-          generationComplete: Boolean(content.generationComplete),
-          turnComplete: Boolean(content.turnComplete),
-          interrupted: Boolean(content.interrupted),
-        }),
-      );
-    }
     if (content.interrupted) {
-      console.log(
-        JSON.stringify({
-          event: "gemini_generation_interrupted",
-          answerCharacters: this.inputTranscript.length,
-        }),
-      );
+      this.log("info", "gemini_generation_interrupted", {
+        answerCharacters: this.inputTranscript.length,
+      });
       this.interruptedGeneration = true;
       this.resetOutputAudio();
       this.outputTranscript = "";
@@ -1948,13 +1900,8 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         this.inputTranscript,
         content.inputTranscription.text,
       );
-      console.log(
-        JSON.stringify({
-          event: "gemini_input_transcription",
-          characters: content.inputTranscription.text.length,
-        }),
-      );
-      this.sendStatus(connection, "thinking");
+      // Transcription is a partial observation, not an input-state boundary.
+      // The explicit commit path owns the listening -> thinking transition.
     }
     if (content.outputTranscription?.text) {
       this.awaitingToolContinuation = false;
@@ -1967,12 +1914,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       const inline = part.inlineData;
       if (!inline?.data) continue;
       if (!isBoundedProviderAudio(inline.data)) {
-        console.error(
-          JSON.stringify({
-            event: "gemini_audio_chunk_rejected",
-            encodedCharacters: inline.data.length,
-          }),
-        );
+        this.log("error", "gemini_audio_chunk_rejected", {
+          encodedCharacters: inline.data.length,
+        });
         this.handleGeminiTransportFailure(connection, generation, "oversized_audio_chunk");
         return;
       }
@@ -1990,7 +1934,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       this.sendStatus(connection, "listening");
       return;
     }
-    if (!shouldEndTurn(content, this.openingHandshakeInProgress)) return;
+    if (!shouldEndTurn(content, this.openingSequenceInProgress)) return;
     if (this.responseCompletionHandled) return;
     this.responseCompletionHandled = true;
     const completedProviderTurn = this.pendingProviderTurn;
@@ -2016,12 +1960,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
           });
         }
       } catch (error) {
-        console.error(
-          JSON.stringify({
-            event: "turn_finalization_failed",
-            error: String(error).slice(0, 240),
-          }),
-        );
+        this.log("error", "turn_finalization_failed", {
+          error: String(error).slice(0, 240),
+        });
         if (generation === this.liveGeneration) {
           if (
             completedProviderTurn &&
@@ -2083,12 +2024,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       callback();
     } catch (error) {
       if (generation !== this.liveGeneration) return;
-      console.error(
-        JSON.stringify({
-          event: `gemini_${operation}_callback_failed`,
-          error: String(error).slice(0, 240),
-        }),
-      );
+      this.log("error", `gemini_${operation}_callback_failed`, {
+        error: String(error).slice(0, 240),
+      });
       try {
         this.handleGeminiTransportFailure(
           this.device ?? connection,
@@ -2096,13 +2034,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
           `${operation}_callback_failed`,
         );
       } catch (recoveryError) {
-        console.error(
-          JSON.stringify({
-            event: "gemini_callback_recovery_failed",
-            operation,
-            error: String(recoveryError).slice(0, 240),
-          }),
-        );
+        this.log("error", "gemini_callback_recovery_failed", {
+          operation,
+          error: String(recoveryError).slice(0, 240),
+        });
       }
     }
   }
@@ -2115,9 +2050,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
    */
   private openingPlaybackIsCurrent(
     generation: number,
-    stage: "case" | "readiness",
+    stage: "case" | "first_question",
   ): boolean {
-    const expectedStage = stage === "case" ? "presenting_case" : "asking_readiness";
+    const expectedStage = stage === "case" ? "presenting_case" : "asking_first_question";
     return (
       generation === this.liveGeneration &&
       this.state.phase === "interviewing" &&
@@ -2126,7 +2061,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   }
 
   private async playOpeningSpeechFallback(
-    stage: "case" | "readiness",
+    stage: "case" | "first_question",
     text: string,
     generation: number,
   ): Promise<OpeningPlaybackResult> {
@@ -2135,9 +2070,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       const speech =
         stage === "case"
           ? await this.openingCaseSpeechForPlayback(text)
-          : text === "Are you ready to begin?"
-            ? await this.readinessSpeechForPlayback()
-            : await this.synthesizeReliableOpeningSpeech(text);
+          : await this.synthesizeReliableOpeningSpeech(text);
       if (!this.openingPlaybackIsCurrent(generation, stage)) return "stale";
       const pcm = resamplePcm16(speech.pcm, speech.sampleRate, DEVICE_SAMPLE_RATE);
       const target = this.device;
@@ -2180,23 +2113,17 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         stage,
         bytes: sentBytes,
       });
-      console.log(
-        JSON.stringify({
-          event: "opening_audio_fallback_played",
-          stage,
-          bytes: sentBytes,
-        }),
-      );
+      this.log("info", "opening_audio_fallback_played", {
+        stage,
+        bytes: sentBytes,
+      });
       return "played";
     } catch (error) {
       if (!this.openingPlaybackIsCurrent(generation, stage)) return "stale";
-      console.error(
-        JSON.stringify({
-          event: "opening_audio_fallback_failed",
-          stage,
-          error: String(error).slice(0, 200),
-        }),
-      );
+      this.log("error", "opening_audio_fallback_failed", {
+        stage,
+        error: String(error).slice(0, 200),
+      });
       return "failed";
     }
   }
@@ -2211,30 +2138,12 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       try {
         return await synthesizeCloudflareSpeech(this.env.AI, text);
       } catch (error) {
-        console.warn(
-          JSON.stringify({
-            event: "cloudflare_opening_tts_failed",
-            error: String(error).slice(0, 180),
-          }),
-        );
+        this.log("warn", "cloudflare_opening_tts_failed", {
+          error: String(error).slice(0, 180),
+        });
       }
     }
     return synthesizeOpeningSpeech(this.env.GEMINI_API_KEY, text);
-  }
-
-  private async readinessSpeechForPlayback(): Promise<OpeningSpeech> {
-    if (this.readinessSpeech) return this.readinessSpeech;
-    const pending =
-      this.readinessSpeechPromise ??
-      this.synthesizeReliableOpeningSpeech("Are you ready to begin?");
-    this.readinessSpeechPromise = pending;
-    try {
-      const speech = await pending;
-      this.readinessSpeech = speech;
-      return speech;
-    } finally {
-      if (this.readinessSpeechPromise === pending) this.readinessSpeechPromise = undefined;
-    }
   }
 
   private async openingCaseSpeechForPlayback(text: string): Promise<OpeningSpeech> {
@@ -2270,57 +2179,11 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     );
   }
 
-  private prewarmReadinessSpeech(): void {
-    if (this.readinessSpeech || this.readinessSpeechPromise) return;
-    this.runProtected(
-      () => this.readinessSpeechForPlayback().then(() => undefined),
-      "readiness_prewarm_failed",
-    );
-  }
-
-  /**
-   * Readiness is fixed product copy, so do not let a generative audio turn add
-   * a clinical question before the candidate confirms. Generate the exact
-   * sentence through bounded TTS, prewarmed alongside the spoken case.
-   */
-  private async presentReadinessPrompt(
-    connection: Connection,
-    generation: number,
-  ): Promise<void> {
-    if (!this.openingPlaybackIsCurrent(generation, "readiness")) return;
-    const readinessText = "Are you ready to begin?";
-    const playback = await this.playOpeningSpeechFallback(
-      "readiness",
-      readinessText,
-      generation,
-    );
-    if (playback === "stale") return;
-    if (playback === "unavailable") {
-      this.deferOpeningPlaybackUntilReconnect("readiness playback client disconnected");
-      return;
-    }
-    if (playback === "failed") {
-      this.failOpeningAudio(connection, generation, "readiness");
-      return;
-    }
-    if (!this.openingPlaybackIsCurrent(generation, "readiness")) return;
-    const target = this.device ?? connection;
-    this.sendAssistantTranscript(target, readinessText);
-    this.updateInterview(target, {
-      openingStage: "awaiting_confirmation",
-      casePresentation: this.openingCaseText,
-      currentQuestion: openingPresentationForDisplay(
-        `${this.openingCaseText || this.state.currentQuestion} ${readinessText}`,
-      ),
-    });
-    this.sendStatus(target, "listening");
-  }
-
   private sendAssistantTranscript(connection: Connection, text: string): void {
     const normalized = normalizeTranscript(text);
     if (
       !normalized ||
-      (this.openingHandshakeInProgress && normalized === this.lastOpeningTranscript)
+      (this.openingSequenceInProgress && normalized === this.lastOpeningTranscript)
     ) {
       return;
     }
@@ -2330,7 +2193,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       role: "assistant",
       text: normalized,
     });
-    if (this.openingHandshakeInProgress) this.lastOpeningTranscript = normalized;
+    if (this.openingSequenceInProgress) this.lastOpeningTranscript = normalized;
   }
 
   private deferOpeningPlaybackUntilReconnect(reason: string): void {
@@ -2343,14 +2206,14 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
   private failOpeningAudio(
     connection: Connection,
     generation: number,
-    stage: "case" | "readiness",
+    stage: "case" | "first_question",
   ): void {
     if (!this.openingPlaybackIsCurrent(generation, stage)) return;
     this.failOpening(
       connection,
       generation,
       "opening audio unavailable",
-      `The ${stage} audio could not play. Please retry the interview.`,
+      `The ${stage.replace("_", " ")} audio could not play. Please retry the interview.`,
     );
   }
 
@@ -2365,7 +2228,6 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     this.closeGeminiSession(reason);
     this.openingStage = "complete";
     this.openingAudioRetryCount = 0;
-    this.openingContentRetryCount = 0;
     this.openingCaseText = "";
     this.lastOpeningTranscript = "";
     this.sendJSON(target, {
@@ -2413,31 +2275,35 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     generation: number,
   ): Promise<void> {
     if (generation !== this.liveGeneration) return;
+    const startedStage = this.openingStage;
+    const answerCountBefore = this.answerCount;
     const answer = normalizeTranscript(this.inputTranscript);
     const examinerSpeech = normalizeTranscript(this.outputTranscript);
-    const openingCaseTurn =
-      this.openingStage === "presenting_case"
-        ? splitOpeningCaseReadiness(examinerSpeech)
-        : { caseText: examinerSpeech, includesReadiness: false };
-    const validOpeningCase =
-      this.openingStage !== "presenting_case" ||
-      isValidOpeningCasePresentation(examinerSpeech);
     const producedAudio = this.turnProducedAudio && !this.turnAudioDeliveryFailed;
-    const openingPlaybackSinkUnavailable =
-      this.openingHandshakeInProgress && (!this.device || this.turnAudioDeliveryFailed);
+    const audioDeliveryFailed = this.turnAudioDeliveryFailed;
     this.inputTranscript = "";
     this.outputTranscript = "";
     this.turnProducedAudio = false;
     this.turnAudioDeliveryFailed = false;
+    this.log("info", "gemini_turn_received", {
+      startedStage,
+      answerCountBefore,
+      answerCharacters: answer.length,
+      examinerCharacters: examinerSpeech.length,
+      disposition: this.turnDisposition,
+      producedAudio,
+      audioDeliveryFailed,
+    });
 
-    const deferOpeningTranscript =
-      (this.openingHandshakeInProgress && !producedAudio) || !validOpeningCase;
-    if (this.openingStage !== "warming_up" && !deferOpeningTranscript) {
+    // Normal examiner turns can remain text-visible if provider audio is
+    // unavailable. Opening audio has a stricter fallback below so the first
+    // clinical question is never silently presented.
+    if (startedStage === "complete" && examinerSpeech) {
       this.sendAssistantTranscript(connection, examinerSpeech);
     }
 
     if (!answer) {
-      if (openingPlaybackSinkUnavailable && this.openingStage === "warming_up") {
+      if (startedStage === "warming_up" && !this.device) {
         this.deferOpeningPlaybackUntilReconnect("opening playback client disconnected");
         return;
       }
@@ -2445,151 +2311,66 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       // every later one: it returns the whole transcript at once and streams
       // its audio after turnComplete. Spend that anomaly on a throwaway
       // warm-up turn so the case presentation is never the first generation.
-      if (this.openingStage === "warming_up") {
+      if (startedStage === "warming_up") {
         this.updateInterview(connection, { openingStage: "presenting_case" });
         await this.presentPersistedOpeningCase(connection, generation);
         return;
       }
-      if (
-        this.openingStage === "presenting_case" &&
-        validOpeningCase &&
-        examinerSpeech &&
-        !this.openingCaseText
-      ) {
-        this.openingCaseText = openingCaseTurn.caseText;
-        if (this.state.phase === "interviewing" && this.answerCount === 0) {
-          this.updateInterview(connection, {
-            casePresentation: this.openingCaseText,
-            currentQuestion: openingPresentationForDisplay(this.openingCaseText),
-          });
-        }
-      }
-      if (openingPlaybackSinkUnavailable) {
-        this.deferOpeningPlaybackUntilReconnect("opening playback client disconnected");
-        return;
-      }
-      if (this.openingStage === "presenting_case" && !validOpeningCase) {
-        const target = this.device ?? connection;
-        this.sendJSON(target, { type: "playback_interrupt" });
-        if (this.openingContentRetryCount < MAX_OPENING_CONTENT_RETRIES) {
-          this.openingContentRetryCount += 1;
-          this.openingAudioRetryCount = 0;
-          this.openingCaseText = "";
-          this.lastOpeningTranscript = "";
-          this.updateInterview(target, {
-            openingStage: "presenting_case",
-            casePresentation: "",
-            currentQuestion: "Regenerating the oral-board vignette...",
-          });
-          this.sendJSON(target, {
-            type: "turn_recovery",
-            action: "retrying",
-            message: "The examiner misspoke. Replaying the case…",
-          });
-          this.askGemini(
+      if (startedStage === "asking_first_question") {
+        const firstQuestion = questionForDisplay(examinerSpeech);
+        if (!firstQuestion.includes("?")) {
+          const target = this.device ?? connection;
+          this.sendJSON(target, { type: "playback_interrupt" });
+          if (this.openingAudioRetryCount < MAX_OPENING_AUDIO_RETRIES) {
+            this.openingAudioRetryCount += 1;
+            this.log("warn", "first_question_retry", {
+              examinerCharacters: examinerSpeech.length,
+            });
+            this.askGemini(target, geminiFirstQuestionTurn());
+            return;
+          }
+          this.failOpening(
             target,
-            this.openingCaseText
-              ? geminiReplayForAudioTurn(this.openingCaseText)
-              : geminiOpeningTurn(),
+            generation,
+            "invalid first clinical question",
+            "The examiner could not prepare the first question. Please retry the interview.",
           );
           return;
         }
-        this.failOpening(
-          target,
-          generation,
-          "invalid opening case boundary",
-          "The examiner could not prepare a valid case. Please retry the interview.",
-        );
-        return;
-      }
-      if (this.openingStage === "presenting_case") this.openingContentRetryCount = 0;
-      if (
-        this.openingHandshakeInProgress &&
-        !producedAudio &&
-        this.openingAudioRetryCount < MAX_OPENING_AUDIO_RETRIES
-      ) {
-        this.openingAudioRetryCount += 1;
-        const retryTurn =
-          this.openingStage === "presenting_case"
-            ? this.openingCaseText
-              ? geminiReplayForAudioTurn(this.openingCaseText)
-              : geminiOpeningTurn()
-            : undefined;
-        if (!retryTurn) {
-          await this.presentReadinessPrompt(connection, generation);
+        if (!this.device || audioDeliveryFailed) {
+          this.deferOpeningPlaybackUntilReconnect("first question playback disconnected");
           return;
         }
-        this.askGemini(
-          connection,
-          retryTurn,
-        );
-        return;
-      }
-      let spokenOpeningText = examinerSpeech;
-      if (this.openingHandshakeInProgress && !producedAudio) {
-        const fallbackStage = this.openingStage === "presenting_case" ? "case" : "readiness";
-        const fallbackText =
-          fallbackStage === "case" ? this.openingCaseText : "Are you ready to begin?";
-        if (!fallbackText) {
-          this.failOpeningAudio(connection, generation, fallbackStage);
-          return;
+        if (!producedAudio) {
+          const playback = await this.playOpeningSpeechFallback(
+            "first_question",
+            examinerSpeech,
+            generation,
+          );
+          if (playback === "stale") return;
+          if (playback === "unavailable") {
+            this.deferOpeningPlaybackUntilReconnect("first question playback disconnected");
+            return;
+          }
+          if (playback === "failed") {
+            this.failOpeningAudio(connection, generation, "first_question");
+            return;
+          }
+          if (!this.openingPlaybackIsCurrent(generation, "first_question")) return;
         }
-        const playback = await this.playOpeningSpeechFallback(
-          fallbackStage,
-          fallbackText,
-          generation,
-        );
-        if (playback === "stale") return;
-        if (playback === "unavailable") {
-          this.deferOpeningPlaybackUntilReconnect("opening fallback client disconnected");
-          return;
-        }
-        if (playback === "failed") {
-          this.failOpeningAudio(connection, generation, fallbackStage);
-          return;
-        }
-        if (!this.openingPlaybackIsCurrent(generation, fallbackStage)) return;
-        spokenOpeningText = fallbackText;
-        this.sendAssistantTranscript(this.device ?? connection, fallbackText);
-      }
-      this.openingAudioRetryCount = 0;
-      const generatedQuestion = openingPresentationForDisplay(
-        this.openingCaseText || spokenOpeningText,
-      );
-      if (
-        this.state.phase === "interviewing" &&
-        this.answerCount === 0 &&
-        this.openingStage === "presenting_case" &&
-        generatedQuestion
-      ) {
-        this.updateInterview(connection, { currentQuestion: generatedQuestion });
-      }
-      if (this.openingStage === "presenting_case") {
-        if (openingCaseTurn.includesReadiness && producedAudio) {
-          this.updateInterview(connection, {
-            openingStage: "awaiting_confirmation",
-            casePresentation: this.openingCaseText,
-            currentQuestion: openingPresentationForDisplay(
-              `${this.openingCaseText} Are you ready to begin?`,
-            ),
-          });
-          this.sendStatus(connection, "listening");
-          return;
-        }
-        this.updateInterview(connection, {
-          openingStage: "asking_readiness",
+        const target = this.device ?? connection;
+        this.openingAudioRetryCount = 0;
+        this.lastOpeningTranscript = "";
+        this.sendAssistantTranscript(target, examinerSpeech);
+        this.activeQuestion = firstQuestion;
+        this.updateInterview(target, {
+          openingStage: "complete",
           casePresentation: this.openingCaseText,
+          currentQuestion: firstQuestion,
         });
-        await this.presentReadinessPrompt(connection, generation);
-        return;
-      }
-      if (this.openingStage === "asking_readiness") {
-        this.updateInterview(connection, {
-          openingStage: "awaiting_confirmation",
-          casePresentation: this.openingCaseText,
-          currentQuestion: openingPresentationForDisplay(
-            `${this.state.currentQuestion} ${spokenOpeningText || "Are you ready to begin?"}`,
-          ),
+        this.log("info", "first_question_ready", {
+          questionCharacters: firstQuestion.length,
+          usedTtsFallback: !producedAudio,
         });
       }
       this.sendStatus(connection, "listening");
@@ -2607,27 +2388,6 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       return;
     }
 
-    if (this.openingStage === "awaiting_confirmation") {
-      const readinessConfirmed =
-        this.turnDisposition === "begin_first_question" ||
-        /^(?:yes|yeah|yep|ready|i am ready|let'?s (?:begin|start)|go ahead)\b/i.test(answer);
-      if (readinessConfirmed) {
-        this.openingStage = "complete";
-        this.lastOpeningTranscript = "";
-      }
-      const firstQuestion = readinessConfirmed
-        ? questionForDisplay(examinerSpeech) || "The first clinical question is being prepared."
-        : this.state.currentQuestion;
-      if (readinessConfirmed) this.activeQuestion = firstQuestion;
-      this.updateInterview(connection, {
-        openingStage: readinessConfirmed ? "complete" : "awaiting_confirmation",
-        casePresentation: this.openingCaseText,
-        currentQuestion: firstQuestion,
-      });
-      this.sendStatus(connection, "listening");
-      return;
-    }
-
     // The model does not reliably honor its own probe limit, so enforce it
     // here: past the cap the next answer closes the exchange whatever the
     // model classified, which keeps the interview reaching its configured target.
@@ -2636,13 +2396,9 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       Boolean(this.pendingQuestion) &&
       this.pendingFollowUps.length + 1 >= MAX_FOLLOW_UPS_PER_EXCHANGE;
     if (probeLimitReached) {
-      console.log(
-        JSON.stringify({
-          event: "probe_limit_reached",
-          questionNumber: this.questionNumber,
-          followUps: this.pendingFollowUps.length,
-        }),
-      );
+      this.log("info", "probe_limit_reached", {
+        followUps: this.pendingFollowUps.length,
+      });
       this.turnDisposition = "advance_skillset";
     }
 
@@ -2681,6 +2437,11 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         ...(followUps.length > 0 ? { followUps } : {}),
       },
     ];
+    this.log("info", "exchange_recorded", {
+      persistedAnswerCount: exchanges.length,
+      followUpCount: followUps.length,
+      finalExchange: exchanges.length >= this.plannedQuestionCount,
+    });
     if (exchanges.length >= this.plannedQuestionCount) {
       this.updateInterview(connection, {
         phase: "evaluating",
@@ -2759,13 +2520,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
    * review screen.
    */
   private async salvageInterview(connection: Connection, reason: string): Promise<void> {
-    console.log(
-      JSON.stringify({
-        event: "interview_salvaged",
-        reason: reason.slice(0, 60),
-        answerCount: this.answerCount + (this.pendingSavedExchange ? 1 : 0),
-      }),
-    );
+    this.log("warn", "interview_salvaged", {
+      reason: reason.slice(0, 60),
+      savedAnswerCount: this.answerCount + (this.pendingSavedExchange ? 1 : 0),
+    });
     this.updateInterview(connection, { phase: "evaluating" });
     this.sendStatus(connection, "evaluating");
     await this.finishInterview(connection);
@@ -2789,6 +2547,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       this.setState({ ...this.state, interviewGeneration });
     }
     const snapshot = this.buildFinalizationSnapshot(reportId, interviewGeneration);
+    this.log("info", "interview_finalization_started", {
+      reportId,
+      savedAnswerCount: snapshot.exchanges.length,
+    });
     const finalization = this.finalizeInterview(connection, snapshot);
     this.finalizationPromise = finalization;
     try {
@@ -2807,6 +2569,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     const pending = this.pendingSavedExchange;
     if (
       pending &&
+      exchanges.length < this.plannedQuestionCount &&
       !exchanges.some((exchange) => this.sameExchange(exchange, pending))
     ) {
       exchanges.push(pending);
@@ -2861,19 +2624,22 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         evaluation,
         cheatsheetAvailable: Boolean(cheatsheet),
       });
+      this.log("info", "interview_completed", {
+        reportId: snapshot.reportId,
+        outcome: evaluation.outcome,
+        savedAnswerCount: snapshot.exchanges.length,
+        cheatsheetAvailable: Boolean(cheatsheet),
+      });
       this.notifyCompletedReport(reportConnection);
       this.closeLiveSession("interview complete", connection);
     } catch (error) {
       if (this.currentInterviewGeneration() !== snapshot.interviewGeneration) return;
       // A failed provider/R2 call must leave the DO in a recoverable state and
       // release the Live heartbeat/socket before the client tries recovery.
-      console.error(
-        JSON.stringify({
-          event: "interview_finalization_failed",
-          reportId: snapshot.reportId,
-          error: String(error).slice(0, 240),
-        }),
-      );
+      this.log("error", "interview_finalization_failed", {
+        reportId: snapshot.reportId,
+        error: String(error).slice(0, 240),
+      });
       this.closeGeminiSession(
         "interview finalization failed",
         true,
