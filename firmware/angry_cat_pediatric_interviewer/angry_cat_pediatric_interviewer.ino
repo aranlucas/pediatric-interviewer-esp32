@@ -793,7 +793,7 @@ void processInterviewerEvents() {
     case InterviewerEventType::ReviewUnavailable:
       reviewLoading = false;
       snprintf(currentQuestion, sizeof(currentQuestion),
-               "%.330s The full report remains saved privately as %.8s.",
+               "%.330s The full report is published in Reports as %.8s.",
                event.text,
                savedReportId[0] == '\0' ? "unknown" : savedReportId);
       setScreenStatus(ScreenStatus::Complete, "TAP TO CHOOSE ANOTHER TOPIC");
@@ -810,20 +810,21 @@ void processInterviewerEvents() {
       reviewLoading = savedReportId[0] != '\0';
       snprintf(currentDomain, sizeof(currentDomain), "INTERVIEW COMPLETE");
       if (answeredQuestions >= totalQuestions) {
-        snprintf(currentQuestion, sizeof(currentQuestion),
-                 "Six questions complete. Your review was saved privately. "
-                 "Loading report %.8s for this screen.",
-                 savedReportId[0] == '\0' ? "pending" : savedReportId);
+        snprintf(
+            currentQuestion, sizeof(currentQuestion),
+            "Six questions complete. Your review was published in Reports. "
+            "Loading report %.8s for this screen.",
+            savedReportId[0] == '\0' ? "pending" : savedReportId);
       } else {
         snprintf(currentQuestion, sizeof(currentQuestion),
                  "Interview ended after %u of %u answered questions. Your "
-                 "partial review was saved privately as %.8s.",
+                 "partial review was published in Reports as %.8s.",
                  static_cast<unsigned>(answeredQuestions),
                  static_cast<unsigned>(totalQuestions),
                  savedReportId[0] == '\0' ? "pending" : savedReportId);
       }
       setScreenStatus(ScreenStatus::Complete,
-                      reviewLoading ? "LOADING REVIEW FROM R2"
+                      reviewLoading ? "LOADING PUBLISHED REVIEW"
                                     : "TAP TO CHOOSE ANOTHER TOPIC");
 #if defined(ANGRY_CAT_SIMULATOR_LIVE)
       Serial.println("SIM_INTEGRATION: interview complete");
@@ -840,8 +841,8 @@ void processInterviewerEvents() {
         break;
       }
       snprintf(currentQuestion, sizeof(currentQuestion),
-               "The interview was stopped. Tap Angry Cat when you are ready to "
-               "resume.");
+               "The interview was stopped. Tap Angry Cat to choose another "
+               "topic.");
       setScreenStatus(ScreenStatus::Stopped, "TAP TO RETURN TO TOPICS");
       break;
     case InterviewerEventType::Error:
@@ -857,7 +858,7 @@ void processInterviewerEvents() {
         break;
       }
       snprintf(currentQuestion, sizeof(currentQuestion), "%s", event.text);
-      setScreenStatus(ScreenStatus::Error, "TAP TO RETRY");
+      setScreenStatus(ScreenStatus::Error, "TAP TO CHOOSE A TOPIC");
       Serial.printf("Interviewer error: %s\n", event.text);
 #if defined(ANGRY_CAT_SIMULATOR_LIVE)
       Serial.printf("SIM_INTEGRATION: FAIL %s\n", event.text);

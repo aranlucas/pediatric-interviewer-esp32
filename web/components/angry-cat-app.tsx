@@ -35,6 +35,7 @@ import {
   DEFAULT_DIFFICULTY,
   DIFFICULTY_OPTIONS,
   interviewKeepsScreenAwake,
+  interviewLocksSetup,
   type InterviewDifficulty,
   type InterviewState,
   type InterviewStatus,
@@ -161,6 +162,7 @@ function InterviewExperience({
   const statusRef = useRef<InterviewStatus>("idle");
   const serverStatusRef = useRef<InterviewStatus>("idle");
   const textComposerOpenRef = useRef(false);
+  const typedAnswerRef = useRef<HTMLTextAreaElement>(null);
   const stateRef = useRef<InterviewState>(EMPTY_STATE);
   const hadConnectionRef = useRef(false);
   const recoveryPendingRef = useRef(false);
@@ -178,6 +180,16 @@ function InterviewExperience({
     setTextComposerOpen(open);
     audioRef.current?.setListening(shouldCaptureInterviewAudio(statusRef.current, open));
   }, []);
+
+  useEffect(() => {
+    if (textComposerOpen) typedAnswerRef.current?.focus();
+  }, [textComposerOpen]);
+
+  useEffect(() => {
+    if (status === "evaluating" || status === "complete") {
+      updateTextComposerOpen(false);
+    }
+  }, [status, updateTextComposerOpen]);
 
   const sendJson = useCallback((message: Record<string, unknown>): boolean => {
     const socket = agentRef.current;
@@ -275,6 +287,8 @@ function InterviewExperience({
         } else if (message.type === "transcript_end" && message.role === "assistant") {
           appendTranscript("examiner", String(message.text ?? ""));
         } else if (message.type === "error") {
+          audioRef.current?.interruptPlayback();
+          audioRef.current?.setListening(false);
           setError(String(message.message ?? "The interviewer encountered an error."));
           updateStatus("error");
         } else if (message.type === "turn_recovery") {
@@ -391,6 +405,8 @@ function InterviewExperience({
       }
     },
     onConnectionError: (connectionError) => {
+      audioRef.current?.interruptPlayback();
+      audioRef.current?.setListening(false);
       setConnected(false);
       setConnectionState("error");
       setError(
@@ -460,14 +476,31 @@ function InterviewExperience({
       : Math.min(state.exchanges.length + 1, plannedQuestionCount);
   const copy = statusCopy(status, plannedQuestionCount);
   const catIsTalking = status === "speaking" || browserSpeaking;
-  const interviewRunning =
-    starting ||
-    status === "thinking" ||
-    status === "listening" ||
-    status === "speaking" ||
-    status === "evaluating";
+  const setupLocked = interviewLocksSetup(status, state.phase, starting);
+  const interviewViewAvailable = state.phase !== "idle" || starting;
+  const answerControlsAvailable = ["thinking", "listening", "speaking"].includes(status);
+  const statusDetail =
+    error ||
+    (!audioAvailable && status === "listening"
+      ? "Microphone unavailable. Type your answer below."
+      : copy.detail);
   const difficultyDetail =
     DIFFICULTY_OPTIONS.find((option) => option.id === difficulty)?.detail ?? "";
+  const startButtonLabel = starting
+    ? "Starting interview…"
+    : status === "evaluating"
+      ? "Preparing review…"
+      : state.phase === "evaluation_failed"
+        ? "Retry review to continue"
+        : setupLocked
+          ? status === "error"
+            ? "End current interview first"
+            : "Interview in progress"
+          : connectionState !== "connected"
+            ? "Waiting for connection…"
+            : selectedTopics.length === 0
+              ? "Select a topic to start"
+              : `Start ${questionCount}-question ${selectedTopics.length > 1 ? "combo" : "interview"}`;
 
   const toggleTopic = useCallback((topicId: TopicId) => {
     setSelectedTopics((current) => {
@@ -481,7 +514,7 @@ function InterviewExperience({
 
   const startInterview = useCallback(
     async () => {
-      if (selectedTopics.length === 0 || !connected || interviewRunning) return;
+      if (selectedTopics.length === 0 || !connected || setupLocked) return;
       const generation = startGenerationRef.current + 1;
       startGenerationRef.current = generation;
       startingRef.current = true;
@@ -531,11 +564,11 @@ function InterviewExperience({
     [
       connected,
       difficulty,
-      interviewRunning,
       questionCount,
       selectedTopics,
       sendAudio,
       sendJson,
+      setupLocked,
       updateStatus,
       updateTextComposerOpen,
     ],
@@ -601,7 +634,7 @@ function InterviewExperience({
       }
       setTypedAnswer("");
       updateStatus("thinking");
-      updateTextComposerOpen(false);
+      updateTextComposerOpen(true);
     },
     [sendJson, typedAnswer, updateStatus, updateTextComposerOpen],
   );
@@ -630,9 +663,16 @@ function InterviewExperience({
 
         <div className="rail-heading">
           <span>Select one or more topics</span>
-          <button className="mobile-close" onClick={() => setView("interview")} aria-label="Close topics">
-            <X size={18} />
-          </button>
+          {interviewViewAvailable && (
+            <button
+              type="button"
+              className="mobile-close"
+              onClick={() => setView(evaluation ? "review" : "interview")}
+              aria-label="Close topics"
+            >
+              <X size={18} />
+            </button>
+          )}
         </div>
         <nav className="topic-list">
           {TOPICS.map((topic, index) => {
@@ -640,12 +680,13 @@ function InterviewExperience({
             const selected = selectedTopics.includes(topic.id);
             return (
               <button
+                type="button"
                 className="topic-button"
                 data-selected={selected}
                 key={topic.id}
                 onClick={() => toggleTopic(topic.id)}
                 aria-pressed={selected}
-                disabled={interviewRunning}
+                disabled={setupLocked}
               >
                 <span className="topic-check" aria-hidden="true">
                   {selected ? <Check size={14} strokeWidth={3} /> : index + 1}
@@ -671,7 +712,7 @@ function InterviewExperience({
                   questionCountForSelection(Number(event.target.value), selectedTopics.length),
                 )
               }
-              disabled={interviewRunning}
+              disabled={setupLocked}
             >
               {QUESTION_COUNT_OPTIONS.map((count) => (
                 <option key={count} value={count} disabled={count < selectedTopics.length}>
@@ -689,7 +730,7 @@ function InterviewExperience({
                   role="radio"
                   aria-checked={difficulty === option.id}
                   data-selected={difficulty === option.id}
-                  disabled={interviewRunning}
+                  disabled={setupLocked}
                   key={option.id}
                   onClick={() => setDifficulty(option.id)}
                 >
@@ -703,14 +744,14 @@ function InterviewExperience({
             type="button"
             className="start-interview-button"
             onClick={() => void startInterview()}
-            disabled={connectionState !== "connected" || selectedTopics.length === 0 || interviewRunning}
+            disabled={connectionState !== "connected" || selectedTopics.length === 0 || setupLocked}
           >
-            Start {questionCount}-question {selectedTopics.length > 1 ? "combo" : "interview"}
+            {startButtonLabel}
           </button>
           <div className="setup-connection" role="status" aria-live="polite">
             <ConnectionIndicator state={connectionState} />
             {connectionState !== "connected" && error && <p role="alert">{error}</p>}
-            {connectionState !== "connected" && (
+            {connectionState === "error" && (
               <button type="button" className="retry-connection-button" onClick={retryConnection}>
                 <RotateCcw size={15} aria-hidden="true" /> Retry connection
               </button>
@@ -724,9 +765,17 @@ function InterviewExperience({
             question target.
           </span>
         </div>
-        <a className="reports-hub-link" href="/reports">
+        <a
+          className="reports-hub-link"
+          href="/reports"
+          aria-disabled={setupLocked}
+          tabIndex={setupLocked ? -1 : undefined}
+          onClick={(event) => {
+            if (setupLocked) event.preventDefault();
+          }}
+        >
           <ClipboardCheck size={18} aria-hidden="true" />
-          Browse completed reports
+          Open public reports
         </a>
       </aside>
 
@@ -748,7 +797,7 @@ function InterviewExperience({
               alt="Tuxedo Angry Cat examiner"
               width={1311}
               height={1200}
-              priority
+              fetchPriority="high"
             />
             <h2>Build your practice case</h2>
             <p>
@@ -761,7 +810,13 @@ function InterviewExperience({
         {view !== "topics" && (
           <>
             <div className="stage-topline">
-              <button className="domain-button" onClick={() => setView("topics")}>
+              <button
+                type="button"
+                className="domain-button"
+                onClick={() => setView("topics")}
+                disabled={setupLocked}
+                aria-label={`Edit selected topics: ${activeTopicLabel}`}
+              >
                 <Stethoscope size={18} />
                 <span>{activeTopicLabel}</span>
               </button>
@@ -782,7 +837,7 @@ function InterviewExperience({
                   width={1311}
                   height={1200}
                   sizes="(max-width: 640px) 185px, (max-height: 850px) 235px, 310px"
-                  priority
+                  fetchPriority="high"
                 />
                 <svg
                   className="cat-mouth"
@@ -825,7 +880,7 @@ function InterviewExperience({
                 </div>
                 <div>
                   <strong>{copy.label}</strong>
-                  <p>{error || (audioAvailable ? copy.detail : "Microphone unavailable. Type your answer below.")}</p>
+                  <p>{statusDetail}</p>
                 </div>
                 <Waveform level={status === "listening" ? level : browserSpeaking ? 0.72 : 0.18} active={status !== "idle"} />
               </div>
@@ -849,6 +904,7 @@ function InterviewExperience({
                 icon={muted ? MicOff : Mic}
                 label={muted ? "Unmute" : "Mute"}
                 active={muted}
+                disabled={!audioAvailable || !answerControlsAvailable}
                 onClick={toggleMute}
               />
               <div className="volume-control">
@@ -868,10 +924,20 @@ function InterviewExperience({
                 type="button"
                 className="end-button"
                 onClick={endInterview}
-                disabled={status === "complete" || endPending}
+                disabled={status === "complete" || status === "evaluating" || endPending}
               >
-                <span>{state.phase === "evaluation_failed" ? <RotateCcw size={19} /> : <Square size={19} fill="currentColor" />}</span>
-                {state.phase === "evaluation_failed"
+                <span>
+                  {status === "evaluating" ? (
+                    <ClipboardCheck size={19} />
+                  ) : state.phase === "evaluation_failed" ? (
+                    <RotateCcw size={19} />
+                  ) : (
+                    <Square size={19} fill="currentColor" />
+                  )}
+                </span>
+                {status === "evaluating"
+                  ? "Preparing review…"
+                  : state.phase === "evaluation_failed"
                   ? "Retry review"
                   : endPending
                     ? "Ending after reconnect"
@@ -883,6 +949,9 @@ function InterviewExperience({
                 icon={MessageCircleMore}
                 label="Type answer"
                 active={textComposerOpen}
+                disabled={!answerControlsAvailable}
+                controls="typed-answer-panel"
+                expanded={textComposerOpen}
                 onClick={() =>
                   updateTextComposerOpen(!textComposerOpenRef.current)
                 }
@@ -895,22 +964,31 @@ function InterviewExperience({
               />
             </div>
 
-            {textComposerOpen && (
-              <form className="text-composer" onSubmit={submitTypedAnswer}>
-                <label htmlFor="typed-answer">Type your answer</label>
-                <textarea
-                  id="typed-answer"
-                  value={typedAnswer}
-                  onChange={(event) => setTypedAnswer(event.target.value)}
-                  placeholder="Answer the examiner in your own words…"
-                  maxLength={1000}
-                  autoFocus
-                />
-                <button type="submit" disabled={!typedAnswer.trim() || status !== "listening"}>
-                  Send answer <Send size={17} />
-                </button>
-              </form>
-            )}
+            <div className="t-acc text-composer-disclosure" data-open={textComposerOpen}>
+              <div
+                id="typed-answer-panel"
+                className="t-acc-panel"
+                aria-hidden={!textComposerOpen}
+                inert={!textComposerOpen}
+              >
+                <div className="t-acc-panel-inner">
+                  <form className="text-composer" onSubmit={submitTypedAnswer}>
+                    <label htmlFor="typed-answer">Type your answer</label>
+                    <textarea
+                      ref={typedAnswerRef}
+                      id="typed-answer"
+                      value={typedAnswer}
+                      onChange={(event) => setTypedAnswer(event.target.value)}
+                      placeholder="Answer the examiner in your own words…"
+                      maxLength={1000}
+                    />
+                    <button type="submit" disabled={!typedAnswer.trim() || status !== "listening"}>
+                      Send answer <Send size={17} />
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
 
             <div
               className="audio-meter"
@@ -922,7 +1000,7 @@ function InterviewExperience({
               aria-valuetext={`${Math.round(level * 100)} percent`}
             >
               <span>Audio level</span>
-              <div><i style={{ width: `${Math.max(4, level * 100)}%` }} /></div>
+              <div><i style={{ transform: `scaleX(${Math.max(0.04, level)})` }} /></div>
             </div>
           </>
         )}
@@ -939,15 +1017,16 @@ function InterviewExperience({
         cheatsheetAvailable={Boolean(state.cheatsheetAvailable)}
         questionCount={questionCount}
         connectionState={connectionState}
+        canBuildAnother={Boolean(evaluation) && !setupLocked}
         onClose={() => setView("interview")}
         onBuildAnother={() => setView("topics")}
         onReviewPage={setReviewPage}
       />
 
       <nav className="mobile-tabs" aria-label="App views">
-        <button type="button" data-active={view === "topics"} aria-current={view === "topics" ? "page" : undefined} onClick={() => setView("topics")}><BookOpenText aria-hidden="true" />Topics</button>
-        <button type="button" data-active={view === "interview"} aria-current={view === "interview" ? "page" : undefined} onClick={() => setView("interview")}><Headphones aria-hidden="true" />Interview</button>
-        <button type="button" data-active={view === "review"} aria-current={view === "review" ? "page" : undefined} onClick={() => setView("review")}><ClipboardCheck aria-hidden="true" />Review</button>
+        <button type="button" data-active={view === "topics"} aria-current={view === "topics" ? "page" : undefined} disabled={setupLocked} onClick={() => setView("topics")}><BookOpenText aria-hidden="true" />Topics</button>
+        <button type="button" data-active={view === "interview"} aria-current={view === "interview" ? "page" : undefined} disabled={!interviewViewAvailable} onClick={() => setView("interview")}><Headphones aria-hidden="true" />Interview</button>
+        <button type="button" data-active={view === "review"} aria-current={view === "review" ? "page" : undefined} disabled={!evaluation} onClick={() => setView("review")}><ClipboardCheck aria-hidden="true" />Review</button>
       </nav>
     </main>
   );

@@ -5,3 +5,6 @@ firmware/**/build/
 *.elf
 *.map
 node_modules/
+.jez/
+.playwright-cli/
+output/

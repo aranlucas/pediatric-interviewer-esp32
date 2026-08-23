@@ -15,7 +15,8 @@ to fetch the saved JSON report from R2 through the Worker. It retains a bounded
 device review containing the outcome, examiner summary, and up to six scored
 skill areas. The review opens automatically: swipe left or right between pages,
 tap to advance, or hold for 2.5 seconds to return to the topic menu. The complete
-JSON and Markdown reports remain privately stored in R2.
+JSON and Markdown objects remain private at rest in R2, while the browser's
+public Reports library publishes every completed review and study aid.
 
 The browser client in `web/` adds configurable setup: check one or more domains
 to create a coherent combo case, choose 3-10 questions, and select Easy,

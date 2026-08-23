@@ -32,7 +32,7 @@ export function turnDispositionToolOutput(
   if (disposition === "advance_skillset") {
     const nextAnswerCount = Math.min(answerCount + 1, questionCount);
     if (nextAnswerCount === questionCount) {
-      return `Runtime count: the latest answer will become scored exchange ${questionCount} of ${questionCount}. Ask no further question. Briefly thank the candidate and say their private review is being prepared.`;
+      return `Runtime count: the latest answer will become scored exchange ${questionCount} of ${questionCount}. Ask no further question. Briefly thank the candidate and say their review is being prepared and published to Reports.`;
     }
     return `Runtime count: ${answerCount} of ${questionCount} scored exchanges are currently persisted. The latest answer will become exchange ${nextAnswerCount} of ${questionCount}. Ask clinical question ${nextAnswerCount + 1} for the next untested question target. Do not thank the candidate or conclude the interview.`;
   }

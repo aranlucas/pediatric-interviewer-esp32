@@ -30,6 +30,7 @@ export function InterviewReview({
   cheatsheetAvailable,
   questionCount,
   connectionState,
+  canBuildAnother,
   onClose,
   onBuildAnother,
   onReviewPage,
@@ -44,6 +45,7 @@ export function InterviewReview({
   cheatsheetAvailable: boolean;
   questionCount: number;
   connectionState: ConnectionState;
+  canBuildAnother: boolean;
   onClose: () => void;
   onBuildAnother: () => void;
   onReviewPage: (page: number) => void;
@@ -63,10 +65,10 @@ export function InterviewReview({
       if (!response.ok) {
         throw new Error(
           response.status === 401
-            ? "Your private download session expired. Start a new interview to refresh it."
+            ? "Your download session expired. Start a new interview to refresh it."
             : response.status === 404
               ? "That file is not available yet. Retry in a moment."
-              : "The private file could not be downloaded. Please retry.",
+              : "The report could not be downloaded. Please retry.",
         );
       }
       const blob = await response.blob();
@@ -82,7 +84,7 @@ export function InterviewReview({
       setDownloadError(
         downloadFailure instanceof Error
           ? downloadFailure.message
-          : "The private file could not be downloaded. Please retry.",
+          : "The report could not be downloaded. Please retry.",
       );
     } finally {
       setDownloading(undefined);
@@ -195,18 +197,20 @@ export function InterviewReview({
         <div className="empty-review">
           <div className="empty-review-icon"><ClipboardCheck /></div>
           <h3>Your review appears here</h3>
-          <p>Complete the interview to get a practice outcome, examiner summary, and a score for every skillset.</p>
+          <p>Complete the interview to get a practice outcome, examiner summary, and a score for every skillset. Completed feedback is published in Reports.</p>
           <ol>
             <li><span>1</span> Choose one or more study topics</li>
             <li><span>2</span> Answer {questionCount} questions aloud</li>
-            <li><span>3</span> Review private feedback</li>
+            <li><span>3</span> Review published feedback</li>
           </ol>
         </div>
       )}
 
-      <button type="button" className="new-interview-button" onClick={onBuildAnother}>
-        <RotateCcw size={18} /> Build another case
-      </button>
+      {evaluation && (
+        <button type="button" className="new-interview-button" disabled={!canBuildAnother} onClick={onBuildAnother}>
+          <RotateCcw size={18} /> Set up another case
+        </button>
+      )}
       <ConnectionIndicator state={connectionState} />
     </aside>
   );

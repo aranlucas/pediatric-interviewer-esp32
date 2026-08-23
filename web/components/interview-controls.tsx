@@ -57,7 +57,12 @@ export function Waveform({ level, active }: { level: number; active: boolean }) 
   return (
     <div className="waveform" data-active={active} aria-hidden="true">
       {bars.map((height, index) => (
-        <i key={index} style={{ height: `${8 + height * 30 * Math.max(0.18, level)}px` }} />
+        <i
+          key={index}
+          style={{
+            transform: `scaleY(${(8 + height * 30 * Math.max(0.18, level)) / 38})`,
+          }}
+        />
       ))}
     </div>
   );
@@ -67,11 +72,17 @@ export function ControlButton({
   icon: Icon,
   label,
   active,
+  disabled = false,
+  controls,
+  expanded,
   onClick,
 }: {
   icon: typeof Mic;
   label: string;
   active: boolean;
+  disabled?: boolean;
+  controls?: string;
+  expanded?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -81,6 +92,9 @@ export function ControlButton({
       data-active={active}
       onClick={onClick}
       aria-pressed={active}
+      aria-controls={controls}
+      aria-expanded={expanded}
+      disabled={disabled}
     >
       <span><Icon size={22} /></span>
       {label}

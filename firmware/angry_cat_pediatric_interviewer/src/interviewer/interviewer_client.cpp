@@ -362,17 +362,17 @@ bool InterviewerClient::fetchReport(const char *reportId,
   }
   if (WiFi.status() != WL_CONNECTED) {
     postEvent(eventQueue, InterviewerEventType::ReviewUnavailable,
-              "The review is saved, but Wi-Fi disconnected before it could be "
-              "loaded.");
+              "The review is published in Reports, but Wi-Fi disconnected "
+              "before it could be loaded here.");
     return false;
   }
 
   postEvent(eventQueue, InterviewerEventType::ReviewLoading,
-            "Loading your private review from R2.");
+            "Loading your published review from Reports.");
   const String url = reportUrl(reportId);
   if (url.isEmpty()) {
     postEvent(eventQueue, InterviewerEventType::ReviewUnavailable,
-              "Could not start the private report download.");
+              "Could not load the published report on this device.");
     return false;
   }
 
@@ -392,8 +392,8 @@ bool InterviewerClient::fetchReport(const char *reportId,
   for (uint8_t attempt = 1; attempt <= kReportDownloadAttempts; ++attempt) {
     if (WiFi.status() != WL_CONNECTED) {
       postEvent(eventQueue, InterviewerEventType::ReviewUnavailable,
-                "The review is saved, but Wi-Fi disconnected before it could "
-                "be loaded.");
+                "The review is published in Reports, but Wi-Fi disconnected "
+                "before it could be loaded here.");
       return false;
     }
 

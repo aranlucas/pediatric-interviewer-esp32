@@ -5,6 +5,8 @@ import {
   DEFAULT_DIFFICULTY,
   DIFFICULTY_OPTIONS,
   interviewKeepsScreenAwake,
+  interviewIsRunning,
+  interviewLocksSetup,
   outcomeLabel,
   questionCountForSelection,
   shouldCaptureInterviewAudio,
@@ -58,6 +60,24 @@ describe("interview helpers", () => {
     expect(interviewKeepsScreenAwake("idle")).toBe(false);
     expect(interviewKeepsScreenAwake("complete")).toBe(false);
     expect(interviewKeepsScreenAwake("error")).toBe(false);
+  });
+
+  it("keeps live interview navigation locked until capture and evaluation finish", () => {
+    expect(interviewIsRunning("idle", true)).toBe(true);
+    expect(interviewIsRunning("thinking")).toBe(true);
+    expect(interviewIsRunning("listening")).toBe(true);
+    expect(interviewIsRunning("speaking")).toBe(true);
+    expect(interviewIsRunning("evaluating")).toBe(true);
+    expect(interviewIsRunning("idle")).toBe(false);
+    expect(interviewIsRunning("complete")).toBe(false);
+    expect(interviewIsRunning("error")).toBe(false);
+  });
+
+  it("keeps setup locked when a persisted interview still needs resolution", () => {
+    expect(interviewLocksSetup("error", "interviewing")).toBe(true);
+    expect(interviewLocksSetup("error", "evaluation_failed")).toBe(true);
+    expect(interviewLocksSetup("complete", "complete")).toBe(false);
+    expect(interviewLocksSetup("error", "idle")).toBe(false);
   });
 
   it("restores authoritative server status after a rejected typed answer", () => {

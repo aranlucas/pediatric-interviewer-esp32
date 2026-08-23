@@ -167,6 +167,10 @@ whose subject matches the R2 object's `sessionId` metadata. Invalid, expired,
 missing, or mismatched signed report credentials return the same unauthorized
 result without revealing whether an object exists.
 
+The R2 bucket and these direct Worker routes remain private. The paired web
+application intentionally publishes completed feedback through its read-only
+`/reports` pages and `/api/report-library/:reportId` download routes.
+
 ## R2 reports and recovery
 
 The private `pediatric-oral-boards-reports` bucket stores JSON and Markdown for
@@ -316,7 +320,7 @@ Deploy in this order:
 4. Verify that `POST /api/session?room=web-<32 hex>` returns a scoped token,
    the browser WebSocket origin is accepted, a reconnect can recover saved
    answers, and `/api/reports/<reportId>?kind=report` and
-   `?kind=cheatsheet` return the private review.
+   `?kind=cheatsheet` return the authorized review.
 
 Never deploy a Worker version with missing required secrets, stale generated
 types, or a failing test/check gate. Do not treat the simulator's modeled

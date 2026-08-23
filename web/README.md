@@ -13,9 +13,9 @@ at Standard difficulty.
 - The Agents SDK connects to the `esp32-angry-cat` Worker using a 128-bit `web-<32 hex>` Durable Object name. A same-origin session route mints a two-hour, room-scoped HMAC connection token and stores a two-hour report-scope token in an HttpOnly cookie.
 - Session authentication is fetched once per explicit connection attempt and passed through the SDK's supported static query contract. Transient sockets therefore use the library's exponential reconnect backoff instead of minting a new token on every failed handshake; a terminal failure exposes one explicit token-refresh action.
 - `WEB_TOKEN_SECRET` is a Worker secret shared by the web OpenNext Worker and the interviewer Worker. Configure it with `wrangler secret put WEB_TOKEN_SECRET`; it must never be a `NEXT_PUBLIC_*` variable.
-- Interview reports remain private R2 objects. The browser downloads them through `/api/reports/<report-id>?kind=report|cheatsheet`; the web Worker proxies the request over the `INTERVIEWER_SERVICE` binding with an Authorization bearer token.
+- Interview reports remain private R2 objects at rest. The current interview downloads them through `/api/reports/<report-id>?kind=report|cheatsheet`; the web Worker proxies the request over the `INTERVIEWER_SERVICE` binding with an Authorization bearer token. The same completed feedback is intentionally published through the public Reports library.
 - `/reports` is a public, read-only library of every completed R2 report. Report Markdown and study aids are rendered as sanitized React HTML, with public Markdown and JSON downloads available from each detail page. The R2 bucket itself remains private behind deterministic Worker routes.
-- A web `start_call` sends `topic_ids`, `question_count`, and `difficulty`; the Worker persists those settings in synchronized state and the private report.
+- A web `start_call` sends `topic_ids`, `question_count`, and `difficulty`; the Worker persists those settings in synchronized state and the published report.
 
 ## Commands
 
@@ -65,7 +65,7 @@ origin allowlist, token verification, and private R2 objects. Then build and
 deploy this OpenNext Worker. A production smoke test should verify:
 
 1. `POST /api/session?room=web-<32 lowercase hex>` returns `200`, a scoped
-   token, and the private report cookie from the production web origin.
+   token, and the report-scope cookie from the production web origin.
 2. The browser connects without exposing `DEVICE_TOKEN`, survives a forced
    WebSocket reconnect, and preserves already-saved answers.
 3. A completed report and optional cheat sheet download through `/api/reports`

@@ -4,12 +4,14 @@ import {
   Download,
   FileJson,
   FileText,
+  Globe2,
   ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { ReportLibraryList } from "@/components/report-library-list";
 import type { CompletedReport, ReportDocumentKind } from "@/lib/reports";
 
 function formatCompletedAt(value: string, timezone: string): string {
@@ -89,56 +91,28 @@ export function ReportLibraryIndex({
 
       <section className="report-library-content">
         <div className="report-scope-note">
-          <ShieldCheck size={19} aria-hidden="true" />
+          <Globe2 size={19} aria-hidden="true" />
           <p>
             This public archive contains completed evaluations. Runs that never reached scoring
-            have no R2 report and are not shown here.
+            are not shown here.
           </p>
         </div>
 
         {reports.length ? (
-          <div className="report-table-wrap">
-            <table className="report-table">
-              <thead>
-                <tr>
-                  <th scope="col">Completed</th>
-                  <th scope="col">Topic</th>
-                  <th scope="col">Grade</th>
-                  <th scope="col">Outcome</th>
-                  <th scope="col">Questions</th>
-                  <th scope="col">Files</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reports.map((report) => (
-                  <tr key={report.reportId}>
-                    <td>
-                      <Link href={`/reports/${report.reportId}`}>
-                        <strong>{formatCompletedAt(report.generatedAt, timezone)}</strong>
-                        <span>{report.reportId}</span>
-                      </Link>
-                    </td>
-                    <td>
-                      <strong>{report.topicLabel}</strong>
-                      <span>{report.difficulty ?? "Unspecified difficulty"}</span>
-                    </td>
-                    <td className="report-score">{scoreLabel(report.averageScore)}</td>
-                    <td>
-                      <span className="report-outcome" data-outcome={report.outcome}>
-                        {outcomeLabel(report.outcome)}
-                      </span>
-                    </td>
-                    <td>{report.answeredQuestions}/{report.configuredQuestions}</td>
-                    <td>
-                      <span className="report-file-count">
-                        {Object.values(report.artifacts).filter(Boolean).length}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ReportLibraryList
+            reports={reports.map((report) => ({
+              reportId: report.reportId,
+              generatedAt: report.generatedAt,
+              outcome: report.outcome,
+              averageScore: report.averageScore,
+              answeredQuestions: report.answeredQuestions,
+              configuredQuestions: report.configuredQuestions,
+              difficulty: report.difficulty,
+              topicLabel: report.topicLabel,
+              fileCount: Object.values(report.artifacts).filter(Boolean).length,
+            }))}
+            timezone={timezone}
+          />
         ) : (
           <div className="report-empty-state">
             <BookOpenText aria-hidden="true" />
@@ -190,8 +164,6 @@ export function ReportLibraryDetail({
         <dl className="report-detail-meta">
           <div><dt>Questions</dt><dd>{report.answeredQuestions}/{report.configuredQuestions}</dd></div>
           <div><dt>Difficulty</dt><dd>{report.difficulty ?? "—"}</dd></div>
-          <div><dt>Session</dt><dd>{report.sessionId ?? "—"}</dd></div>
-          <div><dt>Evaluator</dt><dd>{report.evaluatorModel ?? "—"}</dd></div>
         </dl>
       </header>
 
@@ -212,10 +184,10 @@ export function ReportLibraryDetail({
           </div>
           <div className="report-document-downloads">
             <a href={activeDownload}>
-              <Download size={16} aria-hidden="true" /> Markdown
+              <Download size={16} aria-hidden="true" /> Download .md
             </a>
             <a href={`/api/report-library/${report.reportId}?kind=json`}>
-              <FileJson size={16} aria-hidden="true" /> JSON
+              <FileJson size={16} aria-hidden="true" /> Download JSON
             </a>
           </div>
         </div>

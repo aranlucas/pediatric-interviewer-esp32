@@ -134,7 +134,7 @@ export function statusCopy(
     case "evaluating":
       return { label: "Evaluating", detail: "Scoring your answers and preparing feedback." };
     case "complete":
-      return { label: "Complete", detail: "Your private interview review is ready." };
+      return { label: "Complete", detail: "Your review is ready and published in Reports." };
     case "error":
       return { label: "Needs attention", detail: "The interview connection needs attention." };
     default:
@@ -165,5 +165,31 @@ export function interviewKeepsScreenAwake(status: InterviewStatus): boolean {
     status === "listening" ||
     status === "speaking" ||
     status === "evaluating"
+  );
+}
+
+export function interviewIsRunning(
+  status: InterviewStatus,
+  starting = false,
+): boolean {
+  return (
+    starting ||
+    status === "thinking" ||
+    status === "listening" ||
+    status === "speaking" ||
+    status === "evaluating"
+  );
+}
+
+export function interviewLocksSetup(
+  status: InterviewStatus,
+  phase: InterviewState["phase"],
+  starting = false,
+): boolean {
+  return (
+    interviewIsRunning(status, starting) ||
+    phase === "interviewing" ||
+    phase === "evaluating" ||
+    phase === "evaluation_failed"
   );
 }
