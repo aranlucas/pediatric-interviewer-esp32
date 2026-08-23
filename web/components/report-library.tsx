@@ -4,8 +4,6 @@ import {
   Download,
   FileJson,
   FileText,
-  KeyRound,
-  LogOut,
   ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
@@ -13,8 +11,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { CompletedReport, ReportDocumentKind } from "@/lib/reports";
-
-type ReportsError = "configuration" | "invalid" | "rate-limited" | undefined;
 
 function formatCompletedAt(value: string, timezone: string): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -49,17 +45,6 @@ function ReportsBrand({ detail = false }: { detail?: boolean }) {
   );
 }
 
-function SignOutButton() {
-  return (
-    <form action="/api/report-library/access?action=logout" method="post">
-      <button className="report-library-signout" type="submit">
-        <LogOut size={16} aria-hidden="true" />
-        Sign out
-      </button>
-    </form>
-  );
-}
-
 export function ReportsConfigurationError() {
   return (
     <main className="report-library-gate">
@@ -67,51 +52,9 @@ export function ReportsConfigurationError() {
         <div className="report-access-icon"><ShieldCheck aria-hidden="true" /></div>
         <h1>Report library is not configured</h1>
         <p>
-          The web service needs its private R2 binding and a reports admin secret before this
-          page can be opened.
+          The web service needs its R2 report binding before this page can be opened.
         </p>
         <Link className="report-gate-link" href="/">Return to the interviewer</Link>
-      </section>
-    </main>
-  );
-}
-
-export function ReportsAccessGate({ error }: { error: ReportsError }) {
-  const errorMessage =
-    error === "invalid"
-      ? "That access key was not accepted."
-      : error === "rate-limited"
-        ? "Too many attempts. Wait a minute, then try again."
-        : error === "configuration"
-          ? "Report access is temporarily unavailable."
-          : null;
-  return (
-    <main className="report-library-gate">
-      <section className="report-access-card">
-        <ReportsBrand />
-        <div className="report-access-icon"><KeyRound aria-hidden="true" /></div>
-        <h1>Private report library</h1>
-        <p>
-          Enter the operator access key to review every completed oral-board report stored in
-          private R2.
-        </p>
-        <form action="/api/report-library/access" method="post" className="report-access-form">
-          <label htmlFor="reports-access-key">Operator access key</label>
-          <input
-            id="reports-access-key"
-            name="accessKey"
-            type="password"
-            autoComplete="current-password"
-            required
-            minLength={32}
-          />
-          {errorMessage ? <p className="report-access-error" role="alert">{errorMessage}</p> : null}
-          <button type="submit">Open reports</button>
-        </form>
-        <p className="report-access-note">
-          The key is exchanged for a short-lived, HttpOnly admin session and is never stored in
-          browser JavaScript.
-        </p>
       </section>
     </main>
   );
@@ -130,7 +73,6 @@ export function ReportLibraryIndex({
         <ReportsBrand />
         <div className="report-library-nav-actions">
           <Link href="/">New interview</Link>
-          <SignOutButton />
         </div>
       </nav>
 
@@ -149,8 +91,8 @@ export function ReportLibraryIndex({
         <div className="report-scope-note">
           <ShieldCheck size={19} aria-hidden="true" />
           <p>
-            This is the completed-report index. Runs that never reached evaluation have no R2
-            report and are not shown as scored.
+            This public archive contains completed evaluations. Runs that never reached scoring
+            have no R2 report and are not shown here.
           </p>
         </div>
 
@@ -227,7 +169,7 @@ export function ReportLibraryDetail({
       <nav className="report-library-nav" aria-label="Report navigation">
         <ReportsBrand detail />
         <div className="report-library-nav-actions">
-          <SignOutButton />
+          <Link href="/">New interview</Link>
         </div>
       </nav>
 

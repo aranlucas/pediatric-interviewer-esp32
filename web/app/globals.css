@@ -874,17 +874,6 @@ textarea:focus-visible {
   letter-spacing: -0.05em;
 }
 .report-access-card > p { margin: 0; color: #c8d3e7; line-height: 1.58; }
-.report-access-form { margin-top: 25px; display: grid; gap: 9px; }
-.report-access-form label { color: #e4e9f3; font-size: 0.76rem; font-weight: 800; }
-.report-access-form input {
-  min-height: 48px;
-  padding: 10px 13px;
-  border: 1px solid #796ca7;
-  border-radius: 11px;
-  color: white;
-  background: #0b1931;
-}
-.report-access-form button,
 .report-gate-link {
   min-height: 48px;
   margin-top: 3px;
@@ -898,8 +887,6 @@ textarea:focus-visible {
   text-decoration: none;
   cursor: pointer;
 }
-.report-access-error { margin: 0 !important; color: #ffaaa7 !important; font-size: 0.75rem; }
-.report-access-note { margin-top: 16px !important; color: #929fba !important; font-size: 0.7rem; }
 .report-gate-link { margin-top: 24px; }
 .report-library-loading { display: grid; justify-items: center; gap: 14px; color: #d9e3f4; font-weight: 750; }
 .report-library-loading p { margin: 0; }
@@ -915,8 +902,7 @@ textarea:focus-visible {
   gap: 20px;
 }
 .report-library-nav-actions { display: flex; align-items: center; gap: 8px; }
-.report-library-nav-actions > a,
-.report-library-signout {
+.report-library-nav-actions > a {
   min-height: 38px;
   padding: 8px 12px;
   border: 1px solid #7768a780;
@@ -926,9 +912,7 @@ textarea:focus-visible {
   font-size: 0.74rem;
   font-weight: 800;
   text-decoration: none;
-  cursor: pointer;
 }
-.report-library-signout { display: flex; align-items: center; gap: 7px; }
 .report-library-header,
 .report-detail-header,
 .report-library-content,

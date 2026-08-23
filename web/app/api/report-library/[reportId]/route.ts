@@ -1,9 +1,5 @@
-import {
-  configuredReportsSecret,
-  reportsAdminFromCookie,
-  reportsEnvironment,
-} from "@/lib/reports-admin";
 import { reportObjectKey } from "@/lib/reports";
+import { reportsEnvironment } from "@/lib/reports-environment";
 
 export const dynamic = "force-dynamic";
 
@@ -27,18 +23,14 @@ export async function GET(
   if (!key) return json({ error: "invalid_report" }, 400);
 
   const env = await reportsEnvironment();
-  const secret = configuredReportsSecret(env);
-  if (!env?.INTERVIEW_REPORTS || !secret) {
+  if (!env?.INTERVIEW_REPORTS) {
     return json({ error: "report_service_not_configured" }, 503);
-  }
-  if (!(await reportsAdminFromCookie(request.headers.get("cookie"), secret))) {
-    return json({ error: "unauthorized" }, 401);
   }
 
   const object = await env.INTERVIEW_REPORTS.get(key);
   if (!object) return json({ error: "report_not_found" }, 404);
   const headers = new Headers({
-    "Cache-Control": "private, no-store",
+    "Cache-Control": "public, max-age=300, s-maxage=3600",
     "Content-Disposition": `attachment; filename="angry-cat-${reportId.toLowerCase()}${kind === "cheatsheet" ? "-cheatsheet" : ""}.${kind === "json" ? "json" : "md"}"`,
     "Content-Type": kind === "json"
       ? "application/json; charset=utf-8"

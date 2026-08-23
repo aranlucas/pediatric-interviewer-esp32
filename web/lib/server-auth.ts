@@ -1,4 +1,4 @@
-export type AccessTokenScope = "connect" | "report" | "reports_admin";
+export type AccessTokenScope = "connect" | "report";
 
 export type AccessTokenPayload = {
   v: 1;
