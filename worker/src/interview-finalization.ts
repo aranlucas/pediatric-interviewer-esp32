@@ -27,6 +27,8 @@ export type InterviewFinalizationSnapshot = {
   questionCount: number;
   difficulty: InterviewDifficulty;
   exchanges: InterviewExchange[];
+  /** Absent when no durable opening case was retained for this interview. */
+  casePresentation?: string;
 };
 
 export type InterviewRetryOptions = {
@@ -105,7 +107,7 @@ export async function finalizeInterviewReport(
   }
 
   const report: StoredInterviewReport = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     reportId: snapshot.reportId,
     sessionId: snapshot.sessionId,
     generatedAt: new Date().toISOString(),
@@ -115,6 +117,7 @@ export async function finalizeInterviewReport(
       questionCount: snapshot.questionCount,
       difficulty: snapshot.difficulty,
     },
+    ...(snapshot.casePresentation ? { casePresentation: snapshot.casePresentation } : {}),
     topic: {
       id: snapshot.topic.id,
       label: snapshot.topic.label,

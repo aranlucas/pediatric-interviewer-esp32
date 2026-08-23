@@ -791,6 +791,24 @@ describe("Pediatric oral-board interviewer", () => {
     expect(markdown.match(/^### Question /gm)).toHaveLength(6);
   });
 
+  it("quotes the original case presentation before the scoring anchors", () => {
+    const report = sampleReport();
+    const markdown = buildInterviewMarkdown(report);
+    const caseSection = markdown.indexOf("## Original case presentation");
+    const anchorsSection = markdown.indexOf("## Practice scoring anchors");
+    expect(caseSection).toBeGreaterThan(-1);
+    expect(anchorsSection).toBeGreaterThan(caseSection);
+    expect(markdown).toContain(
+      "Here is your case. A four-year-old presents with swelling and pain around a treated baby tooth.",
+    );
+  });
+
+  it("omits the case presentation section for reports without one", () => {
+    const markdown = buildInterviewMarkdown({ ...sampleReport(), casePresentation: undefined });
+    expect(markdown).not.toContain("## Original case presentation");
+    expect(markdown).toContain("## Practice scoring anchors");
+  });
+
   it("stores private JSON and Markdown objects under the report ID", async () => {
     const report = sampleReport();
     const puts: Array<{ key: string; value: string; options: R2PutOptions }> = [];
@@ -864,14 +882,16 @@ describe("Pediatric oral-board interviewer", () => {
           candidates: [{ content: { parts: [{ text: JSON.stringify(sampleCheatsheet()) }] } }],
         }),
       );
-    const storedKeys: string[] = [];
+    const stored: Array<{ key: string; value: string }> = [];
     const bucket = {
-      put: vi.fn(async (key: string) => {
-        storedKeys.push(key);
+      put: vi.fn(async (key: string, value: string) => {
+        stored.push({ key, value });
       }),
     } as unknown as R2Bucket;
     const retry = async <T>(operation: (attempt: number) => Promise<T>): Promise<T> =>
       operation(1);
+    const casePresentation =
+      "Here is your case. A four-year-old presents with swelling around a restored molar.";
 
     const finalized = await finalizeInterviewReport(
       {
@@ -884,6 +904,7 @@ describe("Pediatric oral-board interviewer", () => {
         questionCount: 6,
         difficulty: "standard",
         exchanges: transcript,
+        casePresentation,
       },
       bucket,
       retry,
@@ -891,17 +912,24 @@ describe("Pediatric oral-board interviewer", () => {
 
     expect(finalized.evaluation.exchanges).toHaveLength(transcript.length);
     expect(finalized.cheatsheet?.headline).toContain("Commit");
-    expect(storedKeys).toEqual([
+    expect(stored.map(({ key }) => key)).toEqual([
       "pediatric-oral-boards/reports/report-snapshot.json",
       "pediatric-oral-boards/reports/report-snapshot.md",
       "pediatric-oral-boards/reports/report-snapshot-cheatsheet.md",
     ]);
+    const storedJson = JSON.parse(
+      stored.find(({ key }) => key.endsWith(".json"))?.value ?? "{}",
+    );
+    expect(storedJson.casePresentation).toBe(casePresentation);
+    const storedMarkdown = stored.find(({ key }) => key.endsWith(".md"))?.value ?? "";
+    expect(storedMarkdown).toContain("## Original case presentation");
+    expect(storedMarkdown).toContain(casePresentation);
   });
 });
 
 function sampleReport(): StoredInterviewReport {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     reportId: "report-123",
     sessionId: "esp32-12345678",
     generatedAt: "2026-08-12T23:00:00.000Z",
@@ -911,6 +939,8 @@ function sampleReport(): StoredInterviewReport {
       questionCount: 6,
       difficulty: "standard",
     },
+    casePresentation:
+      "Here is your case. A four-year-old presents with swelling and pain around a treated baby tooth.",
     topic: {
       id: "pulp_therapy",
       label: "Pulp Therapy",

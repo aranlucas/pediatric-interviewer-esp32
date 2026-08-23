@@ -2584,6 +2584,11 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       questionCount: this.plannedQuestionCount,
       difficulty: this.interviewDifficulty,
       exchanges,
+      // The presented case is public interview content, so the saved review
+      // can quote the exact vignette the answers were graded against.
+      casePresentation:
+        normalizeTranscript(this.openingCaseText || this.state.casePresentation || "") ||
+        undefined,
     };
   }
 

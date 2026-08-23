@@ -142,7 +142,7 @@ export type InterviewEvaluation = z.infer<typeof interviewEvaluationSchema>;
 export type InterviewCheatsheet = z.infer<typeof interviewCheatsheetSchema>;
 
 export type StoredInterviewReport = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   reportId: string;
   sessionId: string;
   generatedAt: string;
@@ -152,6 +152,8 @@ export type StoredInterviewReport = {
     questionCount: number;
     difficulty: InterviewDifficulty;
   };
+  /** The exact opening vignette the candidate answered against. */
+  casePresentation?: string;
   topic: {
     id: string;
     label: string;
@@ -570,6 +572,11 @@ export function buildInterviewMarkdown(report: StoredInterviewReport): string {
     `Questions: ${report.configuration.questionCount}`,
     `Difficulty: ${report.configuration.difficulty}`,
     "",
+    // Schema v3 keeps the exact spoken vignette with the review, so the
+    // candidate can reread the findings their answers were graded against.
+    ...(report.casePresentation
+      ? ["## Original case presentation", "", report.casePresentation, ""]
+      : []),
     "## Practice scoring anchors",
     "",
     `- **3:** ${PRACTICE_SCORE_RUBRIC[3]}`,
