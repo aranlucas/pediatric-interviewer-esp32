@@ -1,5 +1,8 @@
-import { reportObjectKey } from "@/lib/reports";
-import { reportsEnvironment } from "@/lib/reports-environment";
+import {
+  getPublicReportJson,
+  publicReportObjectKey,
+} from "@/lib/reports";
+import { publicReportsEnabled, reportsEnvironment } from "@/lib/reports-environment";
 
 export const dynamic = "force-dynamic";
 
@@ -19,16 +22,15 @@ export async function GET(
   if (kind !== "json" && kind !== "report" && kind !== "cheatsheet") {
     return json({ error: "invalid_report" }, 400);
   }
-  const key = reportObjectKey(reportId, kind);
+  const key = publicReportObjectKey(reportId, kind);
   if (!key) return json({ error: "invalid_report" }, 400);
 
   const env = await reportsEnvironment();
   if (!env?.INTERVIEW_REPORTS) {
     return json({ error: "report_service_not_configured" }, 503);
   }
+  if (!publicReportsEnabled(env)) return json({ error: "report_not_found" }, 404);
 
-  const object = await env.INTERVIEW_REPORTS.get(key);
-  if (!object) return json({ error: "report_not_found" }, 404);
   const headers = new Headers({
     "Cache-Control": "public, max-age=300, s-maxage=3600",
     "Content-Disposition": `attachment; filename="angry-cat-${reportId.toLowerCase()}${kind === "cheatsheet" ? "-cheatsheet" : ""}.${kind === "json" ? "json" : "md"}"`,
@@ -38,5 +40,17 @@ export async function GET(
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
   });
+  if (kind === "json") {
+    try {
+      const body = await getPublicReportJson(env.INTERVIEW_REPORTS, reportId);
+      if (!body) return json({ error: "report_not_found" }, 404);
+      return new Response(body, { headers });
+    } catch {
+      return json({ error: "report_unavailable" }, 502);
+    }
+  }
+
+  const object = await env.INTERVIEW_REPORTS.get(key);
+  if (!object) return json({ error: "report_not_found" }, 404);
   return new Response(object.body, { headers });
 }

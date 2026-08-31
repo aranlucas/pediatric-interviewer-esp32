@@ -2,8 +2,12 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 import {
   createAccessToken,
+  getCookie,
   isWebRoom,
   serializeReportCookie,
+  serializeSessionOwnerCookie,
+  sessionOwnerCookieName,
+  verifyAccessToken,
 } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +17,7 @@ export const dynamic = "force-dynamic";
 // failures are recovered explicitly by the UI with a newly minted token.
 const CONNECT_TOKEN_TTL_SECONDS = 2 * 60 * 60;
 const REPORT_TOKEN_TTL_SECONDS = 2 * 60 * 60;
+const SESSION_OWNER_TTL_SECONDS = 2 * 60 * 60;
 
 type SessionRateLimiter = {
   limit: (options: { key: string }) => Promise<{ success: boolean }>;
@@ -38,8 +43,10 @@ export async function POST(request: Request): Promise<Response> {
   if (request.headers.get("Origin") !== requestUrl.origin) {
     return json({ error: "origin_not_allowed" }, 403);
   }
-  const room = requestUrl.searchParams.get("room");
-  if (!isWebRoom(room)) return json({ error: "invalid_room" }, 400);
+  const requestedRoom = requestUrl.searchParams.get("room");
+  if (requestedRoom !== null && !isWebRoom(requestedRoom)) {
+    return json({ error: "invalid_room" }, 400);
+  }
 
   let rawEnv: CloudflareEnv;
   try {
@@ -51,6 +58,23 @@ export async function POST(request: Request): Promise<Response> {
   const secret = env.WEB_TOKEN_SECRET;
   if (!secret?.trim() || secret.length < 32 || !env.SESSION_RATE_LIMITER) {
     return json({ error: "session_auth_not_configured" }, 503);
+  }
+
+  // The first request creates the room on the server. A later request may
+  // refresh its handshake token only when the browser presents the owner
+  // capability issued for that exact room. The cookie name is derived from the
+  // room for isolation, while the signed subject prevents name-only forgery.
+  const room = requestedRoom ?? `web-${crypto.randomUUID().replaceAll("-", "")}`;
+  if (!isWebRoom(room)) return json({ error: "invalid_room" }, 400);
+  if (requestedRoom) {
+    const ownerCookieName = sessionOwnerCookieName(room);
+    const ownerToken = ownerCookieName
+      ? getCookie(request.headers.get("Cookie"), ownerCookieName)
+      : null;
+    const owner = await verifyAccessToken(ownerToken, secret, "owner");
+    if (!owner || owner.sub !== room) {
+      return json({ error: "session_owner_required" }, 401);
+    }
   }
 
   // CF-Connecting-IP is supplied by Cloudflare. Do not trust a caller-owned
@@ -83,6 +107,21 @@ export async function POST(request: Request): Promise<Response> {
     token: connectToken,
     expiresAt: (now + CONNECT_TOKEN_TTL_SECONDS) * 1_000,
   });
-  response.headers.set("Set-Cookie", serializeReportCookie(reportToken, REPORT_TOKEN_TTL_SECONDS));
+  if (!requestedRoom) {
+    const ownerCookie = await createAccessToken(secret, {
+      v: 1,
+      sub: room,
+      exp: now + SESSION_OWNER_TTL_SECONDS,
+      scope: "owner",
+    });
+    const serializedOwnerCookie = serializeSessionOwnerCookie(
+      ownerCookie,
+      room,
+      SESSION_OWNER_TTL_SECONDS,
+    );
+    if (!serializedOwnerCookie) return json({ error: "invalid_room" }, 400);
+    response.headers.append("Set-Cookie", serializedOwnerCookie);
+  }
+  response.headers.append("Set-Cookie", serializeReportCookie(reportToken, REPORT_TOKEN_TTL_SECONDS));
   return response;
 }

@@ -12,6 +12,14 @@ AUDIO_DRIVER_INCLUDE := $(abspath $(AUDIO_DRIVER_DIR)/src)
 AUDIO_TOOLS_DIR := $(SKETCH_DIR)/third_party/arduino-audio-tools
 AUDIO_TOOLS_INCLUDE := $(abspath $(AUDIO_TOOLS_DIR)/src)
 AUDIO_INCLUDE_FLAGS := -I$(AUDIO_DRIVER_INCLUDE) -I$(AUDIO_TOOLS_INCLUDE)
+WAVESHARE_DIR := $(SKETCH_DIR)/third_party/waveshare
+WAVESHARE_TOUCH_DIR := $(WAVESHARE_DIR)/Arduino/libraries/esp_lcd_touch_axs15231b
+WAVESHARE_TOUCH_INCLUDE := $(abspath $(WAVESHARE_TOUCH_DIR))
+LIBRARY_INCLUDE_FLAGS := $(AUDIO_INCLUDE_FLAGS) -I$(WAVESHARE_TOUCH_INCLUDE)
+SIMULATOR_WAVESHARE_TOUCH_INCLUDE = $(abspath $(SIMULATOR_SKETCH_DIR)/third_party/waveshare/Arduino/libraries/esp_lcd_touch_axs15231b)
+SIMULATOR_INTEGRATION_WAVESHARE_TOUCH_INCLUDE = $(abspath $(SIMULATOR_INTEGRATION_SKETCH_DIR)/third_party/waveshare/Arduino/libraries/esp_lcd_touch_axs15231b)
+SIMULATOR_LIBRARY_INCLUDE_FLAGS = $(AUDIO_INCLUDE_FLAGS) -I$(SIMULATOR_WAVESHARE_TOUCH_INCLUDE)
+SIMULATOR_INTEGRATION_LIBRARY_INCLUDE_FLAGS = $(AUDIO_INCLUDE_FLAGS) -I$(SIMULATOR_INTEGRATION_WAVESHARE_TOUCH_INCLUDE)
 CLANG_FORMAT ?= $(shell command -v clang-format 2>/dev/null || xcrun --find clang-format 2>/dev/null)
 CLANG_TIDY ?=
 PYTHON ?= python3
@@ -47,22 +55,25 @@ format-check:
 	$(CLANG_FORMAT) --style=LLVM --dry-run --Werror $(FORMAT_SOURCES)
 
 tidy:
-	PROFILE=$(PROFILE) ARDUINO_CLI=$(ARDUINO_CLI) CLANG_TIDY="$(CLANG_TIDY)" AUDIO_DRIVER_INCLUDE="$(AUDIO_DRIVER_INCLUDE)" AUDIO_TOOLS_INCLUDE="$(AUDIO_TOOLS_INCLUDE)" tools/run_clang_tidy.sh
+	PROFILE=$(PROFILE) ARDUINO_CLI=$(ARDUINO_CLI) CLANG_TIDY="$(CLANG_TIDY)" AUDIO_DRIVER_INCLUDE="$(AUDIO_DRIVER_INCLUDE)" AUDIO_TOOLS_INCLUDE="$(AUDIO_TOOLS_INCLUDE)" WAVESHARE_TOUCH_INCLUDE="$(WAVESHARE_TOUCH_INCLUDE)" tools/run_clang_tidy.sh
 
 lint: format-check tidy
 
 compile:
-	$(ARDUINO_CLI) compile --profile $(PROFILE) --build-path $(BUILD_PATH) --build-property "compiler.cpp.extra_flags=$(AUDIO_INCLUDE_FLAGS)" --clean --export-binaries $(SKETCH_DIR)
+	$(ARDUINO_CLI) compile --profile $(PROFILE) --build-path $(BUILD_PATH) --build-property "compiler.cpp.extra_flags=$(LIBRARY_INCLUDE_FLAGS)" --clean --export-binaries $(SKETCH_DIR)
 
 stage-simulator:
 	@test "$(SIMULATOR_STAGE_ROOT)" = "build/wokwi-standard-sketch"
 	rm -rf $(SIMULATOR_STAGE_ROOT)
 	mkdir -p $(SIMULATOR_SKETCH_DIR)
 	cp -R $(SKETCH_DIR)/. $(SIMULATOR_SKETCH_DIR)/
+	rm -rf $(SIMULATOR_SKETCH_DIR)/third_party/waveshare
+	mkdir -p $(SIMULATOR_SKETCH_DIR)/third_party/waveshare/Arduino/libraries
+	cp -R $(WAVESHARE_TOUCH_DIR) $(SIMULATOR_SKETCH_DIR)/third_party/waveshare/Arduino/libraries/
 	cp $(SIMULATOR_FIXTURES)/AngryCatSimulator.h $(SIMULATOR_FIXTURES)/AngryCatSimulator.cpp $(SIMULATOR_SKETCH_DIR)/
 
 compile-simulator: stage-simulator
-	$(ARDUINO_CLI) compile --fqbn $(SIMULATOR_FQBN) --build-path $(SIMULATOR_BUILD_PATH) --build-property "compiler.cpp.extra_flags=$(AUDIO_INCLUDE_FLAGS) -DANGRY_CAT_SIMULATOR=1" --clean --export-binaries $(SIMULATOR_SKETCH_DIR)
+	$(ARDUINO_CLI) compile --fqbn $(SIMULATOR_FQBN) --build-path $(SIMULATOR_BUILD_PATH) --build-property "compiler.cpp.extra_flags=$(SIMULATOR_LIBRARY_INCLUDE_FLAGS) -DANGRY_CAT_SIMULATOR=1" --clean --export-binaries $(SIMULATOR_SKETCH_DIR)
 	ln -sfn "$(notdir $(SIMULATOR_BUILD_PATH))" "$(SIMULATOR_ACTIVE_PATH).next"
 	mv -f "$(SIMULATOR_ACTIVE_PATH).next" "$(SIMULATOR_ACTIVE_PATH)"
 
@@ -71,10 +82,13 @@ stage-simulator-integration:
 	rm -rf $(SIMULATOR_INTEGRATION_STAGE_ROOT)
 	mkdir -p $(SIMULATOR_INTEGRATION_SKETCH_DIR)
 	cp -R $(SKETCH_DIR)/. $(SIMULATOR_INTEGRATION_SKETCH_DIR)/
+	rm -rf $(SIMULATOR_INTEGRATION_SKETCH_DIR)/third_party/waveshare
+	mkdir -p $(SIMULATOR_INTEGRATION_SKETCH_DIR)/third_party/waveshare/Arduino/libraries
+	cp -R $(WAVESHARE_TOUCH_DIR) $(SIMULATOR_INTEGRATION_SKETCH_DIR)/third_party/waveshare/Arduino/libraries/
 	cp $(SIMULATOR_FIXTURES)/AngryCatSimulator.h $(SIMULATOR_FIXTURES)/AngryCatSimulator.cpp $(SIMULATOR_INTEGRATION_SKETCH_DIR)/
 
 compile-simulator-integration: stage-simulator-integration
-	$(ARDUINO_CLI) compile --fqbn $(SIMULATOR_FQBN) --build-path $(SIMULATOR_INTEGRATION_BUILD_PATH) --build-property "compiler.cpp.extra_flags=$(AUDIO_INCLUDE_FLAGS) -DANGRY_CAT_SIMULATOR=1 -DANGRY_CAT_SIMULATOR_LIVE=1" --clean --export-binaries $(SIMULATOR_INTEGRATION_SKETCH_DIR)
+	$(ARDUINO_CLI) compile --fqbn $(SIMULATOR_FQBN) --build-path $(SIMULATOR_INTEGRATION_BUILD_PATH) --build-property "compiler.cpp.extra_flags=$(SIMULATOR_INTEGRATION_LIBRARY_INCLUDE_FLAGS) -DANGRY_CAT_SIMULATOR=1 -DANGRY_CAT_SIMULATOR_LIVE=1" --clean --export-binaries $(SIMULATOR_INTEGRATION_SKETCH_DIR)
 	ln -sfn "$(notdir $(SIMULATOR_INTEGRATION_BUILD_PATH))" "$(SIMULATOR_ACTIVE_PATH).next"
 	mv -f "$(SIMULATOR_ACTIVE_PATH).next" "$(SIMULATOR_ACTIVE_PATH)"
 

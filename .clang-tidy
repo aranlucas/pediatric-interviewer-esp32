@@ -2,11 +2,14 @@
 # LLVM 18 reports ArduinoJson's placement-new tagged union as leaked storage.
 # arduino-audio-driver's CodecConfig constructor leaves signal_type for callers
 # to set, which is safe here but trips the constructor-level analyzer check.
+# arduino-audio-tools' BufferRTOS constructor intentionally calls reset() while
+# establishing its stream buffer, which clang models as a virtual dispatch.
 Checks: >-
   clang-diagnostic-*,
   clang-analyzer-*,
   -clang-analyzer-cplusplus.NewDeleteLeaks,
-  -clang-analyzer-optin.cplusplus.UninitializedObject
+  -clang-analyzer-optin.cplusplus.UninitializedObject,
+  -clang-analyzer-optin.cplusplus.VirtualCall
 # Analyze only maintained application headers. Third-party codec and touch
 # headers are version-pinned and checked by their upstream projects.
 HeaderFilterRegex: ".*/src/(audio|interviewer)/.*"

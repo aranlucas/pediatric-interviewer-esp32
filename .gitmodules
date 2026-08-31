@@ -4,3 +4,6 @@
 [submodule "firmware/angry_cat_pediatric_interviewer/third_party/arduino-audio-tools"]
 	path = firmware/angry_cat_pediatric_interviewer/third_party/arduino-audio-tools
 	url = https://github.com/pschatzmann/arduino-audio-tools.git
+[submodule "firmware/angry_cat_pediatric_interviewer/third_party/waveshare"]
+	path = firmware/angry_cat_pediatric_interviewer/third_party/waveshare
+	url = https://github.com/waveshareteam/ESP32-S3-Touch-LCD-3.5B.git

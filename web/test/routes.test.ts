@@ -11,6 +11,7 @@ import { POST as createSession } from "../app/api/session/route";
 import {
   createAccessToken,
   REPORT_TOKEN_COOKIE,
+  sessionOwnerCookieName,
   verifyAccessToken,
 } from "../lib/server-auth";
 
@@ -23,14 +24,14 @@ beforeEach(() => {
 });
 
 describe("session token route", () => {
-  it("mints compatible scoped tokens only for a same-origin POST", async () => {
+  it("creates a server-owned room and mints compatible scoped tokens", async () => {
     const limit = vi.fn().mockResolvedValue({ success: true });
     getCloudflareContext.mockResolvedValue({
       env: { WEB_TOKEN_SECRET: SECRET, SESSION_RATE_LIMITER: { limit } },
     });
 
     const response = await createSession(
-      new Request(`https://oral.example/api/session?room=${ROOM}`, {
+      new Request("https://oral.example/api/session", {
         method: "POST",
         headers: {
           Origin: "https://oral.example",
@@ -44,6 +45,7 @@ describe("session token route", () => {
     expect(response.headers.get("Set-Cookie")).toContain(
       `${REPORT_TOKEN_COOKIE}=`,
     );
+    const setCookie = response.headers.get("Set-Cookie") ?? "";
     expect(response.headers.get("Set-Cookie")).toContain("HttpOnly");
     expect(response.headers.get("Set-Cookie")).toContain("SameSite=Strict");
     const payload = (await response.json()) as {
@@ -51,17 +53,99 @@ describe("session token route", () => {
       room: string;
       token: string;
     };
-    expect(payload.room).toBe(ROOM);
+    expect(payload.room).toMatch(/^web-[0-9a-f]{32}$/u);
     expect(payload.expiresAt).toBeGreaterThan(Date.now() + 7_100_000);
     await expect(verifyAccessToken(payload.token, SECRET, "connect")).resolves.toMatchObject({
-      sub: ROOM,
+      sub: payload.room,
+    });
+    const ownerCookieName = sessionOwnerCookieName(payload.room);
+    expect(ownerCookieName).not.toBeNull();
+    const ownerCookie = setCookie.match(new RegExp(`${ownerCookieName}=([^;]+)`, "u"))?.[1];
+    expect(ownerCookie).toBeTruthy();
+    await expect(verifyAccessToken(ownerCookie, SECRET, "owner")).resolves.toMatchObject({
+      sub: payload.room,
     });
     expect(limit).toHaveBeenCalledWith({ key: "192.0.2.10" });
   });
 
-  it("rejects cross-origin issuance before touching Cloudflare bindings", async () => {
+  it("does not let a caller mint tokens for an existing room without its owner cookie", async () => {
+    const limit = vi.fn().mockResolvedValue({ success: true });
+    getCloudflareContext.mockResolvedValue({
+      env: { WEB_TOKEN_SECRET: SECRET, SESSION_RATE_LIMITER: { limit } },
+    });
+
     const response = await createSession(
       new Request(`https://oral.example/api/session?room=${ROOM}`, {
+        method: "POST",
+        headers: { Origin: "https://oral.example" },
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "session_owner_required" });
+    expect(limit).not.toHaveBeenCalled();
+  });
+
+  it("refreshes an existing room only with a matching signed owner capability", async () => {
+    const limit = vi.fn().mockResolvedValue({ success: true });
+    const ownerCookieName = sessionOwnerCookieName(ROOM);
+    const ownerToken = await createAccessToken(SECRET, {
+      v: 1,
+      sub: ROOM,
+      exp: Math.floor(Date.now() / 1_000) + 300,
+      scope: "owner",
+    });
+    getCloudflareContext.mockResolvedValue({
+      env: { WEB_TOKEN_SECRET: SECRET, SESSION_RATE_LIMITER: { limit } },
+    });
+
+    const response = await createSession(
+      new Request(`https://oral.example/api/session?room=${ROOM}`, {
+        method: "POST",
+        headers: {
+          Origin: "https://oral.example",
+          Cookie: `${ownerCookieName}=${ownerToken}`,
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ room: ROOM });
+    expect(response.headers.get("Set-Cookie")).toContain(`${REPORT_TOKEN_COOKIE}=`);
+    expect(response.headers.get("Set-Cookie")).not.toContain(`${ownerCookieName}=`);
+    expect(limit).toHaveBeenCalledWith({ key: "local" });
+  });
+
+  it("rejects a signed owner capability for a different room", async () => {
+    const ownerToken = await createAccessToken(SECRET, {
+      v: 1,
+      sub: "web-fedcba9876543210fedcba9876543210",
+      exp: Math.floor(Date.now() / 1_000) + 300,
+      scope: "owner",
+    });
+    getCloudflareContext.mockResolvedValue({
+      env: {
+        WEB_TOKEN_SECRET: SECRET,
+        SESSION_RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: true }) },
+      },
+    });
+
+    const response = await createSession(
+      new Request(`https://oral.example/api/session?room=${ROOM}`, {
+        method: "POST",
+        headers: {
+          Origin: "https://oral.example",
+          Cookie: `${sessionOwnerCookieName(ROOM)}=${ownerToken}`,
+        },
+      }),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects cross-origin issuance before touching Cloudflare bindings", async () => {
+    const response = await createSession(
+      new Request("https://oral.example/api/session", {
         method: "POST",
         headers: { Origin: "https://evil.example" },
       }),
@@ -80,7 +164,7 @@ describe("session token route", () => {
     });
 
     const response = await createSession(
-      new Request(`https://oral.example/api/session?room=${ROOM}`, {
+      new Request("https://oral.example/api/session", {
         method: "POST",
         headers: { Origin: "https://oral.example" },
       }),

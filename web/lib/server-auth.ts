@@ -1,4 +1,4 @@
-export type AccessTokenScope = "connect" | "report";
+export type AccessTokenScope = "connect" | "owner" | "report";
 
 export type AccessTokenPayload = {
   v: 1;
@@ -8,6 +8,7 @@ export type AccessTokenPayload = {
 };
 
 export const REPORT_TOKEN_COOKIE = "__Host-angry-cat-report";
+export const SESSION_OWNER_COOKIE_PREFIX = "__Host-angry-cat-owner-";
 
 const encoder = new TextEncoder();
 
@@ -110,6 +111,11 @@ export function isWebRoom(value: string | null): value is `web-${string}` {
   return typeof value === "string" && /^web-[0-9a-f]{32}$/u.test(value);
 }
 
+export function sessionOwnerCookieName(room: string): string | null {
+  if (!isWebRoom(room)) return null;
+  return `${SESSION_OWNER_COOKIE_PREFIX}${room.slice("web-".length)}`;
+}
+
 export function isReportId(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
     value,
@@ -118,4 +124,14 @@ export function isReportId(value: string): boolean {
 
 export function serializeReportCookie(token: string, maxAgeSeconds: number): string {
   return `${REPORT_TOKEN_COOKIE}=${token}; Max-Age=${maxAgeSeconds}; Path=/; Secure; HttpOnly; SameSite=Strict`;
+}
+
+export function serializeSessionOwnerCookie(
+  token: string,
+  room: string,
+  maxAgeSeconds: number,
+): string | null {
+  const name = sessionOwnerCookieName(room);
+  if (!name) return null;
+  return `${name}=${token}; Max-Age=${maxAgeSeconds}; Path=/; Secure; HttpOnly; SameSite=Strict`;
 }

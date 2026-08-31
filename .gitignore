@@ -1,4 +1,5 @@
 **/interviewer_config.h
+.codex/
 build/
 firmware/**/build/
 *.bin

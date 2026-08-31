@@ -5,6 +5,8 @@ import {
   getCookie,
   isReportId,
   isWebRoom,
+  serializeSessionOwnerCookie,
+  sessionOwnerCookieName,
   verifyAccessToken,
 } from "../lib/server-auth";
 
@@ -28,6 +30,7 @@ describe("web HMAC session tokens", () => {
       scope: "connect",
     });
     await expect(verifyAccessToken(token, SECRET, "report", NOW)).resolves.toBeNull();
+    await expect(verifyAccessToken(token, SECRET, "owner", NOW)).resolves.toBeNull();
     await expect(verifyAccessToken(`${token}x`, SECRET, "connect", NOW)).resolves.toBeNull();
     await expect(verifyAccessToken(token, "wrong-secret", "connect", NOW)).resolves.toBeNull();
   });
@@ -79,5 +82,15 @@ describe("web auth input validation", () => {
       "signed.value",
     );
     expect(getCookie("foo=bar", "__Host-angry-cat-report")).toBeNull();
+  });
+
+  it("derives an isolated owner cookie name from a validated room", () => {
+    const room = "web-0123456789abcdef0123456789abcdef";
+    const name = sessionOwnerCookieName(room);
+    expect(name).toBe("__Host-angry-cat-owner-0123456789abcdef0123456789abcdef");
+    expect(serializeSessionOwnerCookie("signed.value", room, 7200)).toBe(
+      `${name}=signed.value; Max-Age=7200; Path=/; Secure; HttpOnly; SameSite=Strict`,
+    );
+    expect(sessionOwnerCookieName("not-a-room")).toBeNull();
   });
 });

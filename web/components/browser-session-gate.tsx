@@ -1,68 +1,59 @@
 "use client";
 
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import {
   requestBrowserSessionToken,
+  SessionSetupError,
   type BrowserSessionToken,
 } from "@/lib/session-token";
 
 type BrowserSession = {
   connectionEnabled: boolean;
   refreshSession: () => void;
-  sessionId: string;
+  room: string;
   sessionToken: string;
 };
-
-function createSessionId(): string {
-  let stored: string | null = null;
-  try {
-    stored = sessionStorage.getItem("angry-cat-session");
-  } catch {
-    // Private browsing can deny storage; an in-memory ID remains sufficient.
-  }
-  if (stored && /^[0-9a-f]{32}$/u.test(stored)) return stored;
-  if (!globalThis.crypto?.getRandomValues) {
-    throw new Error("This browser cannot create a secure interview session.");
-  }
-  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
-  const sessionId = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  try {
-    sessionStorage.setItem("angry-cat-session", sessionId);
-  } catch {
-    // Continue with the in-memory session for this page lifetime.
-  }
-  return sessionId;
-}
 
 export function BrowserSessionGate({
   children,
 }: {
   children: (session: BrowserSession) => ReactNode;
 }) {
-  const [sessionId, setSessionId] = useState<string>();
   const [attempt, setAttempt] = useState(0);
   const [session, setSession] = useState<BrowserSessionToken>();
+  const sessionRef = useRef<BrowserSessionToken | undefined>(undefined);
   const [setupError, setSetupError] = useState("");
   const [refreshing, setRefreshing] = useState(true);
 
   useEffect(() => {
-    try {
-      setSessionId(createSessionId());
-    } catch (failure) {
-      setSetupError(
-        failure instanceof Error ? failure.message : "Could not start a secure session.",
-      );
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!sessionId) return;
     let active = true;
+    const existingRoom = sessionRef.current?.room ?? null;
     setSetupError("");
-    void requestBrowserSessionToken(sessionId, attempt)
+
+    const acquireSession = async (): Promise<BrowserSessionToken> => {
+      try {
+        return await requestBrowserSessionToken(existingRoom, attempt);
+      } catch (failure: unknown) {
+        // An expired owner cookie cannot recover the old Durable Object. Start
+        // a fresh server-owned room rather than leaving the UI permanently
+        // stuck behind the failed refresh.
+        if (
+          existingRoom &&
+          failure instanceof SessionSetupError &&
+          failure.status === 401
+        ) {
+          sessionRef.current = undefined;
+          return requestBrowserSessionToken(null, attempt);
+        }
+        throw failure;
+      }
+    };
+
+    void acquireSession()
       .then((next) => {
         if (!active) return;
+        sessionRef.current = next;
         setSession(next);
         setRefreshing(false);
       })
@@ -77,9 +68,9 @@ export function BrowserSessionGate({
     return () => {
       active = false;
     };
-  }, [attempt, sessionId]);
+  }, [attempt]);
 
-  if (!sessionId || !session) {
+  if (!session) {
     return (
       <main
         className="loading-shell"
@@ -90,11 +81,9 @@ export function BrowserSessionGate({
             <div className="loading-cat" aria-hidden="true">AC</div>
             <h1>Secure connection unavailable</h1>
             <p>{setupError}</p>
-            {sessionId && (
-              <button type="button" onClick={() => setAttempt((current) => current + 1)}>
-                Retry connection
-              </button>
-            )}
+            <button type="button" onClick={() => setAttempt((current) => current + 1)}>
+              Retry connection
+            </button>
           </section>
         ) : (
           <div className="loading-cat" role="status" aria-label="Connecting securely">AC</div>
@@ -113,7 +102,7 @@ export function BrowserSessionGate({
     <>
       {children({
         connectionEnabled: !refreshing,
-        sessionId,
+        room: session.room,
         sessionToken: session.token,
         refreshSession,
       })}

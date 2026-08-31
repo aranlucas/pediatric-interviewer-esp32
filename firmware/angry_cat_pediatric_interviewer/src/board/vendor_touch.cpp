@@ -1,3 +1,4 @@
 // Arduino CLI profiles cannot be combined with --library, so this adapter
-// keeps Waveshare's vendored driver sketch-local and reproducible.
-#include "../../third_party/waveshare/esp_lcd_touch_axs15231b/src/esp_lcd_touch_axs15231b.cpp"
+// compiles the untouched driver source from the pinned Waveshare submodule as
+// part of the sketch.
+#include "../../third_party/waveshare/Arduino/libraries/esp_lcd_touch_axs15231b/esp_lcd_touch_axs15231b.cpp"

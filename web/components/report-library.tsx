@@ -62,6 +62,25 @@ export function ReportsConfigurationError() {
   );
 }
 
+export function ReportsDisabled() {
+  return (
+    <main className="report-library-gate">
+      <section className="report-access-card">
+        <div className="report-access-icon"><ShieldCheck aria-hidden="true" /></div>
+        <h1>Public report library is disabled</h1>
+        <p>
+          This deployment keeps completed interview reports private by default. Only a separately
+          curated public archive can be enabled by its operator.
+        </p>
+        <div className="report-gate-actions">
+          <Link className="report-gate-link" href="/">Return to the interviewer</Link>
+          <Link className="report-gate-secondary-link" href="/privacy">Read privacy details</Link>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export function ReportLibraryIndex({
   reports,
   timezone,
@@ -93,8 +112,9 @@ export function ReportLibraryIndex({
         <div className="report-scope-note">
           <Globe2 size={19} aria-hidden="true" />
           <p>
-            This public archive contains completed evaluations. Runs that never reached scoring
-            are not shown here.
+            This archive contains only reports deliberately copied into the public collection.
+            Practice with fictional details; never include patient or identifying information.
+            <Link href="/privacy">Read the privacy details.</Link>
           </p>
         </div>
 
@@ -168,6 +188,13 @@ export function ReportLibraryDetail({
       </header>
 
       <section className="report-document-shell">
+        <div className="report-scope-note report-detail-scope-note">
+          <ShieldCheck size={19} aria-hidden="true" />
+          <p>
+            This is a curated public training artifact. Do not use real patient, child, guardian,
+            or other identifying information in practice answers. <Link href="/privacy">Privacy and data use</Link>
+          </p>
+        </div>
         <div className="report-document-toolbar">
           <div className="report-document-tabs" role="navigation" aria-label="Report documents">
             <Link data-active={kind === "report"} href={`/reports/${report.reportId}?view=report`}>
