@@ -1,5 +1,6 @@
 export type BrowserSessionToken = {
   expiresAt: number;
+  room: string;
   token: string;
 };
 
@@ -7,7 +8,17 @@ const pendingRequests = new Map<string, Promise<BrowserSessionToken>>();
 
 const SESSION_HANDSHAKE_TIMEOUT_MS = 10_000;
 
-class SessionSetupError extends Error {}
+export class SessionSetupError extends Error {
+  readonly status: number | undefined;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "SessionSetupError";
+    this.status = status;
+  }
+}
+
+const WEB_ROOM_PATTERN = /^web-[0-9a-f]{32}$/u;
 
 /**
  * Dedupe React Strict Mode's development effect replay without caching an
@@ -15,17 +26,17 @@ class SessionSetupError extends Error {}
  * server and receives a fresh token.
  */
 export function requestBrowserSessionToken(
-  sessionId: string,
+  room: string | null,
   attempt: number,
   request: typeof fetch = fetch,
 ): Promise<BrowserSessionToken> {
-  const key = `${sessionId}:${attempt}`;
+  const key = `${room ?? "new"}:${attempt}`;
   const pending = pendingRequests.get(key);
   if (pending) return pending;
 
   const promise = Promise.resolve()
     .then(() => request(
-      `/api/session?room=${encodeURIComponent(`web-${sessionId}`)}`,
+      room ? `/api/session?room=${encodeURIComponent(room)}` : "/api/session",
       {
         method: "POST",
         cache: "no-store",
@@ -39,6 +50,7 @@ export function requestBrowserSessionToken(
           response.status === 429
             ? "Too many connection attempts. Wait a moment, then retry."
             : "Secure interviewer setup is unavailable. Please retry in a moment.",
+          response.status,
         );
       }
       let payload: Partial<BrowserSessionToken>;
@@ -50,6 +62,9 @@ export function requestBrowserSessionToken(
         );
       }
       if (
+        typeof payload.room !== "string" ||
+        !WEB_ROOM_PATTERN.test(payload.room) ||
+        (room !== null && payload.room !== room) ||
         typeof payload.token !== "string" ||
         !payload.token ||
         typeof payload.expiresAt !== "number" ||
@@ -60,7 +75,7 @@ export function requestBrowserSessionToken(
           "Secure interviewer setup returned an invalid response. Please retry.",
         );
       }
-      return { token: payload.token, expiresAt: payload.expiresAt };
+      return { room: payload.room, token: payload.token, expiresAt: payload.expiresAt };
     })
     .catch((error: unknown) => {
       if (error instanceof SessionSetupError) throw error;

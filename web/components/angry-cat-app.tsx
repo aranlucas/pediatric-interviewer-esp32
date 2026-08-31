@@ -111,10 +111,10 @@ const topicIcons = [
 export function AngryCatApp() {
   return (
     <BrowserSessionGate>
-      {({ connectionEnabled, sessionId, sessionToken, refreshSession }) => (
+      {({ connectionEnabled, room, sessionToken, refreshSession }) => (
         <InterviewExperience
           connectionEnabled={connectionEnabled}
-          sessionId={sessionId}
+          room={room}
           sessionToken={sessionToken}
           onRefreshSession={refreshSession}
         />
@@ -125,12 +125,12 @@ export function AngryCatApp() {
 
 function InterviewExperience({
   connectionEnabled,
-  sessionId,
+  room,
   sessionToken,
   onRefreshSession,
 }: {
   connectionEnabled: boolean;
-  sessionId: string;
+  room: string;
   sessionToken: string;
   onRefreshSession: () => void;
 }) {
@@ -321,7 +321,7 @@ function InterviewExperience({
 
   const agent = useAgent<InterviewState>({
     agent: "PediatricInterviewer",
-    name: `web-${sessionId}`,
+    name: room,
     host: AGENT_HOST,
     query: agentQuery,
     enabled: connectionEnabled,
@@ -763,6 +763,13 @@ function InterviewExperience({
           <span>
             Multiple selections become one coherent combo case. Each selected domain gets a
             question target.
+          </span>
+        </div>
+        <div className="rail-privacy-note">
+          <ShieldCheck size={18} aria-hidden="true" />
+          <span>
+            Practice data only: never enter real patient, child, guardian, or identifying
+            information. <a href="/privacy">Privacy and data use</a>
           </span>
         </div>
         <a

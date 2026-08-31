@@ -15,8 +15,9 @@ to fetch the saved JSON report from R2 through the Worker. It retains a bounded
 device review containing the outcome, examiner summary, and up to six scored
 skill areas. The review opens automatically: swipe left or right between pages,
 tap to advance, or hold for 2.5 seconds to return to the topic menu. The complete
-JSON and Markdown objects remain private at rest in R2, while the browser's
-public Reports library publishes every completed review and study aid.
+JSON and Markdown objects remain private at rest in R2. The browser's public
+Reports library is disabled by default and can read only redacted artifacts
+deliberately copied into a separate public prefix.
 
 The browser client in `web/` adds configurable setup: check one or more domains
 to create a coherent combo case, choose 3-10 questions, and select Easy,
@@ -35,6 +36,8 @@ https://www.aapd.org/research/oral-health-policies--recommendations/
 The Arduino sketch lives in
 `firmware/angry_cat_pediatric_interviewer`; the root Makefile keeps the normal
 workflow independent of the repository's checkout directory name.
+`make setup` initializes the pinned Arduino library submodules, including the
+official Waveshare board repository used for the AXS15231B touch driver.
 
 ```sh
 make setup

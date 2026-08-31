@@ -1,4 +1,0 @@
-[mcp_servers.Wokwi]
-command = "/Users/lucas/.local/bin/wokwi-cli"
-args = ["mcp"]
-enabled = true

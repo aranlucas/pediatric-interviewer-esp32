@@ -10,7 +10,11 @@ import {
   getReportMarkdown,
   type ReportDocumentKind,
 } from "@/lib/reports";
-import { reportsEnvironment, reportsTimezone } from "@/lib/reports-environment";
+import {
+  publicReportsEnabled,
+  reportsEnvironment,
+  reportsTimezone,
+} from "@/lib/reports-environment";
 import { isReportId } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +35,7 @@ export default async function ReportPage({ params, searchParams }: ReportPagePro
 
   const env = await reportsEnvironment();
   if (!env?.INTERVIEW_REPORTS) return <ReportsConfigurationError />;
+  if (!publicReportsEnabled(env)) notFound();
 
   const [report, markdown] = await Promise.all([
     getCompletedReport(env.INTERVIEW_REPORTS, reportId),

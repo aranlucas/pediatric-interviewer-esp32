@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  getPublicReportJson,
   listCompletedReports,
-  reportObjectKey,
+  publicReportObjectKey,
   summarizeStoredReport,
 } from "../lib/reports";
 
@@ -29,9 +30,9 @@ describe("completed report library", () => {
       },
       {
         reportId: REPORT_ID,
-        json: `pediatric-oral-boards/reports/${REPORT_ID}.json`,
-        markdown: `pediatric-oral-boards/reports/${REPORT_ID}.md`,
-        cheatsheet: `pediatric-oral-boards/reports/${REPORT_ID}-cheatsheet.md`,
+        json: `pediatric-oral-boards/public-reports/${REPORT_ID}.json`,
+        markdown: `pediatric-oral-boards/public-reports/${REPORT_ID}.md`,
+        cheatsheet: `pediatric-oral-boards/public-reports/${REPORT_ID}-cheatsheet.md`,
         lastModified: "2026-08-23T02:47:00.000Z",
       },
     );
@@ -45,34 +46,35 @@ describe("completed report library", () => {
       topicLabel: "Behavior Guidance",
       artifacts: { json: true, markdown: true, cheatsheet: true },
     });
+    expect(summary).not.toHaveProperty("sessionId");
   });
 
-  it("builds only deterministic, validated private object keys", () => {
-    expect(reportObjectKey(REPORT_ID, "report")).toBe(
-      `pediatric-oral-boards/reports/${REPORT_ID}.md`,
+  it("builds only deterministic, validated public object keys", () => {
+    expect(publicReportObjectKey(REPORT_ID, "report")).toBe(
+      `pediatric-oral-boards/public-reports/${REPORT_ID}.md`,
     );
-    expect(reportObjectKey(REPORT_ID, "cheatsheet")).toBe(
-      `pediatric-oral-boards/reports/${REPORT_ID}-cheatsheet.md`,
+    expect(publicReportObjectKey(REPORT_ID, "cheatsheet")).toBe(
+      `pediatric-oral-boards/public-reports/${REPORT_ID}-cheatsheet.md`,
     );
-    expect(reportObjectKey(REPORT_ID, "json")).toBe(
-      `pediatric-oral-boards/reports/${REPORT_ID}.json`,
+    expect(publicReportObjectKey(REPORT_ID, "json")).toBe(
+      `pediatric-oral-boards/public-reports/${REPORT_ID}.json`,
     );
-    expect(reportObjectKey("../../private", "report")).toBeNull();
+    expect(publicReportObjectKey("../../private", "report")).toBeNull();
   });
 
-  it("paginates the complete R2 report archive", async () => {
+  it("paginates the curated R2 report archive", async () => {
     const olderId = "11111111-1111-4111-8111-111111111111";
     const newerId = "22222222-2222-4222-8222-222222222222";
     const uploaded = new Date("2026-08-23T02:47:00.000Z");
     const list = vi
       .fn()
       .mockResolvedValueOnce({
-        objects: [{ key: `pediatric-oral-boards/reports/${olderId}.json`, uploaded }],
+        objects: [{ key: `pediatric-oral-boards/public-reports/${olderId}.json`, uploaded }],
         truncated: true,
         cursor: "page-two",
       })
       .mockResolvedValueOnce({
-        objects: [{ key: `pediatric-oral-boards/reports/${newerId}.json`, uploaded }],
+        objects: [{ key: `pediatric-oral-boards/public-reports/${newerId}.json`, uploaded }],
         truncated: false,
       });
     const get = vi.fn(async (key: string) => {
@@ -93,15 +95,35 @@ describe("completed report library", () => {
     const reports = await listCompletedReports({ list, get } as unknown as R2Bucket);
 
     expect(list).toHaveBeenNthCalledWith(1, {
-      prefix: "pediatric-oral-boards/reports/",
+      prefix: "pediatric-oral-boards/public-reports/",
       limit: 1_000,
       cursor: undefined,
     });
     expect(list).toHaveBeenNthCalledWith(2, {
-      prefix: "pediatric-oral-boards/reports/",
+      prefix: "pediatric-oral-boards/public-reports/",
       limit: 1_000,
       cursor: "page-two",
     });
     expect(reports.map((report) => report.reportId)).toEqual([newerId, olderId]);
+  });
+
+  it("redacts the private room identifier from public JSON downloads", async () => {
+    const body = JSON.stringify({
+      reportId: REPORT_ID,
+      sessionId: "web-0123456789abcdef0123456789abcdef",
+      evaluation: { outcome: "pass" },
+    });
+    const get = vi.fn().mockResolvedValue({
+      size: body.length,
+      text: async () => body,
+    });
+
+    const publicBody = await getPublicReportJson({ get } as unknown as R2Bucket, REPORT_ID);
+
+    expect(JSON.parse(publicBody!)).toEqual({
+      reportId: REPORT_ID,
+      evaluation: { outcome: "pass" },
+    });
+    expect(get).toHaveBeenCalledWith(`pediatric-oral-boards/public-reports/${REPORT_ID}.json`);
   });
 });

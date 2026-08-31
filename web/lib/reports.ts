@@ -1,10 +1,11 @@
 import { isReportId } from "@/lib/server-auth";
 
-const REPORT_PREFIX = "pediatric-oral-boards/reports/";
-const REPORT_KEY_PATTERN =
-  /^pediatric-oral-boards\/reports\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(-cheatsheet)?\.(json|md)$/iu;
+const PUBLIC_REPORT_PREFIX = "pediatric-oral-boards/public-reports/";
+const PUBLIC_REPORT_KEY_PATTERN =
+  /^pediatric-oral-boards\/public-reports\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(-cheatsheet)?\.(json|md)$/iu;
 const MAX_REPORT_BYTES = 1_000_000;
 const MAX_MARKDOWN_BYTES = 500_000;
+export const MAX_PUBLIC_REPORTS = 200;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -18,7 +19,6 @@ type ReportArtifacts = {
 
 export type CompletedReport = {
   reportId: string;
-  sessionId: string | null;
   generatedAt: string;
   outcome: string;
   averageScore: number | null;
@@ -60,7 +60,7 @@ function validDate(value: unknown, fallback: string): string {
 function reportArtifacts(objects: R2Object[]): ReportArtifacts[] {
   const grouped = new Map<string, ReportArtifacts>();
   for (const object of objects) {
-    const match = REPORT_KEY_PATTERN.exec(object.key);
+    const match = PUBLIC_REPORT_KEY_PATTERN.exec(object.key);
     if (!match) continue;
     const [, rawReportId, cheatsheetSuffix, extension] = match;
     const reportId = rawReportId.toLowerCase();
@@ -106,7 +106,6 @@ export function summarizeStoredReport(
     finiteNumber(configuration?.questionCount) ?? exchanges.length;
   return {
     reportId: artifacts.reportId,
-    sessionId: cleanString(report.sessionId),
     generatedAt: validDate(report.generatedAt, artifacts.lastModified),
     outcome: cleanString(evaluation?.outcome) ?? "unknown",
     averageScore,
@@ -126,14 +125,24 @@ export function summarizeStoredReport(
 
 async function listReportObjects(bucket: R2Bucket): Promise<R2Object[]> {
   const objects: R2Object[] = [];
+  const reportIds = new Set<string>();
   let cursor: string | undefined;
   do {
     const page = await bucket.list({
-      prefix: REPORT_PREFIX,
+      prefix: PUBLIC_REPORT_PREFIX,
       limit: 1_000,
       cursor,
     });
-    objects.push(...page.objects);
+    for (const object of page.objects) {
+      const match = PUBLIC_REPORT_KEY_PATTERN.exec(object.key);
+      if (!match) continue;
+      const reportId = match[1].toLowerCase();
+      if (!reportIds.has(reportId) && reportIds.size >= MAX_PUBLIC_REPORTS) {
+        return objects;
+      }
+      reportIds.add(reportId);
+      objects.push(object);
+    }
     if (page.truncated && !page.cursor) {
       throw new Error("R2 report listing was truncated without a cursor");
     }
@@ -143,7 +152,10 @@ async function listReportObjects(bucket: R2Bucket): Promise<R2Object[]> {
 }
 
 export async function listCompletedReports(bucket: R2Bucket): Promise<CompletedReport[]> {
-  const artifacts = reportArtifacts(await listReportObjects(bucket));
+  const artifacts = reportArtifacts(await listReportObjects(bucket)).slice(
+    0,
+    MAX_PUBLIC_REPORTS,
+  );
   const reports = await Promise.all(
     artifacts.map(async (entry) => {
       const object = await bucket.get(entry.json!);
@@ -168,7 +180,7 @@ export async function getCompletedReport(
 ): Promise<CompletedReport | null> {
   if (!isReportId(reportId)) return null;
   const normalizedId = reportId.toLowerCase();
-  const prefix = `${REPORT_PREFIX}${normalizedId}`;
+  const prefix = `${PUBLIC_REPORT_PREFIX}${normalizedId}`;
   const [jsonObject, markdownObject, cheatsheetObject] = await Promise.all([
     bucket.get(`${prefix}.json`),
     bucket.head(`${prefix}.md`),
@@ -188,12 +200,12 @@ export async function getCompletedReport(
   }
 }
 
-export function reportObjectKey(
+export function publicReportObjectKey(
   reportId: string,
   kind: "json" | ReportDocumentKind,
 ): string | null {
   if (!isReportId(reportId)) return null;
-  const prefix = `${REPORT_PREFIX}${reportId.toLowerCase()}`;
+  const prefix = `${PUBLIC_REPORT_PREFIX}${reportId.toLowerCase()}`;
   if (kind === "json") return `${prefix}.json`;
   return kind === "cheatsheet" ? `${prefix}-cheatsheet.md` : `${prefix}.md`;
 }
@@ -203,10 +215,24 @@ export async function getReportMarkdown(
   reportId: string,
   kind: ReportDocumentKind,
 ): Promise<string | null> {
-  const key = reportObjectKey(reportId, kind);
+  const key = publicReportObjectKey(reportId, kind);
   if (!key) return null;
   const object = await bucket.get(key);
   if (!object) return null;
   if (object.size > MAX_MARKDOWN_BYTES) throw new Error("stored Markdown is too large");
   return object.text();
+}
+
+export async function getPublicReportJson(
+  bucket: R2Bucket,
+  reportId: string,
+): Promise<string | null> {
+  const key = publicReportObjectKey(reportId, "json");
+  if (!key) return null;
+  const object = await bucket.get(key);
+  if (!object) return null;
+  const report = await parseReportObject(object);
+  const publicReport = { ...report };
+  delete publicReport.sessionId;
+  return `${JSON.stringify(publicReport, null, 2)}\n`;
 }

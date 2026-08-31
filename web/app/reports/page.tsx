@@ -1,8 +1,16 @@
 import type { Metadata } from "next";
 
-import { ReportLibraryIndex, ReportsConfigurationError } from "@/components/report-library";
+import {
+  ReportLibraryIndex,
+  ReportsConfigurationError,
+  ReportsDisabled,
+} from "@/components/report-library";
 import { listCompletedReports } from "@/lib/reports";
-import { reportsEnvironment, reportsTimezone } from "@/lib/reports-environment";
+import {
+  publicReportsEnabled,
+  reportsEnvironment,
+  reportsTimezone,
+} from "@/lib/reports-environment";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +22,7 @@ export const metadata: Metadata = {
 export default async function ReportsPage() {
   const env = await reportsEnvironment();
   if (!env?.INTERVIEW_REPORTS) return <ReportsConfigurationError />;
+  if (!publicReportsEnabled(env)) return <ReportsDisabled />;
 
   const reports = await listCompletedReports(env.INTERVIEW_REPORTS);
   return <ReportLibraryIndex reports={reports} timezone={reportsTimezone(env)} />;

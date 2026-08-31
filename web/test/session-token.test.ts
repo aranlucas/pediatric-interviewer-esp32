@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { requestBrowserSessionToken } from "../lib/session-token";
 
-const SESSION_ID = "0123456789abcdef0123456789abcdef";
+const ROOM = "web-0123456789abcdef0123456789abcdef";
 
 describe("browser session token acquisition", () => {
   it("deduplicates an in-flight React Strict Mode request", async () => {
@@ -11,19 +11,41 @@ describe("browser session token acquisition", () => {
       resolveResponse = resolve;
     }));
 
-    const first = requestBrowserSessionToken(SESSION_ID, 101, request as typeof fetch);
-    const second = requestBrowserSessionToken(SESSION_ID, 101, request as typeof fetch);
+    const first = requestBrowserSessionToken(null, 101, request as typeof fetch);
+    const second = requestBrowserSessionToken(null, 101, request as typeof fetch);
     await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
     resolveResponse?.(Response.json({
+      room: ROOM,
       token: "signed-room-token",
       expiresAt: Date.now() + 120_000,
     }));
 
     await expect(first).resolves.toEqual({
+      room: ROOM,
       token: "signed-room-token",
       expiresAt: expect.any(Number),
     });
     await expect(second).resolves.toMatchObject({ token: "signed-room-token" });
+    expect(request).toHaveBeenCalledWith(
+      "/api/session",
+      expect.objectContaining({ method: "POST", credentials: "same-origin" }),
+    );
+  });
+
+  it("requests an existing room only when refreshing its owner session", async () => {
+    const request = vi.fn().mockResolvedValue(Response.json({
+      room: ROOM,
+      token: "signed-room-token",
+      expiresAt: Date.now() + 120_000,
+    }));
+
+    await expect(
+      requestBrowserSessionToken(ROOM, 104, request as typeof fetch),
+    ).resolves.toMatchObject({ room: ROOM });
+    expect(request).toHaveBeenCalledWith(
+      `/api/session?room=${encodeURIComponent(ROOM)}`,
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("returns a stable rate-limit message without retrying automatically", async () => {
@@ -32,7 +54,7 @@ describe("browser session token acquisition", () => {
     );
 
     await expect(
-      requestBrowserSessionToken(SESSION_ID, 102, request as typeof fetch),
+      requestBrowserSessionToken(null, 102, request as typeof fetch),
     ).rejects.toThrow("Too many connection attempts");
     expect(request).toHaveBeenCalledOnce();
   });
@@ -44,7 +66,7 @@ describe("browser session token acquisition", () => {
     }));
 
     await expect(
-      requestBrowserSessionToken(SESSION_ID, 103, request as typeof fetch),
+      requestBrowserSessionToken(null, 103, request as typeof fetch),
     ).rejects.toThrow("invalid response");
   });
 });

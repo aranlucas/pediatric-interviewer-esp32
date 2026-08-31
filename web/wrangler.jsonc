@@ -8,6 +8,7 @@
     "required": ["WEB_TOKEN_SECRET"]
   },
   "vars": {
+    "PUBLIC_REPORTS_ENABLED": "false",
     "REPORTS_TIMEZONE": "America/Los_Angeles"
   },
   "r2_buckets": [

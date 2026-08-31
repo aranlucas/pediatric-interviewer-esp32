@@ -9,6 +9,7 @@ profile=${PROFILE:-waveshare-3.5b}
 arduino_cli=${ARDUINO_CLI:-arduino-cli}
 audio_driver_include=${AUDIO_DRIVER_INCLUDE:-$sketch_dir/third_party/arduino-audio-driver/src}
 audio_tools_include=${AUDIO_TOOLS_INCLUDE:-$sketch_dir/third_party/arduino-audio-tools/src}
+waveshare_touch_include=${WAVESHARE_TOUCH_INCLUDE:-$sketch_dir/third_party/waveshare/Arduino/libraries/esp_lcd_touch_axs15231b}
 
 if [[ -n ${CLANG_TIDY:-} ]]; then
   clang_tidy=$CLANG_TIDY
@@ -38,7 +39,7 @@ done
 
 "$arduino_cli" compile --profile "$profile" --only-compilation-database --clean \
   --build-path "$build_dir" \
-  --build-property "compiler.cpp.extra_flags=-I$audio_driver_include -I$audio_tools_include" \
+  --build-property "compiler.cpp.extra_flags=-I$audio_driver_include -I$audio_tools_include -I$waveshare_touch_include" \
   "$sketch_dir" >/dev/null
 
 compile_database="$build_dir/compile_commands.json"
@@ -119,9 +120,15 @@ if [[ ${#sources[@]} -eq 0 ]]; then
   exit 1
 fi
 
+# The Android clang target used for analysis aliases int32_t to int. The
+# ESP32-specific upstream header also exposes an optional int overload, which
+# is distinct under the Xtensa ABI but a false duplicate under this host-side
+# analysis target. Keep the actual ESP32 build flags unchanged and model that
+# ABI distinction only for this host-side analysis.
 for source in "${sources[@]}"; do
   "$clang_tidy" -p "$temporary_dir" "$source" \
     --warnings-as-errors='*' \
+    --extra-arg=-D__INT32_TYPE__=long \
     --extra-arg-before=--target=armv7-none-eabi \
     --extra-arg-before=-D__XTENSA__ \
     --extra-arg-before=-D__block=__newlib_block \
