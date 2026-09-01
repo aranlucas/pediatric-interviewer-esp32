@@ -56,7 +56,7 @@ const defaultAnswers = [
 ];
 
 function usage() {
-  console.log(`Usage: npm run simulate:interview -- [options]
+  console.log(`Usage: pnpm run simulate:interview -- [options]
 
 Options:
   --topic <id>       Topic id sent to the examiner (default: behavior_guidance)

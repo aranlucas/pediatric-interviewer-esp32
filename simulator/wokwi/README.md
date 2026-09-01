@@ -74,7 +74,7 @@ disable certificate validation, so `make simulate-integration` and
 `make simulate-turn-complete` fail with `Could not connect to Cloudflare voice`
 regardless of `WOKWI_CLI_TOKEN`. Running `wokwigw` locally does not help: the
 CLI has no option to point at it. Use the VS Code flow for the live path, and
-`cd worker && npm run simulate:interview` for a headless end-to-end check.
+`cd worker && pnpm run simulate:interview` for a headless end-to-end check.
 
 For a question-aware interactive interview, type `i` before `s`. Whenever the
 terminal prints `SIM_MIC: awaiting answer`, enter a new response as:
@@ -95,7 +95,7 @@ fetches the completed report from private R2:
 
 ```sh
 cd ../waveshare_touch_demo/cloudflare/angry-cat-worker
-npm run simulate:suite
+pnpm run simulate:suite
 ```
 
 ## Local visual UI
