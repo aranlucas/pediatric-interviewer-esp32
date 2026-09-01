@@ -6,12 +6,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "check": "tsc --noEmit",
+    "check": "pnpm cf-typecheck",
     "test": "vitest run",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
-    "cf-typecheck": "wrangler types --check --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "cf-typecheck": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts && tsc --noEmit"
   },
   "dependencies": {
     "agents": "^0.21.0",
@@ -29,6 +29,6 @@
     "@types/react-dom": "^19.2.5",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
-    "wrangler": "^4.125.0"
+    "wrangler": "^4.127.1"
   }
 }
