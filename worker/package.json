@@ -2,7 +2,6 @@
   "name": "angry-cat-worker",
   "version": "1.0.0",
   "private": true,
-  "packageManager": "pnpm@12.2.1",
   "type": "module",
   "scripts": {
     "check": "wrangler types && tsc --noEmit",

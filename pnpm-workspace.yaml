@@ -1,3 +1,7 @@
+packages:
+  - web
+  - worker
+
 allowBuilds:
   "@google/genai": true
   core-js-pure: true
