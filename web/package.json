@@ -6,6 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "check": "pnpm cf-typecheck",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "test": "vitest run",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
@@ -13,19 +17,21 @@
     "cf-typecheck": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts && tsc --noEmit"
   },
   "dependencies": {
-    "agents": "^0.21.0",
-    "lucide-react": "^1.33.0",
-    "next": "^16.3.2",
+    "agents": "^0.22.0",
+    "lucide-react": "^1.38.0",
+    "next": "^16.3.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@opennextjs/cloudflare": "^1.20.2",
-    "@types/node": "^26.2.0",
+    "@opennextjs/cloudflare": "^1.20.5",
+    "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.80.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
     "wrangler": "^4.127.1"

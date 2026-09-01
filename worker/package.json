@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "check": "wrangler types && tsc --noEmit",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "generate-types": "wrangler types",
@@ -14,16 +18,18 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@google/genai": "^2.18.0",
-    "agents": "^0.21.0",
-    "hono": "^4.13.3",
-    "zod": "^4.4.3"
+    "@google/genai": "^2.20.0",
+    "agents": "^0.22.0",
+    "hono": "^4.13.5",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.4.0",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.80.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
-    "wrangler": "^4.125.0",
+    "wrangler": "^4.127.1",
     "ws": "^8.21.3"
   }
 }
