@@ -13,6 +13,18 @@ make monitor
 
 The Arduino sketch is in `firmware/angry_cat_pediatric_interviewer`. The web client is in `web/`.
 
+## Web and Worker workspace
+
+The `web/` and `worker/` packages share the root pnpm workspace and lockfile.
+Install dependencies from the repository root, then target a package with
+pnpm's filter:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm --filter angry-cat-web test
+pnpm --filter angry-cat-worker test
+```
+
 ## Privacy
 
 Keep device tokens, credentials, and private interview reports out of Git. Review clinical answers against the [AAPD Reference Manual](https://www.aapd.org/research/oral-health-policies--recommendations/).
