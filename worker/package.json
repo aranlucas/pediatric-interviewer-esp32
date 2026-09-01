@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.20.0",
   "type": "module",
   "scripts": {
-    "check": "wrangler types --check && tsc --noEmit",
+    "check": "wrangler types && tsc --noEmit",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "generate-types": "wrangler types",

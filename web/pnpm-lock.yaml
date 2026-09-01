@@ -49,7 +49,7 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.2.0)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(terser@5.16.9)(yaml@2.9.0))
       wrangler:
-        specifier: ^4.125.0
+        specifier: ^4.127.1
         version: 4.127.1(@cloudflare/workers-types@5.20260830.1)
 
 packages:
