@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn"],
+  "env": {
+    "node": true,
+    "es2026": true
+  },
+  "ignorePatterns": ["worker-configuration.d.ts"]
+}
