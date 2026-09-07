@@ -1,5 +1,8 @@
 {
   "name": "angry-cat-pediatric-interviewer",
   "private": true,
+  "scripts": {
+    "typecheck": "pnpm --dir worker typecheck && pnpm --dir web typecheck"
+  },
   "packageManager": "pnpm@12.2.1"
 }

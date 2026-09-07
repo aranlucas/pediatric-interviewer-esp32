@@ -25,7 +25,7 @@ pnpm install --frozen-lockfile
 pnpm check
 pnpm test
 pnpm cf-typegen
-pnpm cf-typecheck
+pnpm typecheck
 pnpm build
 pnpm exec opennextjs-cloudflare build
 pnpm exec wrangler deploy --dry-run

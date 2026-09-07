@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "wrangler types && tsc --noEmit",
+    "check": "pnpm typecheck",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
     "format": "oxfmt .",
@@ -15,7 +15,8 @@
     "simulate:interview": "node tools/simulate-interview.mjs",
     "simulate:suite": "node tools/simulate-suite.mjs",
     "smoke:web": "node tools/smoke-web.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "wrangler types && tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^2.20.0",
