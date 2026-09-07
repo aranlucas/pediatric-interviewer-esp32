@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "check": "pnpm cf-typecheck",
+    "check": "pnpm typecheck",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
     "format": "oxfmt .",
@@ -14,7 +14,7 @@
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
-    "cf-typecheck": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts && tsc --noEmit"
+    "typecheck": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts && tsc --noEmit"
   },
   "dependencies": {
     "agents": "^0.22.0",
