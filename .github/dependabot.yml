@@ -5,6 +5,8 @@ updates:
     schedule:
       interval: weekly
       day: thursday
+      time: "06:00"
+      timezone: America/Los_Angeles
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
@@ -12,5 +14,7 @@ updates:
     schedule:
       interval: weekly
       day: thursday
+      time: "06:00"
+      timezone: America/Los_Angeles
     open-pull-requests-limit: 5
     versioning-strategy: increase-if-necessary
