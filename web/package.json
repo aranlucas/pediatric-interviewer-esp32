@@ -17,7 +17,7 @@
     "typecheck": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts && tsc --noEmit"
   },
   "dependencies": {
-    "agents": "^0.22.0",
+    "agents": "^0.24.0",
     "lucide-react": "^1.38.0",
     "next": "^16.3.4",
     "react": "^19.2.8",

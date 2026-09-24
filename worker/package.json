@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@google/genai": "^2.20.0",
-    "agents": "^0.22.0",
+    "agents": "^0.24.0",
     "hono": "^4.13.5",
     "zod": "^4.5.4"
   },
