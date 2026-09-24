@@ -113,38 +113,38 @@ importers:
     dependencies:
       agents:
         specifier: ^0.22.0
-        version: 0.22.0(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.0.0)(ai@7.0.64(zod@4.6.5))(react@19.2.8)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.4.0)(esbuild@0.28.2)(terser@5.16.9)(yaml@2.9.0))(zod@4.6.5)
+        version: 0.22.0(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.0.0)(ai@7.0.64(zod@4.6.5))(react@19.3.0)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.4.0)(esbuild@0.28.2)(terser@5.16.9)(yaml@2.9.0))(zod@4.6.5)
       lucide-react:
         specifier: ^1.38.0
-        version: 1.38.0(react@19.2.8)
+        version: 1.38.0(react@19.3.0)
       next:
         specifier: ^16.3.4
-        version: 16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.3.0))(react@19.3.0)
       react:
         specifier: ^19.2.8
-        version: 19.2.8
+        version: 19.3.0
       react-dom:
         specifier: ^19.2.8
-        version: 19.2.8(react@19.2.8)
+        version: 19.2.8(react@19.3.0)
       react-markdown:
         specifier: ^10.1.0
-        version: 10.1.0(@types/react@19.2.18)(react@19.2.8)(supports-color@10.2.2)
+        version: 10.1.0(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2)
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1(supports-color@10.2.2)
     devDependencies:
       '@opennextjs/cloudflare':
         specifier: ^1.20.5
-        version: 1.20.6(next@16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(supports-color@10.2.2)(wrangler@4.131.1(@types/node@26.4.0))
+        version: 1.20.6(next@16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.3.0))(react@19.3.0))(supports-color@10.2.2)(wrangler@4.131.1(@types/node@26.4.0))
       '@types/node':
         specifier: ^26.4.0
         version: 26.4.0
       '@types/react':
         specifier: ^19.2.18
-        version: 19.2.18
+        version: 19.3.0
       '@types/react-dom':
         specifier: ^19.2.5
-        version: 19.2.5(@types/react@19.2.18)
+        version: 19.2.5(@types/react@19.3.0)
       oxfmt:
         specifier: ^0.68.0
         version: 0.68.0
@@ -168,7 +168,7 @@ importers:
         version: 2.22.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5))(supports-color@10.2.2)
       agents:
         specifier: ^0.22.0
-        version: 0.22.0(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.0.0)(ai@7.0.64(zod@4.6.5))(react@19.2.8)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.4.0)(esbuild@0.28.2)(terser@5.16.9)(yaml@2.9.0))(zod@4.6.5)
+        version: 0.22.0(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.0.0)(ai@7.0.64(zod@4.6.5))(react@19.3.0)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.4.0)(esbuild@0.28.2)(terser@5.16.9)(yaml@2.9.0))(zod@4.6.5)
       hono:
         specifier: ^4.13.5
         version: 4.13.8
@@ -2019,8 +2019,8 @@ packages:
     peerDependencies:
       '@types/react': ^19.2.0
 
-  '@types/react@19.2.18':
-    resolution: {integrity: sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w==}
+  '@types/react@19.3.0':
+    resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
 
   '@types/retry@0.12.0':
     resolution: {integrity: sha512-wWKOClTTiizcZhXnPY4wikVAwmdYHp8q6DmC+EJUzAMsycb7HB32Kh9RN4+0gExjmPmZSAQjgURXIGATPegAvA==}
@@ -3401,8 +3401,8 @@ packages:
       '@types/react': '>=18'
       react: '>=18'
 
-  react@19.2.8:
-    resolution: {integrity: sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==}
+  react@19.3.0:
+    resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
     engines: {node: '>=0.10.0'}
 
   remark-gfm@4.0.1:
@@ -5130,7 +5130,7 @@ snapshots:
     dependencies:
       gzip-size: 6.0.0
 
-  '@opennextjs/aws@4.1.4(next@16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(supports-color@10.2.2)':
+  '@opennextjs/aws@4.1.4(next@16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.3.0))(react@19.3.0))(supports-color@10.2.2)':
     dependencies:
       '@ast-grep/napi': 0.40.5
       '@aws-sdk/client-cloudfront': 3.984.0
@@ -5146,24 +5146,24 @@ snapshots:
       cookie: 1.1.1
       esbuild: 0.25.4
       express: 5.2.1(supports-color@10.2.2)
-      next: 16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      next: 16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.3.0))(react@19.3.0)
       path-to-regexp: 6.3.0
       urlpattern-polyfill: 10.1.0
       yaml: 2.9.0
     transitivePeerDependencies:
       - supports-color
 
-  '@opennextjs/cloudflare@1.20.6(next@16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(supports-color@10.2.2)(wrangler@4.131.1(@types/node@26.4.0))':
+  '@opennextjs/cloudflare@1.20.6(next@16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.3.0))(react@19.3.0))(supports-color@10.2.2)(wrangler@4.131.1(@types/node@26.4.0))':
     dependencies:
       '@ast-grep/napi': 0.40.5
       '@dotenvx/dotenvx': 1.31.0
-      '@opennextjs/aws': 4.1.4(next@16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(supports-color@10.2.2)
+      '@opennextjs/aws': 4.1.4(next@16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.3.0))(react@19.3.0))(supports-color@10.2.2)
       ci-info: 4.4.0
       cloudflare: 4.5.0
       comment-json: 4.6.2
       enquirer: 2.4.1
       glob: 12.0.0
-      next: 16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      next: 16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.3.0))(react@19.3.0)
       ts-tqdm: 0.8.6
       wrangler: 4.131.1(@types/node@26.4.0)
       yargs: 18.1.0
@@ -5621,11 +5621,11 @@ snapshots:
     dependencies:
       undici-types: 8.3.0
 
-  '@types/react-dom@19.2.5(@types/react@19.2.18)':
+  '@types/react-dom@19.2.5(@types/react@19.3.0)':
     dependencies:
-      '@types/react': 19.2.18
+      '@types/react': 19.3.0
 
-  '@types/react@19.2.18':
+  '@types/react@19.3.0':
     dependencies:
       csstype: 3.2.3
 
@@ -5761,7 +5761,7 @@ snapshots:
     dependencies:
       humanize-ms: 1.2.1
 
-  agents@0.22.0(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.0.0)(ai@7.0.64(zod@4.6.5))(react@19.2.8)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.4.0)(esbuild@0.28.2)(terser@5.16.9)(yaml@2.9.0))(zod@4.6.5):
+  agents@0.22.0(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.0.0)(ai@7.0.64(zod@4.6.5))(react@19.3.0)(rolldown@1.2.4)(vite@8.2.1(@types/node@26.4.0)(esbuild@0.28.2)(terser@5.16.9)(yaml@2.9.0))(zod@4.6.5):
     dependencies:
       '@babel/plugin-proposal-decorators': 8.0.2(@babel/core@8.0.1)
       '@cfworker/json-schema': 4.1.1
@@ -5773,12 +5773,12 @@ snapshots:
       esbuild: 0.28.2
       mimetext: 3.0.28
       nanoid: 5.1.16
-      partysocket: 1.3.0(react@19.2.8)
+      partysocket: 1.3.0(react@19.3.0)
       yaml: 2.9.0
       zod: 4.6.5
     optionalDependencies:
       ai: 7.0.64(zod@4.6.5)
-      react: 19.2.8
+      react: 19.3.0
       vite: 8.2.1(@types/node@26.4.0)(esbuild@0.28.2)(terser@5.16.9)(yaml@2.9.0)
     transitivePeerDependencies:
       - '@babel/core'
@@ -6542,9 +6542,9 @@ snapshots:
 
   lru-cache@11.5.2: {}
 
-  lucide-react@1.38.0(react@19.2.8):
+  lucide-react@1.38.0(react@19.3.0):
     dependencies:
-      react: 19.2.8
+      react: 19.3.0
 
   magic-string@0.30.21:
     dependencies:
@@ -6964,16 +6964,16 @@ snapshots:
 
   negotiator@1.0.0: {}
 
-  next@16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  next@16.3.5(@babel/core@8.0.1)(@types/node@26.4.0)(react-dom@19.2.8(react@19.3.0))(react@19.3.0):
     dependencies:
       '@next/env': 16.3.5
       '@swc/helpers': 0.5.23
       baseline-browser-mapping: 2.11.19
       caniuse-lite: 1.0.30001810
       postcss: 8.5.23
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
-      styled-jsx: 5.1.6(@babel/core@8.0.1)(react@19.2.8)
+      react: 19.3.0
+      react-dom: 19.2.8(react@19.3.0)
+      styled-jsx: 5.1.6(@babel/core@8.0.1)(react@19.3.0)
     optionalDependencies:
       '@next/swc-darwin-arm64': 16.3.5
       '@next/swc-darwin-x64': 16.3.5
@@ -7094,11 +7094,11 @@ snapshots:
 
   parseurl@1.3.3: {}
 
-  partysocket@1.3.0(react@19.2.8):
+  partysocket@1.3.0(react@19.3.0):
     dependencies:
       event-target-polyfill: 0.0.4
     optionalDependencies:
-      react: 19.2.8
+      react: 19.3.0
 
   path-key@3.1.1: {}
 
@@ -7171,21 +7171,21 @@ snapshots:
       iconv-lite: 0.7.3
       unpipe: 1.0.0
 
-  react-dom@19.2.8(react@19.2.8):
+  react-dom@19.2.8(react@19.3.0):
     dependencies:
-      react: 19.2.8
+      react: 19.3.0
       scheduler: 0.27.0
 
-  react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8)(supports-color@10.2.2):
+  react-markdown@10.1.0(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2):
     dependencies:
       '@types/hast': 3.0.5
       '@types/mdast': 4.0.4
-      '@types/react': 19.2.18
+      '@types/react': 19.3.0
       devlop: 1.1.0
       hast-util-to-jsx-runtime: 2.3.6(supports-color@10.2.2)
       html-url-attributes: 3.0.1
       mdast-util-to-hast: 13.2.1
-      react: 19.2.8
+      react: 19.3.0
       remark-parse: 11.0.0(supports-color@10.2.2)
       remark-rehype: 11.1.2
       unified: 11.0.5
@@ -7194,7 +7194,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  react@19.2.8: {}
+  react@19.3.0: {}
 
   remark-gfm@4.0.1(supports-color@10.2.2):
     dependencies:
@@ -7423,10 +7423,10 @@ snapshots:
     dependencies:
       inline-style-parser: 0.2.7
 
-  styled-jsx@5.1.6(@babel/core@8.0.1)(react@19.2.8):
+  styled-jsx@5.1.6(@babel/core@8.0.1)(react@19.3.0):
     dependencies:
       client-only: 0.0.1
-      react: 19.2.8
+      react: 19.3.0
     optionalDependencies:
       '@babel/core': 8.0.1
 
