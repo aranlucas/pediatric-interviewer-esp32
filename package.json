@@ -1,14 +1,8 @@
 {
   "name": "angry-cat-pediatric-interviewer",
   "private": true,
-<<<<<<< HEAD
   "scripts": {
     "typecheck": "pnpm --dir worker typecheck && pnpm --dir web typecheck"
   },
-  "packageManager": "pnpm@12.2.1"
-||||||| parent of b50c1c6 (chore: update pnpm package manager)
-  "packageManager": "pnpm@12.2.1"
-=======
   "packageManager": "pnpm@12.3.1"
->>>>>>> b50c1c6 (chore: update pnpm package manager)
 }
