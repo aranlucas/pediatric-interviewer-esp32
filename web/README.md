@@ -92,5 +92,3 @@ The app intentionally keeps microphone failure non-fatal: examiner playback,
 captions, and typed answers remain available. Audio capture is transactional,
 bounded, muted outside listening turns, and stopped if the user cancels while
 the browser permission prompt is open.
-
-See the repository’s `CF_MIGRATION.md` for cf deployment and compatibility details.

@@ -39,5 +39,3 @@ The firmware sketch and interview client live in firmware/angry_cat_pediatric_in
 The web client is in web/; the Worker code is in worker/. The current root package.json contains committed merge-conflict markers, so it is invalid JSON and the root pnpm workspace cannot currently be installed. The firmware Make workflow remains available. Repair the root manifest before using the workspace's pnpm install and package test commands.
 
 Keep device tokens, provider credentials, and private interview reports out of Git.
-
-See [Cloudflare CLI migration](CF_MIGRATION.md) for cf deployment and compatibility details.

@@ -325,5 +325,3 @@ Deploy in this order:
 Never deploy a Worker version with missing required secrets, stale generated
 types, or a failing test/check gate. Do not treat the simulator's modeled
 transport results as physical-board validation.
-
-See the repository’s `CF_MIGRATION.md` for cf deployment and compatibility details.
