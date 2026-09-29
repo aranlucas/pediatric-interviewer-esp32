@@ -11,7 +11,7 @@
 
 Angry Cat is a training project for the Waveshare ESP32-S3-Touch-LCD-3.5B. Set up a case in the web client, run the interview on the device, and finish with a bounded review. The connected Cloudflare Worker supports the web and device workflow.
 
-*The orange cat is the existing project mascot; it is not a clinical examiner.*
+_The orange cat is the existing project mascot; it is not a clinical examiner._
 
 ## The practice loop
 
@@ -25,12 +25,12 @@ The repository includes the Arduino firmware, a web client and Worker, and a Wok
 
 The supported board is the Waveshare ESP32-S3-Touch-LCD-3.5B. With the device connected, use the repository Makefile:
 
-~~~sh
+```sh
 make setup
 make compile
 make upload
 make monitor
-~~~
+```
 
 The firmware sketch and interview client live in firmware/angry_cat_pediatric_interviewer. Simulator files are in simulator/wokwi/.
 
