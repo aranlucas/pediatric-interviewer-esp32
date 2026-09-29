@@ -12,9 +12,10 @@
     "format:check": "oxfmt --check .",
     "test": "vitest run",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "deploy": "pnpm build:worker && cf deploy --prebuilt",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
-    "typecheck": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts && tsc --noEmit"
+    "typecheck": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts && tsc --noEmit",
+    "build:worker": "opennextjs-cloudflare build && wrangler build --experimental-new-config --experimental-cf-build-output"
   },
   "dependencies": {
     "agents": "^0.24.0",
@@ -30,10 +31,11 @@
     "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
+    "cf": "1.0.0-beta.5",
     "oxfmt": "^0.70.0",
     "oxlint": "^1.80.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1",
-    "wrangler": "^4.127.1"
+    "wrangler": "^4.143.0"
   }
 }

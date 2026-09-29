@@ -28,7 +28,8 @@ pnpm cf-typegen
 pnpm typecheck
 pnpm build
 pnpm exec opennextjs-cloudflare build
-pnpm exec wrangler deploy --dry-run
+pnpm build:worker
+pnpm exec cf deploy --prebuilt --dry-run
 pnpm preview
 pnpm deploy
 ```
@@ -53,7 +54,7 @@ public collection.
 
 ## Production bindings and rollout
 
-`wrangler.jsonc` declares the private `INTERVIEWER_SERVICE` service binding,
+`cloudflare.config.ts` declares the private `INTERVIEWER_SERVICE` service binding,
 the `INTERVIEW_REPORTS` R2 binding, the required shared secret, and a Cloudflare
 Rate Limiting binding. The session endpoint accepts only same-origin `POST`
 requests and has a 12-request-per-client-IP-per-minute limit. Use a random secret
@@ -91,3 +92,5 @@ The app intentionally keeps microphone failure non-fatal: examiner playback,
 captions, and typed answers remain available. Audio capture is transactional,
 bounded, muted outside listening turns, and stopped if the user cancels while
 the browser permission prompt is open.
+
+See the repository’s `CF_MIGRATION.md` for cf deployment and compatibility details.

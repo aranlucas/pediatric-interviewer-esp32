@@ -122,11 +122,11 @@ failure does not discard the main report.
 
 ### Required Worker bindings and secrets
 
-`worker/wrangler.jsonc` declares the non-secret `AI` binding used for primary
+`worker/cloudflare.config.ts` declares the non-secret `AI` binding used for primary
 opening speech, the private `INTERVIEW_REPORTS` R2 bucket, the
 `PEDIATRIC_INTERVIEWER` Durable Object, and `CONNECTION_RATE_LIMITER`.
 
-`worker/wrangler.jsonc` declares these required secrets and generated Env
+`worker/cloudflare.config.ts` declares these required secrets and generated Env
 types:
 
 - `DEVICE_TOKEN`: shared ESP32 authentication secret.
@@ -208,11 +208,11 @@ pnpm install --frozen-lockfile
 pnpm run generate-types
 pnpm test
 pnpm run check
-pnpm exec wrangler deploy --dry-run
+pnpm exec cf deploy --dry-run
 pnpm run smoke:web
 ```
 
-For local `wrangler dev`, create an untracked `worker/.dev.vars` containing
+For local `cf dev`, create an untracked `worker/.dev.vars` containing
 test/development values for all required bindings:
 
 ```text
@@ -294,7 +294,7 @@ pnpm exec wrangler secret put WEB_TOKEN_SECRET
 pnpm exec wrangler secret put WEB_ORIGINS
 ```
 
-The `AI` binding is account-native and configured in `wrangler.jsonc`; it does
+The `AI` binding is account-native and configured in `cloudflare.config.ts`; it does
 not require a secret.
 
 Deploy in this order:
@@ -325,3 +325,5 @@ Deploy in this order:
 Never deploy a Worker version with missing required secrets, stale generated
 types, or a failing test/check gate. Do not treat the simulator's modeled
 transport results as physical-board validation.
+
+See the repository’s `CF_MIGRATION.md` for cf deployment and compatibility details.
