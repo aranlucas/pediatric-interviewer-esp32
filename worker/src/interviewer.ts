@@ -211,6 +211,8 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
 
   private gemini?: Session;
   private connecting = false;
+  /** Only the current startup may release its asynchronous setup guard. */
+  private startupOwner?: object;
   private device?: Connection;
   private disconnectedDeviceId?: string;
   private clientGraceTimer?: ReturnType<typeof setTimeout>;
@@ -1330,15 +1332,19 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
         }
         this.releaseKeepAlive?.();
         this.releaseKeepAlive = releaseKeepAlive;
+        // Both provider setup and keep-alive acquisition can outlive a client
+        // socket. Prefer the current sink, retaining offline replay behavior
+        // when the client is still inside its reconnect grace period.
+        const activeConnection = this.device ?? target;
         if (pendingTurn) {
-          if (!this.replayPendingProviderTurn(session, target, generation, pendingTurn)) {
+          if (!this.replayPendingProviderTurn(session, activeConnection, generation, pendingTurn)) {
             throw new Error("failed to replay pending provider turn");
           }
-        } else if (!handle && target) {
-          this.resumeFreshGeminiSession(target);
+        } else if (!handle && activeConnection) {
+          this.resumeFreshGeminiSession(activeConnection);
         }
         this.reconnectAttempts = 0;
-        if (target) this.resyncConnection(target);
+        if (activeConnection) this.resyncConnection(activeConnection);
         this.pendingReconnect = undefined;
         this.log("info", "gemini_reconnected", {
           reason: task.reason.slice(0, 100),
@@ -1444,6 +1450,8 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     this.closingGemini = false;
     this.lastStatus = "idle";
     this.openingStage = "warming_up";
+    const startupOwner = {};
+    this.startupOwner = startupOwner;
     this.connecting = true;
     this.reconnectAttempts = 0;
     this.updateInterview(connection, {
@@ -1467,7 +1475,12 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       difficulty: configuration.difficulty,
     });
     try {
-      this.releaseKeepAlive = await this.keepAlive();
+      const releaseKeepAlive = await this.keepAlive();
+      if (generation !== this.liveGeneration || this.startupOwner !== startupOwner) {
+        releaseKeepAlive();
+        return;
+      }
+      this.releaseKeepAlive = releaseKeepAlive;
       // Generate the clinical content through a schema-constrained text model
       // before Live connects. Live then receives and speaks the exact durable
       // case instead of being asked to invent content and obey an audio turn
@@ -1495,9 +1508,10 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       this.log("info", "opening_case_ready", {
         characters: openingCaseText.length,
       });
-      if (this.device?.id !== connection.id) return;
+      const target = this.device;
+      if (!target) return;
       await this.openGeminiSession(
-        connection,
+        target,
         topic,
         configuration,
         generation,
@@ -1509,13 +1523,21 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
           plannedQuestionCount: configuration.questionCount,
         },
       );
-      if (generation !== this.liveGeneration || this.device?.id !== connection.id) return;
-      this.sendJSON(connection, {
+      if (generation !== this.liveGeneration) return;
+      // Setup belongs to this interview generation, not the socket that
+      // started it. A replacement must receive the first provider turn; with
+      // no socket, release the idle transport so reconnect can replay it.
+      const activeConnection = this.device;
+      if (!activeConnection) {
+        this.deferOpeningPlaybackUntilReconnect("client disconnected during setup");
+        return;
+      }
+      this.sendJSON(activeConnection, {
         type: "audio_config",
         format: "pcm16",
         sampleRate: DEVICE_SAMPLE_RATE,
       });
-      this.askGemini(connection, geminiWarmUpTurn());
+      this.askGemini(activeConnection, geminiWarmUpTurn());
     } catch (error) {
       if (generation !== this.liveGeneration) return;
       this.log("error", "gemini_live_start_failed", {
@@ -1534,8 +1556,11 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
       });
       this.sendStatus(connection, "idle");
     } finally {
-      this.connecting = false;
-      this.startPendingReconnect();
+      if (this.startupOwner === startupOwner) {
+        this.startupOwner = undefined;
+        this.connecting = false;
+        this.startPendingReconnect();
+      }
     }
   }
 
@@ -1586,6 +1611,7 @@ export class PediatricInterviewer extends Agent<InterviewerEnv, PediatricIntervi
     const session = this.gemini;
     this.gemini = undefined;
     ++this.liveGeneration;
+    this.startupOwner = undefined;
     this.connecting = false;
     this.reconnectAttempts = MAX_LIVE_RECONNECT_ATTEMPTS;
     this.resetLiveBuffers();
