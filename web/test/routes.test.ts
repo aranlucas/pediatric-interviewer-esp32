@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getCloudflareContext } = vi.hoisted(() => ({
-  getCloudflareContext: vi.fn(),
-}));
+import { z } from "zod";
+import { createReportHandler, type ReportEnv } from "../lib/report-handler";
+import { createSessionHandler, type SessionEnv } from "../lib/session-handler";
 
-vi.mock("@opennextjs/cloudflare", () => ({ getCloudflareContext }));
+const getCloudflareContext = vi.fn<() => Promise<{ env: ReportEnv & SessionEnv }>>();
 
-import { GET as getReport } from "../app/api/reports/[reportId]/route";
-import { POST as createSession } from "../app/api/session/route";
+const getReport = createReportHandler(getCloudflareContext);
+
+const createSession = createSessionHandler(getCloudflareContext);
+
 import {
   createAccessToken,
   REPORT_TOKEN_COOKIE,
@@ -16,7 +18,9 @@ import {
 } from "../lib/server-auth";
 
 const SECRET = "route-test-secret-that-is-long-enough";
+
 const ROOM = "web-0123456789abcdef0123456789abcdef";
+
 const REPORT_ID = "01234567-89ab-4cde-8123-0123456789ab";
 
 beforeEach(() => {
@@ -42,17 +46,15 @@ describe("session token route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(response.headers.get("Set-Cookie")).toContain(
-      `${REPORT_TOKEN_COOKIE}=`,
-    );
+    expect(response.headers.get("Set-Cookie")).toContain(`${REPORT_TOKEN_COOKIE}=`);
     const setCookie = response.headers.get("Set-Cookie") ?? "";
     expect(response.headers.get("Set-Cookie")).toContain("HttpOnly");
     expect(response.headers.get("Set-Cookie")).toContain("SameSite=Strict");
-    const payload = (await response.json()) as {
-      expiresAt: number;
-      room: string;
-      token: string;
-    };
+
+    const payload = z
+      .object({ expiresAt: z.number(), room: z.string(), token: z.string() })
+      .parse(await response.json());
+
     expect(payload.room).toMatch(/^web-[0-9a-f]{32}$/u);
     expect(payload.expiresAt).toBeGreaterThan(Date.now() + 7_100_000);
     await expect(verifyAccessToken(payload.token, SECRET, "connect")).resolves.toMatchObject({
@@ -89,12 +91,14 @@ describe("session token route", () => {
   it("refreshes an existing room only with a matching signed owner capability", async () => {
     const limit = vi.fn().mockResolvedValue({ success: true });
     const ownerCookieName = sessionOwnerCookieName(ROOM);
+
     const ownerToken = await createAccessToken(SECRET, {
       v: 1,
       sub: ROOM,
       exp: Math.floor(Date.now() / 1_000) + 300,
       scope: "owner",
     });
+
     getCloudflareContext.mockResolvedValue({
       env: { WEB_TOKEN_SECRET: SECRET, SESSION_RATE_LIMITER: { limit } },
     });
@@ -123,6 +127,7 @@ describe("session token route", () => {
       exp: Math.floor(Date.now() / 1_000) + 300,
       scope: "owner",
     });
+
     getCloudflareContext.mockResolvedValue({
       env: {
         WEB_TOKEN_SECRET: SECRET,
@@ -183,11 +188,13 @@ describe("private report proxy", () => {
       exp: Math.floor(Date.now() / 1_000) + 300,
       scope: "report",
     });
+
     const serviceFetch = vi.fn().mockResolvedValue(
       new Response("private report", {
         headers: { "Content-Type": "text/markdown; charset=utf-8" },
       }),
     );
+
     getCloudflareContext.mockResolvedValue({
       env: {
         WEB_TOKEN_SECRET: SECRET,
@@ -205,10 +212,8 @@ describe("private report proxy", () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("private report");
     expect(serviceFetch).toHaveBeenCalledOnce();
-    const upstream = serviceFetch.mock.calls[0]?.[0] as Request;
-    expect(new URL(upstream.url).pathname).toBe(
-      `/interviewer/reports/${REPORT_ID}.md`,
-    );
+    const upstream = serviceFetch.mock.calls[0]?.[0];
+    expect(new URL(upstream.url).pathname).toBe(`/interviewer/reports/${REPORT_ID}.md`);
     expect(upstream.headers.get("Authorization")).toBe(`Bearer ${reportToken}`);
   });
 
@@ -247,12 +252,14 @@ describe("private report proxy", () => {
       exp: Math.floor(Date.now() / 1_000) - 1,
       scope: "report",
     });
+
     const wrongSubject = await createAccessToken(SECRET, {
       v: 1,
       sub: "device-room",
       exp: Math.floor(Date.now() / 1_000) + 300,
       scope: "report",
     });
+
     const serviceFetch = vi.fn();
     getCloudflareContext.mockResolvedValue({
       env: {
@@ -268,8 +275,10 @@ describe("private report proxy", () => {
         }),
         { params: Promise.resolve({ reportId: REPORT_ID }) },
       );
+
       expect(response.status).toBe(401);
     }
+
     expect(serviceFetch).not.toHaveBeenCalled();
   });
 
@@ -280,9 +289,11 @@ describe("private report proxy", () => {
       exp: Math.floor(Date.now() / 1_000) + 300,
       scope: "report",
     });
-    const serviceFetch = vi.fn().mockResolvedValue(
-      Response.json({ error: "not_found" }, { status: 404 }),
-    );
+
+    const serviceFetch = vi
+      .fn()
+      .mockResolvedValue(Response.json({ error: "not_found" }, { status: 404 }));
+
     getCloudflareContext.mockResolvedValue({
       env: {
         WEB_TOKEN_SECRET: SECRET,
@@ -299,10 +310,8 @@ describe("private report proxy", () => {
 
     expect(response.status).toBe(404);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    const upstream = serviceFetch.mock.calls[0]?.[0] as Request;
-    expect(new URL(upstream.url).pathname).toBe(
-      `/interviewer/reports/${REPORT_ID}-cheatsheet.md`,
-    );
+    const upstream = serviceFetch.mock.calls[0]?.[0];
+    expect(new URL(upstream.url).pathname).toBe(`/interviewer/reports/${REPORT_ID}-cheatsheet.md`);
   });
 
   it("returns a generic 502 when the private service binding fails", async () => {
@@ -312,6 +321,7 @@ describe("private report proxy", () => {
       exp: Math.floor(Date.now() / 1_000) + 300,
       scope: "report",
     });
+
     getCloudflareContext.mockResolvedValue({
       env: {
         WEB_TOKEN_SECRET: SECRET,

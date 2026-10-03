@@ -14,10 +14,15 @@ import WebSocket from "ws";
 import { interviewerSettings } from "./interviewer-settings.mjs";
 
 const execFileAsync = promisify(execFile);
+
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+
 const sampleRate = 24_000;
+
 const pcmFrameBytes = 960;
+
 const frameDurationMs = 20;
+
 // The opening (vignette and first clinical question) is many
 // seconds of speech. Anything materially below this means audio never played.
 const MINIMUM_OPENING_AUDIO_BYTES = 240_000; // ~5 s at 24 kHz mono 16-bit
@@ -90,18 +95,24 @@ function parseArguments(argv) {
     // means that enforcement is broken and the exam would never reach six.
     maxFollowUps: 4,
   };
+
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
+
     if (argument === "--help") {
       usage();
       process.exit(0);
     }
+
     if (argument === "--wait-report") {
       options.waitReport = true;
       continue;
     }
+
     const value = argv[index + 1];
+
     if (!value) throw new Error(`Missing value for ${argument}`);
+
     if (argument === "--topic") options.topic = value;
     else if (argument === "--turns") options.turns = Number(value);
     else if (argument === "--pause-ms") options.pauseMs = Number(value);
@@ -114,18 +125,23 @@ function parseArguments(argv) {
     else throw new Error(`Unknown option: ${argument}`);
     index += 1;
   }
+
   if (!Number.isInteger(options.turns) || options.turns < 0 || options.turns > 6) {
     throw new Error("--turns must be an integer from 0 through 6");
   }
+
   if (options.waitReport && options.turns === 0) {
     throw new Error("--wait-report requires at least one simulated answer");
   }
+
   if (!Number.isFinite(options.pauseMs) || options.pauseMs < 0) {
     throw new Error("--pause-ms must be zero or greater");
   }
+
   if (!Number.isFinite(options.commitDelayMs) || options.commitDelayMs < 0) {
     throw new Error("--commit-delay-ms must be zero or greater");
   }
+
   if (
     !Number.isFinite(options.cafeNoisePercent) ||
     options.cafeNoisePercent < 0 ||
@@ -133,36 +149,45 @@ function parseArguments(argv) {
   ) {
     throw new Error("--cafe-noise-percent must be between 0 and 40");
   }
+
   if (!Number.isFinite(options.rate) || options.rate < 80 || options.rate > 450) {
     throw new Error("--rate must be between 80 and 450 words per minute");
   }
+
   if (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 30_000) {
     throw new Error("--timeout-ms must be at least 30000");
   }
+
   return options;
 }
 
 function sessionUrl(baseUrl) {
   const url = new URL(baseUrl);
   url.pathname = `/agents/pediatric-interviewer/esp32-${crypto.randomBytes(4).toString("hex")}`;
+
   return url.toString();
 }
 
 function wavPcm(buffer) {
   let offset = 12;
+
   while (offset + 8 <= buffer.length) {
     const chunk = buffer.toString("ascii", offset, offset + 4);
     const length = buffer.readUInt32LE(offset + 4);
+
     if (chunk === "data") return buffer.subarray(offset + 8, offset + 8 + length);
     offset += 8 + length + (length & 1);
   }
+
   throw new Error("Generated WAV file has no PCM data chunk");
 }
 
 async function synthesizeAnswers(options, temporaryDirectory) {
   const answers = [];
+
   for (let answerIndex = 0; answerIndex < options.turns; answerIndex += 1) {
     const parts = [];
+
     for (let partIndex = 0; partIndex < 2; partIndex += 1) {
       const base = path.join(temporaryDirectory, `answer-${answerIndex + 1}-${partIndex + 1}`);
       const aiff = `${base}.aiff`;
@@ -188,8 +213,10 @@ async function synthesizeAnswers(options, temporaryDirectory) {
       ]);
       parts.push(wavPcm(fs.readFileSync(wav)));
     }
+
     answers.push(parts);
   }
+
   return answers;
 }
 
@@ -203,19 +230,12 @@ const followUpAnswers = [
 
 async function synthesizeFollowUps(options, temporaryDirectory) {
   const parts = [];
+
   for (const [index, line] of followUpAnswers.entries()) {
     const base = path.join(temporaryDirectory, `follow-up-${index + 1}`);
     const aiff = `${base}.aiff`;
     const wav = `${base}.wav`;
-    await execFileAsync("say", [
-      "-v",
-      options.voice,
-      "-r",
-      String(options.rate),
-      "-o",
-      aiff,
-      line,
-    ]);
+    await execFileAsync("say", ["-v", options.voice, "-r", String(options.rate), "-o", aiff, line]);
     await execFileAsync("afconvert", [
       "-f",
       "WAVE",
@@ -228,6 +248,7 @@ async function synthesizeFollowUps(options, temporaryDirectory) {
     ]);
     parts.push(wavPcm(fs.readFileSync(wav)));
   }
+
   return parts;
 }
 
@@ -254,12 +275,14 @@ async function synthesizeCafeNoise(options, temporaryDirectory) {
     aiff,
     wav,
   ]);
+
   return wavPcm(fs.readFileSync(wav));
 }
 
 function mixBackground(pcm, background, percent, backgroundOffset) {
   if (!background || percent <= 0) return { pcm, backgroundOffset };
   const mixed = Buffer.allocUnsafe(pcm.length);
+
   for (let offset = 0; offset + 1 < pcm.length; offset += 2) {
     const speech = pcm.readInt16LE(offset);
     const noiseOffset = backgroundOffset % background.length;
@@ -269,6 +292,7 @@ function mixBackground(pcm, background, percent, backgroundOffset) {
     mixed.writeInt16LE(value, offset);
     backgroundOffset = (backgroundOffset + 2) % background.length;
   }
+
   return { pcm: mixed, backgroundOffset };
 }
 
@@ -282,12 +306,15 @@ function wait(durationMs) {
 
 async function simulate(options, answers, followUps, settings, cafeNoise) {
   const startedAt = Date.now();
+
   const log = (event, details = {}) => {
     console.log(JSON.stringify({ elapsedMs: Date.now() - startedAt, event, ...details }));
   };
+
   const socket = new WebSocket(sessionUrl(settings.baseUrl), {
     headers: { "X-Device-Token": settings.token },
   });
+
   let questionNumber = 0;
   let currentQuestion = "";
   let phase = "idle";
@@ -326,6 +353,7 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
   let partialCompletion = null;
   let resolveRun;
   let rejectRun;
+
   const run = new Promise((resolve, reject) => {
     resolveRun = resolve;
     rejectRun = reject;
@@ -337,12 +365,11 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     stopCandidateAudio = true;
     clearTimeout(deadline);
     const error = reason instanceof Error ? reason : new Error(String(reason));
-    if (
-      socket.readyState === WebSocket.OPEN ||
-      socket.readyState === WebSocket.CONNECTING
-    ) {
+
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
       socket.terminate();
     }
+
     rejectRun(error);
   };
 
@@ -350,6 +377,7 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     if (finished) return;
     finished = true;
     clearTimeout(deadline);
+
     const summary = {
       ...result,
       commitsSent,
@@ -373,12 +401,15 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
         oddFrames: oddOutputFrames,
       },
     };
+
     log("simulation_complete", summary);
+
     if (socket.readyState === WebSocket.OPEN) {
       if (sendEndCall && !endCallSent) {
         socket.send(JSON.stringify({ type: "end_call" }));
         endCallSent = true;
       }
+
       socket.close(1000, "simulation complete");
       // Some edge WebSocket paths do not return a close frame and `ws` waits
       // 30 seconds before giving up. Allow the end_call frame to flush, then
@@ -387,6 +418,7 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
         if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
       }, 2_000);
     }
+
     resolveRun(summary);
   };
 
@@ -394,10 +426,13 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     if (finished || partialCompletion) return;
     partialCompletion = result;
     stopCandidateAudio = true;
+
     if (socket.readyState !== WebSocket.OPEN) {
       fail(new Error("WebSocket closed before partial report generation could start"));
+
       return;
     }
+
     socket.send(JSON.stringify({ type: "end_call" }));
     endCallSent = true;
     log("partial_completion_requested", result);
@@ -425,16 +460,20 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     await sendPcm(answers[answerIndex][0]);
     log("candidate_thinking_pause_started", { answer: answerIndex + 1 });
     await sendPcm(silence(options.pauseMs));
+
     if (!stopCandidateAudio) await sendPcm(answers[answerIndex][1]);
+
     if (!stopCandidateAudio) {
       log("candidate_answer_finished", { answer: answerIndex + 1 });
       await sendPcm(silence(options.commitDelayMs));
     }
+
     if (!stopCandidateAudio && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "commit_turn" }));
       commitsSent += 1;
       log("candidate_turn_committed", { answer: answerIndex + 1 });
     }
+
     candidateStreaming = false;
   };
 
@@ -449,7 +488,9 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
       followUp: followUpsOnCurrentQuestion,
     });
     await sendPcm(followUps[index]);
+
     if (!stopCandidateAudio) await sendPcm(silence(options.commitDelayMs));
+
     if (!stopCandidateAudio && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "commit_turn" }));
       commitsSent += 1;
@@ -458,11 +499,13 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
         followUp: followUpsOnCurrentQuestion,
       });
     }
+
     candidateStreaming = false;
   };
 
   const maybeStartAnswer = () => {
     if (finished || candidateStreaming || phase !== "interviewing") return;
+
     // The examiner probed instead of advancing: the question number has not
     // moved even though this answer is already in. Answer the probe, otherwise
     // both sides wait for each other until the run times out.
@@ -477,15 +520,21 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
         },
       );
       void sendFollowUp().catch(fail);
+
       return;
     }
+
     if (questionNumber !== answersStarted + 1) return;
+
     if (answersStarted >= options.turns) {
       const result = { answersSimulated: answersStarted, stoppedBeforeQuestion: questionNumber };
+
       if (options.waitReport && answersStarted > 0) requestPartialCompletion(result);
       else finish(result);
+
       return;
     }
+
     const answerIndex = answersStarted;
     answersStarted += 1;
     primaryQuestions.push(currentQuestion);
@@ -497,11 +546,14 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
 
   const handleListening = () => {
     if (!firstQuestionReceived) return;
+
     if (options.turns === 0) {
       openingOnlyComplete = true;
       openingCompletionTarget = turnCompletions.length + 1;
+
       return;
     }
+
     maybeStartAnswer();
   };
 
@@ -527,22 +579,30 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
       outputAudioBytes += data.length;
       turnOutputAudioBytes += data.length;
       maximumOutputFrameBytes = Math.max(maximumOutputFrameBytes, data.length);
+
       if (data.length % 2 !== 0) oddOutputFrames += 1;
+
       for (let offset = 0; offset + 1 < data.length; offset += 2) {
         const sample = data.readInt16LE(offset);
+
         if (sample !== 0) turnOutputNonzeroSamples += 1;
         turnOutputAudioPeak = Math.max(turnOutputAudioPeak, Math.abs(sample));
       }
+
       return;
     }
+
     let message;
+
     try {
       message = JSON.parse(data.toString());
     } catch {
       return;
     }
+
     if (message.type === "status") {
       log("status", { status: message.status, questionNumber });
+
       if (candidateStreaming && (message.status === "thinking" || message.status === "speaking")) {
         stopCandidateAudio = true;
         prematureStops += 1;
@@ -551,7 +611,9 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
           reason: message.status,
         });
       }
+
       if (message.status === "listening") handleListening();
+
       if (message.status === "complete") {
         finish(
           { ...(partialCompletion ?? { answersSimulated: answersStarted }), phase: "complete" },
@@ -577,6 +639,7 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
         peak: turnOutputAudioPeak,
         nonzeroSamples: turnOutputNonzeroSamples,
       };
+
       if (!firstQuestionReceived && message.text.includes("?")) {
         firstQuestionReceived = true;
         awaitingFirstQuestionCompletion = true;
@@ -584,6 +647,7 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
       } else if (!firstQuestionReceived) {
         openingTurns.push({ text: message.text, audio });
       }
+
       log("examiner_transcript", {
         text: message.text,
         audioBytes: turnOutputAudioBytes,
@@ -598,14 +662,17 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
         answerCount: message.answerCount,
         questionNumber: message.questionNumber,
       });
+
       if (awaitingFirstQuestionCompletion) {
         awaitingFirstQuestionCompletion = false;
         openingTurnCompletionCount = turnCompletions.length;
       }
+
       log("turn_complete", {
         answerCount: message.answerCount,
         questionNumber: message.questionNumber,
       });
+
       if (openingOnlyComplete && turnCompletions.length >= openingCompletionTarget) {
         finish({ answersSimulated: 0, stoppedBeforeQuestion: questionNumber });
       }
@@ -639,6 +706,7 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
   socket.on("close", (code, reason) => {
     clearTimeout(forcedCloseTimer);
     log("websocket_closed", { code, reason: reason.toString() });
+
     if (!finished) fail(new Error(`WebSocket closed before completion (${code})`));
   });
 
@@ -653,9 +721,11 @@ async function verifyStoredReport(settings, report, expectedExchangeCount) {
   url.protocol = url.protocol === "ws:" ? "http:" : "https:";
   url.pathname = `/interviewer/reports/${report.reportId}.json`;
   url.search = "";
+
   const response = await fetch(url, {
     headers: { "X-Device-Token": settings.token },
   });
+
   assert(response.ok, `Stored report fetch returned ${response.status}`, {
     reportId: report.reportId,
   });
@@ -672,14 +742,17 @@ async function verifyStoredReport(settings, report, expectedExchangeCount) {
       actualExchangeCount: stored.evaluation?.exchanges?.length ?? null,
     },
   );
+
   return stored;
 }
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
+
   const temporaryDirectory = await mkdtemp(
     path.join(os.tmpdir(), "pediatric-interview-simulator-"),
   );
+
   try {
     console.log(
       JSON.stringify({
@@ -690,12 +763,14 @@ async function main() {
         voice: options.voice,
       }),
     );
+
     const [answers, followUps, settings, cafeNoise] = await Promise.all([
       synthesizeAnswers(options, temporaryDirectory),
       synthesizeFollowUps(options, temporaryDirectory),
       interviewerSettings(),
       synthesizeCafeNoise(options, temporaryDirectory),
     ]);
+
     const result = await simulate(options, answers, followUps, settings, cafeNoise);
     assert(
       result.answersSimulated === options.turns,
@@ -709,6 +784,7 @@ async function main() {
         reportId: result.report?.reportId ?? null,
       },
     );
+
     if (options.turns === 6) {
       assert(result.phase === "complete", "Six-answer interview did not complete", {
         phase: result.phase ?? null,
@@ -723,12 +799,14 @@ async function main() {
       });
       assert(
         result.primaryQuestions.every(
-          (question) => !/(?:thank you|review is being prepared|concludes? (?:our|the))/i.test(question),
+          (question) =>
+            !/(?:thank you|review is being prepared|concludes? (?:our|the))/i.test(question),
         ),
         "A completion message was presented as a clinical question",
         { primaryQuestions: result.primaryQuestions },
       );
     }
+
     if (options.waitReport) {
       assert(options.turns > 0, "--wait-report requires at least one simulated answer", {
         turns: options.turns,
@@ -742,6 +820,7 @@ async function main() {
         answersSimulated: result.answersSimulated,
       });
     }
+
     if (options.waitReport || options.turns === 6) {
       const stored = await verifyStoredReport(settings, result.report, options.turns);
       console.log(
@@ -754,12 +833,14 @@ async function main() {
         }),
       );
     }
+
     const openingSummary = result.openingTurns.map((turn, index) => ({
       index,
       audioBytes: turn.audio.bytes,
       audioPeak: turn.audio.peak,
       text: turn.text.slice(0, 90),
     }));
+
     console.log(
       JSON.stringify({
         event: "opening_summary",
@@ -771,9 +852,11 @@ async function main() {
     );
 
     const caseTurns = result.openingTurns.filter((turn) => /here is your case/i.test(turn.text));
+
     const caseFallbackBytes = result.openingAudioFallbacks
       .filter(({ stage }) => stage === "case")
       .reduce((total, { bytes }) => total + bytes, 0);
+
     assert(caseTurns.length === 1, "The audible case transcript must be delivered exactly once", {
       caseTurns: caseTurns.map(({ text, audio }) => ({
         text: text.slice(0, 200),
@@ -800,11 +883,13 @@ async function main() {
     const openingAudioBytes =
       result.openingTurns.reduce((total, turn) => total + turn.audio.bytes, 0) +
       (result.firstQuestionTurn?.audio.bytes ?? 0);
+
     const openingAudioPeak = Math.max(
       0,
       ...result.openingTurns.map((turn) => turn.audio.peak),
       result.firstQuestionTurn?.audio.peak ?? 0,
     );
+
     assert(
       openingAudioBytes >= MINIMUM_OPENING_AUDIO_BYTES,
       `Opening delivered less than ${(MINIMUM_OPENING_AUDIO_BYTES / (sampleRate * 2)).toFixed(1)}s ` +
@@ -850,10 +935,7 @@ async function main() {
         .every(({ answerCount }) => answerCount === 0),
       "Opening sequence was incorrectly counted as a clinical answer",
       {
-        openingTurnCompletions: result.turnCompletions.slice(
-          0,
-          result.openingTurnCompletionCount,
-        ),
+        openingTurnCompletions: result.turnCompletions.slice(0, result.openingTurnCompletionCount),
       },
     );
   } finally {

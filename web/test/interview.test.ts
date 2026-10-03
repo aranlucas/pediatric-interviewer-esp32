@@ -43,11 +43,7 @@ describe("interview helpers", () => {
     expect(questionCountForSelection(3, selected.length)).toBe(3);
     expect(questionCountForSelection(3, 5)).toBe(5);
     expect(questionCountForSelection(99, 1)).toBe(10);
-    expect(DIFFICULTY_OPTIONS.map((option) => option.id)).toEqual([
-      "easy",
-      "standard",
-      "hard",
-    ]);
+    expect(DIFFICULTY_OPTIONS.map((option) => option.id)).toEqual(["easy", "standard", "hard"]);
     expect(DEFAULT_DIFFICULTY).toBe("standard");
     expect(statusCopy("idle", 8).detail).toContain("8-question");
   });

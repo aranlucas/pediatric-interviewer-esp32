@@ -40,6 +40,7 @@ export type DeviceStatus =
 export function parseInterviewerDeviceMessage(message: string) {
   try {
     const result = deviceMessageSchema.safeParse(JSON.parse(message));
+
     return result.success ? result.data : null;
   } catch {
     return null;

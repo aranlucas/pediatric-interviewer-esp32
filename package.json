@@ -2,7 +2,12 @@
   "name": "angry-cat-pediatric-interviewer",
   "private": true,
   "scripts": {
-    "typecheck": "pnpm --dir worker typecheck && pnpm --dir web typecheck"
+    "typecheck": "pnpm --dir worker typecheck && pnpm --dir web typecheck",
+    "lint": "pnpm --dir worker lint && pnpm --dir web lint"
   },
-  "packageManager": "pnpm@12.3.1"
+  "packageManager": "pnpm@12.3.1",
+  "devDependencies": {
+    "oxlint": "1.86.0",
+    "@oxlint/plugins": "1.86.0"
+  }
 }

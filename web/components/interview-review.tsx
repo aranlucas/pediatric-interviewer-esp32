@@ -12,10 +12,7 @@ import {
 import { useState } from "react";
 
 import type { Evaluation, Score } from "@/lib/interview";
-import {
-  ConnectionIndicator,
-  type ConnectionState,
-} from "@/components/interview-controls";
+import { ConnectionIndicator, type ConnectionState } from "@/components/interview-controls";
 
 type InterviewView = "topics" | "interview" | "review";
 
@@ -57,11 +54,13 @@ export function InterviewReview({
   const download = async (kind: "report" | "cheatsheet"): Promise<void> => {
     setDownloading(kind);
     setDownloadError("");
+
     try {
-      const response = await fetch(
-        `/api/reports/${encodeURIComponent(reportId)}?kind=${kind}`,
-        { credentials: "same-origin", cache: "no-store" },
-      );
+      const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}?kind=${kind}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+
       if (!response.ok) {
         throw new Error(
           response.status === 401
@@ -71,6 +70,7 @@ export function InterviewReview({
               : "The report could not be downloaded. Please retry.",
         );
       }
+
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -106,7 +106,9 @@ export function InterviewReview({
       {evaluation ? (
         <>
           <div className="outcome-card" data-outcome={evaluation.outcome}>
-            <div className="outcome-ring"><Check size={27} /></div>
+            <div className="outcome-ring">
+              <Check size={27} />
+            </div>
             <div>
               <strong>
                 {evaluation.outcome === "pass"
@@ -120,7 +122,10 @@ export function InterviewReview({
           </div>
           <div className="average-card">
             <Activity size={28} />
-            <div><span>Practice average</span><strong>{average?.toFixed(1)} / 3</strong></div>
+            <div>
+              <span>Practice average</span>
+              <strong>{average?.toFixed(1)} / 3</strong>
+            </div>
           </div>
 
           <div className="review-page-card">
@@ -129,13 +134,19 @@ export function InterviewReview({
                 type="button"
                 aria-label="Previous review page"
                 onClick={() => onReviewPage((reviewPage - 1 + reviewPageCount) % reviewPageCount)}
-              ><ChevronLeft size={18} /></button>
-              <span>Page {reviewPage + 1} of {reviewPageCount}</span>
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <span>
+                Page {reviewPage + 1} of {reviewPageCount}
+              </span>
               <button
                 type="button"
                 aria-label="Next review page"
                 onClick={() => onReviewPage((reviewPage + 1) % reviewPageCount)}
-              ><ChevronRight size={18} /></button>
+              >
+                <ChevronRight size={18} />
+              </button>
             </div>
             {activeReview ? (
               <div className="score-detail">
@@ -163,7 +174,9 @@ export function InterviewReview({
                 aria-pressed={reviewPage === index + 1}
               >
                 <span>{score.skillset}</span>
-                <i aria-hidden="true"><b style={{ width: `${(score.score / 3) * 100}%` }} /></i>
+                <i aria-hidden="true">
+                  <b style={{ width: `${(score.score / 3) * 100}%` }} />
+                </i>
                 <strong>{score.score} / 3</strong>
               </button>
             ))}
@@ -179,7 +192,7 @@ export function InterviewReview({
                 >
                   {downloading === "report" ? "Preparing report…" : "Download full report"}
                 </button>
-              {cheatsheetAvailable && (
+                {cheatsheetAvailable && (
                   <button
                     type="button"
                     disabled={Boolean(downloading)}
@@ -187,27 +200,47 @@ export function InterviewReview({
                   >
                     {downloading === "cheatsheet" ? "Preparing sheet…" : "Download cheat sheet"}
                   </button>
-              )}
+                )}
               </div>
-              {downloadError && <p className="report-download-error" role="alert">{downloadError}</p>}
+              {downloadError && (
+                <p className="report-download-error" role="alert">
+                  {downloadError}
+                </p>
+              )}
             </div>
           )}
         </>
       ) : (
         <div className="empty-review">
-          <div className="empty-review-icon"><ClipboardCheck /></div>
+          <div className="empty-review-icon">
+            <ClipboardCheck />
+          </div>
           <h3>Your review appears here</h3>
-          <p>Complete the interview to get a practice outcome, examiner summary, and a score for every skillset. Completed feedback is published in Reports.</p>
+          <p>
+            Complete the interview to get a practice outcome, examiner summary, and a score for
+            every skillset. Completed feedback is published in Reports.
+          </p>
           <ol>
-            <li><span>1</span> Choose one or more study topics</li>
-            <li><span>2</span> Answer {questionCount} questions aloud</li>
-            <li><span>3</span> Review published feedback</li>
+            <li>
+              <span>1</span> Choose one or more study topics
+            </li>
+            <li>
+              <span>2</span> Answer {questionCount} questions aloud
+            </li>
+            <li>
+              <span>3</span> Review published feedback
+            </li>
           </ol>
         </div>
       )}
 
       {evaluation && (
-        <button type="button" className="new-interview-button" disabled={!canBuildAnother} onClick={onBuildAnother}>
+        <button
+          type="button"
+          className="new-interview-button"
+          disabled={!canBuildAnother}
+          onClick={onBuildAnother}
+        >
           <RotateCcw size={18} /> Set up another case
         </button>
       )}

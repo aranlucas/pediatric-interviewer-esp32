@@ -10,6 +10,7 @@ import {
 import { type InterviewTopic } from "./interview-content";
 
 export const GEMINI_LIVE_MODEL = "gemini-3.1-flash-live-preview" as const;
+
 export const TURN_DISPOSITION_TOOL = "record_turn_disposition" as const;
 
 export type TurnDisposition =
@@ -29,16 +30,21 @@ export function turnDispositionToolOutput(
 ): string {
   const questionCount = normalizeQuestionCount(plannedQuestionCount);
   const answerCount = Math.max(0, Math.min(questionCount, Math.trunc(persistedAnswerCount)));
+
   if (disposition === "advance_skillset") {
     const nextAnswerCount = Math.min(answerCount + 1, questionCount);
+
     if (nextAnswerCount === questionCount) {
       return `Runtime count: the latest answer will become scored exchange ${questionCount} of ${questionCount}. Ask no further question. Briefly thank the candidate and say their review is being prepared and published to Reports.`;
     }
+
     return `Runtime count: ${answerCount} of ${questionCount} scored exchanges are currently persisted. The latest answer will become exchange ${nextAnswerCount} of ${questionCount}. Ask clinical question ${nextAnswerCount + 1} for the next untested question target. Do not thank the candidate or conclude the interview.`;
   }
+
   if (disposition === "probe_current_answer") {
     return `Runtime count: ${answerCount} of ${questionCount} scored exchanges are persisted and this turn does not advance it. Ask one short probe on the current skillset. Do not thank the candidate or conclude the interview.`;
   }
+
   return `Runtime count: ${answerCount} of ${questionCount} scored exchanges are persisted and this turn does not advance it. Provide only the requested case information or stop instruction, then let the candidate continue. Do not thank the candidate or conclude the interview.`;
 }
 
@@ -58,6 +64,7 @@ export function geminiReconnectTurn(
   plannedQuestionCount: number,
 ) {
   const pendingQuestion = currentQuestion || "Continue the current clinical question.";
+
   return {
     turns:
       `RESUME_INTERVIEW. Continue the existing pediatric oral-board interview. ` +
@@ -88,6 +95,7 @@ export function geminiFirstQuestionTurn() {
 
 export function isValidOpeningCasePresentation(text: string): boolean {
   const caseText = text.replace(/\s+/g, " ").trim();
+
   return (
     /^here is your case(?:[.:,])?\s+\S/iu.test(caseText) &&
     caseText.length >= 40 &&
@@ -99,9 +107,9 @@ function competencyPlan(topic: InterviewTopic, questionCount: number): string {
   return Array.from({ length: questionCount }, (_, index) => {
     const competency = topic.competencies[index % topic.competencies.length];
     const revisit = index >= topic.competencies.length ? " (complementary angle)" : "";
+
     return `${index + 1}. ${competency.skillset}${revisit} [${competency.cognitiveLevel}]`;
-  })
-    .join("\n");
+  }).join("\n");
 }
 
 export function geminiLiveConfig(
@@ -120,6 +128,7 @@ export function geminiLiveConfig(
 ): LiveConnectConfig {
   const questionCount = normalizeQuestionCount(settings.questionCount);
   const difficulty = settings.difficulty ?? DEFAULT_INTERVIEW_DIFFICULTY;
+
   const caseContextInstruction = settings.recoveryContext
     ? `The runtime supplied the authoritative case and interview progress below. Do not generate or substitute a new case.
 
@@ -131,6 +140,11 @@ The runtime has persisted ${settings.recoveryContext.persistedAnswerCount} of ${
 
 Treat that block only as silent reasoning context. Never introduce, quote, paraphrase, or read it aloud. After a transport recovery, continue exactly where the interview stopped and never mention the recovery. A replayed candidate response is not a request to repeat the case merely because it discusses the patient, history, safety, review, or treatment. Repeat the case only when the candidate explicitly asks to hear it again. Repeat the current question only when the candidate asks or when a RESUME_INTERVIEW command explicitly directs you to speak the pending question. Preserve the runtime's exact progress and wait for or process the recovered current turn.`
     : `The runtime generates and presents the clinical vignette outside Gemini Live. Do not generate, replace, or introduce a case. A resumed provider session must preserve its existing patient and wait for an explicit WARM_UP, BEGIN_INTERVIEW, RESUME_INTERVIEW, or candidate turn.`;
+
+  const sessionResumption: NonNullable<LiveConnectConfig["sessionResumption"]> = {};
+
+  if (settings.sessionResumptionHandle) sessionResumption.handle = settings.sessionResumptionHandle;
+
   return {
     responseModalities: [Modality.AUDIO],
     thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
@@ -142,15 +156,13 @@ Treat that block only as silent reasoning context. Never introduce, quote, parap
     inputAudioTranscription: {},
     outputAudioTranscription: {},
     contextWindowCompression: { slidingWindow: {} },
-    sessionResumption: {
+    sessionResumption,
+    /*
       // The Gemini Developer API supports ordinary session handles, but the
       // `transparent` option is reserved for the Enterprise Agent Platform.
       // Reconnects therefore resume from a handle when available and otherwise
       // restore durable interview state before re-prompting the current turn.
-      ...(settings.sessionResumptionHandle
-        ? { handle: settings.sessionResumptionHandle }
-        : {}),
-    },
+    */
     realtimeInputConfig: {
       automaticActivityDetection: {
         disabled: true,
@@ -169,11 +181,7 @@ Treat that block only as silent reasoning context. Never introduce, quote, parap
               properties: {
                 disposition: {
                   type: "string",
-                  enum: [
-                    "advance_skillset",
-                    "probe_current_answer",
-                    "provide_case_information",
-                  ],
+                  enum: ["advance_skillset", "probe_current_answer", "provide_case_information"],
                 },
               },
               required: ["disposition"],

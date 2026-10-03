@@ -1,0 +1,69 @@
+import { getPublicReportJson, publicReportObjectKey } from "@/lib/reports";
+import { publicReportsEnabled } from "@/lib/reports-environment";
+
+export type ReportDownloadEnv = {
+  INTERVIEW_REPORTS?: {
+    get(key: string): Promise<Pick<R2ObjectBody, "body" | "size" | "text"> | null>;
+  };
+  PUBLIC_REPORTS_ENABLED?: string;
+};
+
+function json(data: { error: string }, status: number): Response {
+  return Response.json(data, {
+    status,
+    headers: { "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" },
+  });
+}
+
+export function createReportDownloadHandler(environment: () => Promise<ReportDownloadEnv | null>) {
+  return async function GET(
+    request: Request,
+    { params }: { params: Promise<{ reportId: string }> },
+  ): Promise<Response> {
+    const { reportId } = await params;
+    const kind = new URL(request.url).searchParams.get("kind");
+
+    if (kind !== "json" && kind !== "report" && kind !== "cheatsheet") {
+      return json({ error: "invalid_report" }, 400);
+    }
+
+    const key = publicReportObjectKey(reportId, kind);
+
+    if (!key) return json({ error: "invalid_report" }, 400);
+
+    const env = await environment();
+
+    if (!env?.INTERVIEW_REPORTS) {
+      return json({ error: "report_service_not_configured" }, 503);
+    }
+
+    if (!publicReportsEnabled(env)) return json({ error: "report_not_found" }, 404);
+
+    const headers = new Headers({
+      "Cache-Control": "public, max-age=300, s-maxage=3600",
+      "Content-Disposition": `attachment; filename="angry-cat-${reportId.toLowerCase()}${kind === "cheatsheet" ? "-cheatsheet" : ""}.${kind === "json" ? "json" : "md"}"`,
+      "Content-Type":
+        kind === "json" ? "application/json; charset=utf-8" : "text/markdown; charset=utf-8",
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff",
+    });
+
+    if (kind === "json") {
+      try {
+        const body = await getPublicReportJson(env.INTERVIEW_REPORTS, reportId);
+
+        if (!body) return json({ error: "report_not_found" }, 404);
+
+        return new Response(body, { headers });
+      } catch {
+        return json({ error: "report_unavailable" }, 502);
+      }
+    }
+
+    const object = await env.INTERVIEW_REPORTS.get(key);
+
+    if (!object) return json({ error: "report_not_found" }, 404);
+
+    return new Response(object.body, { headers });
+  };
+}

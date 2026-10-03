@@ -10,6 +10,7 @@ export function simulatePlaybackBuffer({
 } = {}) {
   const arrivals = [];
   let previousArrival = 0;
+
   for (let ideal = 0, index = 0; ideal < durationMs; ideal += nominalFrameMs, index += 1) {
     const delayed = index % 10 === 6 ? maximumJitterMs : 0;
     const arrival = Math.max(previousArrival, ideal + delayed);
@@ -27,9 +28,12 @@ export function simulatePlaybackBuffer({
 
   for (const [index, arrival] of arrivals.entries()) {
     const elapsed = arrival - previousTime;
+
     if (index > 0) maximumArrivalGapMs = Math.max(maximumArrivalGapMs, elapsed);
+
     if (playbackStarted) {
       const drained = elapsed * PCM_BYTES_PER_MILLISECOND;
+
       if (drained >= buffered) {
         if (buffered > 0 && drained > buffered) underruns += 1;
         buffered = 0;
@@ -38,12 +42,16 @@ export function simulatePlaybackBuffer({
         buffered -= drained;
       }
     }
+
     buffered += frameBytes;
+
     if (buffered > capacityBytes) {
       overflows += 1;
       buffered = capacityBytes;
     }
+
     maximumBufferedBytes = Math.max(maximumBufferedBytes, buffered);
+
     if (!playbackStarted && buffered >= prebufferBytes) playbackStarted = true;
     previousTime = arrival;
   }

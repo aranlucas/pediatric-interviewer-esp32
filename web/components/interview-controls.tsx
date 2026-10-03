@@ -7,6 +7,7 @@ export type ConnectionState = "connecting" | "connected" | "reconnecting" | "err
 
 export function ConnectionIndicator({ state }: { state: ConnectionState }) {
   const connected = state === "connected";
+
   const label =
     state === "connected"
       ? "Connected"
@@ -15,6 +16,7 @@ export function ConnectionIndicator({ state }: { state: ConnectionState }) {
         : state === "error"
           ? "Connection error"
           : "Connecting";
+
   return (
     <div
       className="connection-indicator"
@@ -24,7 +26,11 @@ export function ConnectionIndicator({ state }: { state: ConnectionState }) {
       aria-live="polite"
     >
       <span aria-hidden="true" /> {label}
-      <i aria-hidden="true"><b /><b /><b /></i>
+      <i aria-hidden="true">
+        <b />
+        <b />
+        <b />
+      </i>
     </div>
   );
 }
@@ -54,6 +60,7 @@ export function Waveform({ level, active }: { level: number; active: boolean }) 
     () => [0.24, 0.48, 0.8, 0.55, 0.92, 0.62, 0.35, 0.7, 1, 0.58, 0.32, 0.72, 0.43, 0.2],
     [],
   );
+
   return (
     <div className="waveform" data-active={active} aria-hidden="true">
       {bars.map((height, index) => (
@@ -96,7 +103,9 @@ export function ControlButton({
       aria-expanded={expanded}
       disabled={disabled}
     >
-      <span><Icon size={22} /></span>
+      <span>
+        <Icon size={22} />
+      </span>
       {label}
     </button>
   );

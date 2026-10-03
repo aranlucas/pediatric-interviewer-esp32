@@ -11,8 +11,11 @@ import {
 } from "../lib/server-auth";
 
 const SECRET = "test-secret-that-is-long-enough";
+
 const NOW = 1_700_000_000;
+
 const CROSS_RUNTIME_SECRET = "test-web-token-secret-that-is-long-enough";
+
 const CROSS_RUNTIME_CONNECT_TOKEN =
   "eyJ2IjoxLCJzdWIiOiJ3ZWItMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJleHAiOjE4MDAwMDAwNjAsInNjb3BlIjoiY29ubmVjdCJ9.wxFQDOYnvGHheuHtQc9M_KbwtJI7PqLYy7gNcTfovLw";
 
@@ -42,6 +45,7 @@ describe("web HMAC session tokens", () => {
       exp: NOW,
       scope: "report",
     });
+
     await expect(verifyAccessToken(token, SECRET, "report", NOW)).resolves.toBeNull();
   });
 
@@ -78,9 +82,9 @@ describe("web auth input validation", () => {
   });
 
   it("parses only the requested cookie", () => {
-    expect(getCookie("foo=bar; __Host-angry-cat-report=signed.value", "__Host-angry-cat-report")).toBe(
-      "signed.value",
-    );
+    expect(
+      getCookie("foo=bar; __Host-angry-cat-report=signed.value", "__Host-angry-cat-report"),
+    ).toBe("signed.value");
     expect(getCookie("foo=bar", "__Host-angry-cat-report")).toBeNull();
   });
 

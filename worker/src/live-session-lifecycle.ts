@@ -2,8 +2,11 @@
 
 /** Maximum PCM payload accepted from one device WebSocket frame. */
 export const MAX_INPUT_PCM_BYTES = 32 * 1024;
+
 export const MAX_INPUT_PCM_BYTES_PER_SECOND = 128 * 1024;
+
 export const MAX_TRANSCRIPT_CHARACTERS = 4_000;
+
 export const MAX_PROVIDER_AUDIO_BASE64_CHARACTERS = 512 * 1024;
 
 /** Keeps incremental provider transcription bounded before turn normalization. */
@@ -13,12 +16,16 @@ export function appendBoundedTranscript(
   maxCharacters = MAX_TRANSCRIPT_CHARACTERS,
 ): string {
   const limit = Math.max(0, Math.trunc(maxCharacters));
+
   if (limit === 0 || current.length >= limit) return current.slice(0, limit);
+
   if (!current || !fragment) return `${current}${fragment}`.slice(0, limit);
+
   const needsWordBoundary =
     !/\s$/u.test(current) &&
     !/^[\s,.;:!?…\])}'’"—-]/u.test(fragment) &&
     !/[\[({'’"—-]$/u.test(current);
+
   return `${current}${needsWordBoundary ? " " : ""}${fragment}`.slice(0, limit);
 }
 
@@ -33,12 +40,15 @@ export function isBoundedProviderAudio(value: string): boolean {
  * or an avoidable Durable Object memory spike.
  */
 export function isValidPcm16Input(audio: ArrayBuffer): boolean {
-  return audio.byteLength > 0 && audio.byteLength <= MAX_INPUT_PCM_BYTES && audio.byteLength % 2 === 0;
+  return (
+    audio.byteLength > 0 && audio.byteLength <= MAX_INPUT_PCM_BYTES && audio.byteLength % 2 === 0
+  );
 }
 
 /** Small bounded backoff for a provider transport reconnect. */
 export function liveReconnectDelayMs(attempt: number, baseDelayMs: number): number {
   const boundedAttempt = Math.max(1, Math.min(4, Math.trunc(attempt)));
+
   return Math.max(0, baseDelayMs) * boundedAttempt;
 }
 
@@ -62,8 +72,10 @@ export class PcmInputRateGuard {
       this.windowStartedAt = now;
       this.bytesInWindow = 0;
     }
+
     if (bytes <= 0 || this.bytesInWindow + bytes > this.maxBytes) return false;
     this.bytesInWindow += bytes;
+
     return true;
   }
 

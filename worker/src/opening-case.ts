@@ -1,9 +1,8 @@
+import { z } from "zod";
+
 import { GoogleGenAI } from "@google/genai/web";
 
-import {
-  difficultyInstruction,
-  type InterviewDifficulty,
-} from "./interview-config";
+import { difficultyInstruction, type InterviewDifficulty } from "./interview-config";
 import { type InterviewTopic } from "./interview-content";
 import { isValidOpeningCasePresentation } from "./gemini-live-protocol";
 import { workerLog } from "./log";
@@ -12,8 +11,11 @@ import { workerLog } from "./log";
 export const GEMINI_OPENING_CASE_MODEL = "gemini-3.5-flash-lite" as const;
 
 const MAX_OPENING_CASE_RESPONSE_CHARACTERS = 4_000;
+
 const MAX_OPENING_CASE_ATTEMPTS = 2;
+
 const MIN_VIGNETTE_WORDS = 20;
+
 const MAX_VIGNETTE_WORDS = 60;
 
 export const OPENING_CASE_REQUEST_OPTIONS = {
@@ -34,10 +36,7 @@ export const openingCaseJsonSchema = {
   required: ["vignette"],
 } as const;
 
-export function openingCaseInteraction(
-  topic: InterviewTopic,
-  difficulty: InterviewDifficulty,
-) {
+export function openingCaseInteraction(topic: InterviewTopic, difficulty: InterviewDifficulty) {
   return {
     model: GEMINI_OPENING_CASE_MODEL,
     store: false,
@@ -79,26 +78,28 @@ export function parseOpeningCaseResponse(outputText: string | undefined): string
   if (!outputText || outputText.length > MAX_OPENING_CASE_RESPONSE_CHARACTERS) {
     throw new Error("Gemini opening case returned an empty or oversized response.");
   }
+
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(outputText);
   } catch {
     throw new Error("Gemini opening case returned invalid JSON.");
   }
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    typeof (parsed as { vignette?: unknown }).vignette !== "string"
-  ) {
-    throw new Error("Gemini opening case omitted the vignette.");
-  }
-  const rawVignette = (parsed as { vignette: string }).vignette;
+
+  const result = z.object({ vignette: z.string() }).safeParse(parsed);
+
+  if (!result.success) throw new Error("Gemini opening case omitted the vignette.");
+  const rawVignette = result.data.vignette;
+
   const vignette = rawVignette
     .replace(/\s+/gu, " ")
     .trim()
     .replace(/^here is your case(?:[.:,])?\s*/iu, "")
     .trim();
+
   const words = wordCount(vignette);
+
   if (
     words < MIN_VIGNETTE_WORDS ||
     words > MAX_VIGNETTE_WORDS ||
@@ -107,10 +108,13 @@ export function parseOpeningCaseResponse(outputText: string | undefined): string
   ) {
     throw new Error("Gemini opening case violated the spoken vignette boundary.");
   }
+
   const casePresentation = `Here is your case. ${vignette}`;
+
   if (!isValidOpeningCasePresentation(casePresentation)) {
     throw new Error("Gemini opening case failed runtime validation.");
   }
+
   return casePresentation;
 }
 
@@ -123,12 +127,14 @@ export async function generateOpeningCase(
   if (!apiKey.trim()) throw new Error("GEMINI_API_KEY is not configured.");
   const ai = new GoogleGenAI({ apiKey });
   let lastError: unknown;
+
   for (let attempt = 1; attempt <= MAX_OPENING_CASE_ATTEMPTS; attempt += 1) {
     try {
       const interaction = await ai.interactions.create(
         openingCaseInteraction(topic, difficulty),
         OPENING_CASE_REQUEST_OPTIONS,
       );
+
       return parseOpeningCaseResponse(interaction.output_text);
     } catch (error) {
       lastError = error;
@@ -138,5 +144,6 @@ export async function generateOpeningCase(
       });
     }
   }
+
   throw new Error("Gemini could not generate a valid opening case.", { cause: lastError });
 }

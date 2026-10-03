@@ -1,44 +1,51 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { routeAgentRequest } = vi.hoisted(() => ({
-  routeAgentRequest: vi.fn(),
-}));
+import {
+  createWorker,
+  type AgentRouter,
+  type WorkerEnv,
+  type ReportObject,
+} from "../src/edge-handler";
 
-vi.mock("agents", () => ({
-  Agent: class {},
-  routeAgentRequest,
-}));
+const routeAgentRequest = vi.fn<AgentRouter<WorkerEnv>>();
 
-import worker from "../src/index";
+const worker = createWorker(routeAgentRequest);
+
 import { signWebToken } from "../src/web-token";
 
 const DEVICE_TOKEN = "device-test-secret";
+
 const WEB_TOKEN_SECRET = "web-test-secret-that-is-long-enough";
+
 const WEB_ROOM = "web-0123456789abcdef0123456789abcdef";
+
 const REPORT_ID = "01234567-89ab-4cde-8123-0123456789ab";
 
-function r2Object(sessionId = WEB_ROOM): R2ObjectBody {
+function r2Object(sessionId = WEB_ROOM): ReportObject {
   return {
     body: new Blob(["private report"]).stream(),
     customMetadata: { sessionId },
     httpEtag: '"report-etag"',
     writeHttpMetadata: () => undefined,
-  } as unknown as R2ObjectBody;
+  };
 }
 
-function testEnv(object: R2ObjectBody | null = null): Env {
+function testEnv(object: ReportObject | null = null): WorkerEnv {
   return {
+    PEDIATRIC_INTERVIEWER: {
+      idFromString: () => ({ toString: () => "synthetic", equals: () => false }),
+      get: () => ({ fetch: async () => new Response("not configured", { status: 503 }) }),
+    },
     DEVICE_TOKEN,
     WEB_TOKEN_SECRET,
     WEB_ORIGINS: "https://oral.example,http://localhost:3000",
-    GEMINI_API_KEY: "gemini-test-key",
     CONNECTION_RATE_LIMITER: {
       limit: vi.fn().mockResolvedValue({ success: true }),
     },
     INTERVIEW_REPORTS: {
       get: vi.fn().mockResolvedValue(object),
     },
-  } as unknown as Env;
+  };
 }
 
 beforeEach(() => {
@@ -49,10 +56,7 @@ describe("Worker edge contract", () => {
   it.each(["/health", "/interviewer/health"])(
     "keeps public health minimal and non-cacheable at %s",
     async (path) => {
-      const response = await worker.fetch(
-        new Request(`https://worker.example${path}`),
-        testEnv(),
-      );
+      const response = await worker.fetch(new Request(`https://worker.example${path}`), testEnv());
 
       expect(response.status).toBe(200);
       expect(response.headers.get("Cache-Control")).toBe("no-store");
@@ -72,13 +76,18 @@ describe("Worker edge contract", () => {
 
   it("routes authenticated report recovery through the Durable Object binding", async () => {
     const durableObjectId = "a".repeat(64);
-    const fetch = vi.fn().mockResolvedValue(new Response("recovered"));
-    const idFromString = vi.fn().mockReturnValue({});
+
+    const fetch = vi
+      .fn<(request: Request) => Promise<Response>>()
+      .mockResolvedValue(new Response("recovered"));
+
+    const idFromString = vi.fn(() => ({ toString: () => durableObjectId, equals: () => false }));
     const get = vi.fn().mockReturnValue({ fetch });
+
     const env = {
       ...testEnv(),
       PEDIATRIC_INTERVIEWER: { idFromString, get },
-    } as unknown as Env;
+    };
 
     const response = await worker.fetch(
       new Request("https://worker.example/interviewer/recover-report", {
@@ -95,7 +104,7 @@ describe("Worker edge contract", () => {
     await expect(response.text()).resolves.toBe("recovered");
     expect(idFromString).toHaveBeenCalledWith(durableObjectId);
     expect(fetch).toHaveBeenCalledOnce();
-    const internalRequest = fetch.mock.calls[0]?.[0] as Request;
+    const internalRequest = fetch.mock.calls[0]?.[0];
     expect(internalRequest.method).toBe("POST");
     expect(internalRequest.url).toBe("https://internal/recover-report");
     expect(internalRequest.headers.get("x-partykit-room")).toBe("recovery-aaaaaaaa");
@@ -122,12 +131,14 @@ describe("Worker edge contract", () => {
       },
       WEB_TOKEN_SECRET,
     );
+
     const authorized = await worker.fetch(
       new Request(`https://worker.example/interviewer/reports/${REPORT_ID}.md`, {
         headers: { Authorization: `Bearer ${reportToken}` },
       }),
       testEnv(r2Object()),
     );
+
     const mismatched = await worker.fetch(
       new Request(`https://worker.example/interviewer/reports/${REPORT_ID}.md`, {
         headers: { Authorization: `Bearer ${reportToken}` },
@@ -164,6 +175,7 @@ describe("Worker edge contract", () => {
         name: WEB_ROOM,
       }),
     );
+
     const connectToken = await signWebToken(
       {
         sub: WEB_ROOM,
@@ -172,6 +184,7 @@ describe("Worker edge contract", () => {
       },
       WEB_TOKEN_SECRET,
     );
+
     const url = `https://worker.example/agents/pediatric-interviewer/${WEB_ROOM}?token=${connectToken}`;
 
     const allowed = await worker.fetch(
@@ -180,6 +193,7 @@ describe("Worker edge contract", () => {
       }),
       testEnv(),
     );
+
     const denied = await worker.fetch(
       new Request(url, {
         headers: { Origin: "https://evil.example", Upgrade: "websocket" },

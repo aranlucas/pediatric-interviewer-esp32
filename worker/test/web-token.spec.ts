@@ -8,7 +8,9 @@ import {
 } from "../src/web-token";
 
 const SECRET = "test-web-token-secret-that-is-long-enough";
+
 const NOW = 1_800_000_000;
+
 const CROSS_RUNTIME_CONNECT_TOKEN =
   "eyJ2IjoxLCJzdWIiOiJ3ZWItMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJleHAiOjE4MDAwMDAwNjAsInNjb3BlIjoiY29ubmVjdCJ9.wxFQDOYnvGHheuHtQc9M_KbwtJI7PqLYy7gNcTfovLw";
 
@@ -61,6 +63,7 @@ describe("signed web tokens", () => {
       { sub: "web-0123456789abcdef0123456789abcdef", exp: NOW + 60, scope: "connect" },
       SECRET,
     );
+
     const [payload, signature] = token.split(".");
     const tamperedPayload = `${payload.slice(0, -1)}${payload.endsWith("A") ? "B" : "A"}.${signature}`;
     const tamperedSignature = `${payload}.${signature.slice(0, -1)}${signature.endsWith("A") ? "B" : "A"}`;
@@ -75,9 +78,7 @@ describe("signed web tokens", () => {
       SECRET,
     );
 
-    await expect(
-      verifyWebToken(token, SECRET, { now: NOW, scope: "report" }),
-    ).resolves.toBeNull();
+    await expect(verifyWebToken(token, SECRET, { now: NOW, scope: "report" })).resolves.toBeNull();
     await expect(
       verifyWebToken(token, SECRET, {
         now: NOW,

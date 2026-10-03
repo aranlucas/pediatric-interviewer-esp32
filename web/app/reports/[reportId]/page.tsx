@@ -1,15 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import {
-  ReportLibraryDetail,
-  ReportsConfigurationError,
-} from "@/components/report-library";
-import {
-  getCompletedReport,
-  getReportMarkdown,
-  type ReportDocumentKind,
-} from "@/lib/reports";
+import { ReportLibraryDetail, ReportsConfigurationError } from "@/components/report-library";
+import { getCompletedReport, getReportMarkdown, type ReportDocumentKind } from "@/lib/reports";
 import {
   publicReportsEnabled,
   reportsEnvironment,
@@ -30,18 +23,23 @@ type ReportPageProps = {
 
 export default async function ReportPage({ params, searchParams }: ReportPageProps) {
   const [{ reportId }, { view }] = await Promise.all([params, searchParams]);
+
   if (!isReportId(reportId)) notFound();
   const kind: ReportDocumentKind = view === "cheatsheet" ? "cheatsheet" : "report";
 
   const env = await reportsEnvironment();
+
   if (!env?.INTERVIEW_REPORTS) return <ReportsConfigurationError />;
+
   if (!publicReportsEnabled(env)) notFound();
 
   const [report, markdown] = await Promise.all([
     getCompletedReport(env.INTERVIEW_REPORTS, reportId),
     getReportMarkdown(env.INTERVIEW_REPORTS, reportId, kind),
   ]);
+
   if (!report || !markdown) notFound();
+
   return (
     <ReportLibraryDetail
       report={report}

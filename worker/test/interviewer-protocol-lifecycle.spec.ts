@@ -1,93 +1,76 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Connection } from "agents";
-import type { LiveConnectParameters, LiveServerMessage } from "@google/genai/web";
+import { LiveServerMessage } from "@google/genai/web";
 
-const adapters = vi.hoisted(() => ({
-  connect: vi.fn(),
-  generateCase: vi.fn(),
-  synthesizeSpeech: vi.fn(),
-  keepAlive: vi.fn(),
-}));
+import { testInterviewer, fakeLiveSession } from "./interviewer-harness";
+import type {
+  InterviewerCore,
+  InterviewServices,
+  InterviewHost,
+  InterviewConnection,
+} from "../src/interviewer-core";
+import { z } from "zod";
 
-// Substitute only persistence/runtime and external providers. Scenarios drive
-// the same socket callbacks and provider events as production, never private
-// interviewer fields or methods.
-vi.mock("agents", () => ({
-  Agent: class {
-    initialState: unknown;
-    private savedState: unknown;
-    env = { GEMINI_API_KEY: "synthetic-test-key", INTERVIEW_REPORTS: {} };
-    name = "synthetic-protocol-test";
-    sql = vi.fn(() => []);
+const adapters = {
+  connect: vi.fn<InterviewServices["connect"]>(),
+  generateCase: vi.fn<InterviewServices["generateOpeningCase"]>(),
+  synthesizeSpeech: vi.fn<InterviewServices["synthesizeOpeningSpeech"]>(),
+  keepAlive: vi.fn<InterviewHost["keepAlive"]>(),
+};
 
-    get state(): unknown {
-      return (this.savedState ??= structuredClone(this.initialState));
-    }
+function newInterviewer() {
+  return testInterviewer(
+    {
+      connect: adapters.connect,
+      generateOpeningCase: adapters.generateCase,
+      synthesizeOpeningSpeech: adapters.synthesizeSpeech,
+    },
+    { keepAlive: adapters.keepAlive },
+  );
+}
 
-    setState(next: unknown): void {
-      this.savedState = structuredClone(next);
-    }
-
-    keepAlive = adapters.keepAlive;
-
-    async keepAliveWhile<T>(operation: () => Promise<T>): Promise<T> {
-      return operation();
-    }
-  },
-}));
-
-vi.mock("@google/genai/web", () => ({
-  GoogleGenAI: class {
-    live = { connect: adapters.connect };
-  },
-  Modality: { AUDIO: "AUDIO" },
-  ThinkingLevel: { MINIMAL: "MINIMAL" },
-}));
-
-vi.mock("../src/opening-case", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../src/opening-case")>()),
-  generateOpeningCase: adapters.generateCase,
-}));
-
-vi.mock("../src/opening-speech", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../src/opening-speech")>()),
-  synthesizeOpeningSpeech: adapters.synthesizeSpeech,
-}));
-
-import { PediatricInterviewer } from "../src/interviewer";
+const frameSchema = () => z.record(z.string(), z.json());
 
 const CASE = "Here is your case. This is a synthetic training scenario.";
+
 const PCM = new Uint8Array([1, 0, 2, 0]);
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((accept) => {
     resolve = accept;
   });
+
   return { promise, resolve };
 }
 
 function client(id: string) {
-  const frames: Array<Record<string, unknown> | Uint8Array> = [];
-  const connection = {
+  const frames: Array<z.infer<ReturnType<typeof frameSchema>> | Uint8Array> = [];
+
+  const connection: InterviewConnection = {
     id,
     send(payload: string | ArrayBuffer | Uint8Array) {
-      frames.push(typeof payload === "string" ? JSON.parse(payload) : new Uint8Array(payload));
+      frames.push(
+        payload instanceof ArrayBuffer || payload instanceof Uint8Array
+          ? new Uint8Array(payload)
+          : frameSchema().parse(JSON.parse(payload)),
+      );
     },
-  } as unknown as Connection;
+  };
+
   return { connection, frames };
 }
 
 function provider() {
-  return { sendRealtimeInput: vi.fn(), sendToolResponse: vi.fn(), close: vi.fn() };
+  return fakeLiveSession();
 }
 
 function emit(content: LiveServerMessage["serverContent"], sessionIndex = 0) {
-  const options = adapters.connect.mock.calls[sessionIndex][0] as LiveConnectParameters;
-  options.callbacks.onmessage?.({ serverContent: content } as LiveServerMessage);
+  const options = adapters.connect.mock.calls[sessionIndex][0];
+  options.callbacks.onmessage?.(Object.assign(new LiveServerMessage(), { serverContent: content }));
 }
 
-function start(interviewer: PediatricInterviewer, connection: Connection) {
+function start(interviewer: InterviewerCore, connection: InterviewConnection) {
   return interviewer.onMessage(connection, JSON.stringify({ type: "start_call" }));
 }
 
@@ -113,7 +96,7 @@ describe("interviewer public lifecycle protocol", () => {
     const pending = deferred<ReturnType<typeof provider>>();
     const live = provider();
     adapters.connect.mockReturnValue(pending.promise);
-    const interviewer = new PediatricInterviewer();
+    const interviewer = newInterviewer();
     const original = client("original");
     const replacement = client("replacement");
     interviewer.onConnect(original.connection);
@@ -142,7 +125,7 @@ describe("interviewer public lifecycle protocol", () => {
     const abandoned = provider();
     const resumed = provider();
     adapters.connect.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(resumed);
-    const interviewer = new PediatricInterviewer();
+    const interviewer = newInterviewer();
     const original = client("original");
     interviewer.onConnect(original.connection);
     const starting = start(interviewer, original.connection);
@@ -171,16 +154,18 @@ describe("interviewer public lifecycle protocol", () => {
     adapters.connect
       .mockResolvedValueOnce(originalProvider)
       .mockReturnValueOnce(pendingReconnect.promise);
-    const interviewer = new PediatricInterviewer();
+    const interviewer = newInterviewer();
     const original = client("original");
     interviewer.onConnect(original.connection);
     await start(interviewer, original.connection);
-    const options = adapters.connect.mock.calls[0][0] as LiveConnectParameters;
-    options.callbacks.onclose?.({
-      code: 1006,
-      reason: "synthetic disconnect",
-      wasClean: false,
-    } as CloseEvent);
+    const options = adapters.connect.mock.calls[0][0];
+    options.callbacks.onclose?.(
+      new CloseEvent("close", {
+        code: 1006,
+        reason: "synthetic disconnect",
+        wasClean: false,
+      }),
+    );
     await vi.advanceTimersByTimeAsync(1_000);
     expect(adapters.connect).toHaveBeenCalledTimes(2);
 
@@ -199,11 +184,13 @@ describe("interviewer public lifecycle protocol", () => {
       text: expect.stringContaining("WARM_UP"),
     });
     // A callback from the retired provider must not disconnect its successor.
-    options.callbacks.onclose?.({
-      code: 1006,
-      reason: "stale close",
-      wasClean: false,
-    } as CloseEvent);
+    options.callbacks.onclose?.(
+      new CloseEvent("close", {
+        code: 1006,
+        reason: "stale close",
+        wasClean: false,
+      }),
+    );
     await vi.advanceTimersByTimeAsync(1_000);
     expect(adapters.connect).toHaveBeenCalledTimes(2);
     expect(resumedProvider.close).not.toHaveBeenCalled();
@@ -216,7 +203,7 @@ describe("interviewer public lifecycle protocol", () => {
       .mockReturnValueOnce(firstCase.promise)
       .mockReturnValueOnce(secondCase.promise);
     adapters.connect.mockResolvedValue(provider());
-    const interviewer = new PediatricInterviewer();
+    const interviewer = newInterviewer();
     const original = client("original");
     interviewer.onConnect(original.connection);
     const firstStart = start(interviewer, original.connection);
@@ -243,7 +230,7 @@ describe("interviewer public lifecycle protocol", () => {
     const pendingHold = deferred<() => void>();
     const release = vi.fn();
     adapters.keepAlive.mockReturnValueOnce(pendingHold.promise);
-    const interviewer = new PediatricInterviewer();
+    const interviewer = newInterviewer();
     const original = client("original");
     interviewer.onConnect(original.connection);
     const starting = start(interviewer, original.connection);
@@ -260,7 +247,7 @@ describe("interviewer public lifecycle protocol", () => {
   it("delivers trailing provider audio before listening after generation completion", async () => {
     const live = provider();
     adapters.connect.mockResolvedValue(live);
-    const interviewer = new PediatricInterviewer();
+    const interviewer = newInterviewer();
     const active = client("active");
     interviewer.onConnect(active.connection);
     await start(interviewer, active.connection);
@@ -283,10 +270,12 @@ describe("interviewer public lifecycle protocol", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     const audioIndex = active.frames.findIndex((frame) => frame instanceof Uint8Array);
+
     const listeningIndex = active.frames.findIndex(
       (frame) =>
         !(frame instanceof Uint8Array) && frame.type === "status" && frame.status === "listening",
     );
+
     expect(audioIndex).toBeGreaterThanOrEqual(0);
     expect(listeningIndex).toBeGreaterThan(audioIndex);
     expect(active.frames).toContainEqual(

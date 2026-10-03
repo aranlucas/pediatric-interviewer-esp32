@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "pnpm typecheck",
+    "check": "pnpm lint && pnpm typecheck",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
     "format": "oxfmt .",
@@ -16,7 +16,7 @@
     "simulate:suite": "node tools/simulate-suite.mjs",
     "smoke:web": "node tools/smoke-web.mjs",
     "test": "vitest run",
-    "typecheck": "wrangler types && tsc --noEmit"
+    "typecheck": "wrangler types && tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@google/genai": "^2.20.0",
@@ -28,7 +28,7 @@
     "@types/node": "^26.4.0",
     "cf": "1.0.0-beta.10",
     "oxfmt": "^0.71.0",
-    "oxlint": "^1.80.0",
+    "oxlint": "1.86.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1",
     "wrangler": "^4.143.0",

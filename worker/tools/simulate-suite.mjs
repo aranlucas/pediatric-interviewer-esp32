@@ -9,6 +9,7 @@ import { simulatePlaybackBuffer } from "./audio-buffer-model.mjs";
 import { interviewerSettings } from "./interviewer-settings.mjs";
 
 const toolDirectory = path.dirname(fileURLToPath(import.meta.url));
+
 const projectDirectory = path.dirname(toolDirectory);
 
 function requireCondition(condition, message) {
@@ -24,11 +25,13 @@ function normalized(value) {
 function runLiveSimulation(name, arguments_) {
   return new Promise((resolve, reject) => {
     console.log(JSON.stringify({ event: "gate_started", gate: name }));
+
     const child = spawn(
       process.execPath,
       [path.join(toolDirectory, "simulate-interview.mjs"), ...arguments_],
       { cwd: projectDirectory, stdio: ["ignore", "pipe", "pipe"] },
     );
+
     let pending = "";
     let stderr = "";
     let summary = null;
@@ -38,9 +41,11 @@ function runLiveSimulation(name, arguments_) {
       pending += chunk;
       const lines = pending.split("\n");
       pending = lines.pop() ?? "";
+
       for (const line of lines) {
         try {
           const message = JSON.parse(line);
+
           if (message.event === "simulation_complete") summary = message;
         } catch {
           // Useful simulator output is JSON; ignore incomplete diagnostic text.
@@ -54,8 +59,10 @@ function runLiveSimulation(name, arguments_) {
     child.on("close", (code) => {
       if (code !== 0 || !summary) {
         reject(new Error(`${name} simulator failed (${code}): ${stderr.trim() || pending.trim()}`));
+
         return;
       }
+
       resolve(summary);
     });
   });
@@ -67,24 +74,31 @@ async function verifyStoredReport(connection, report) {
   url.protocol = "https:";
   url.pathname = `/interviewer/reports/${report.reportId}.json`;
   url.search = "";
+
   const response = await fetch(url, {
     headers: { "X-Device-Token": connection.token },
   });
+
   requireCondition(response.ok, `stored report fetch returned ${response.status}`);
+
   return response.json();
 }
 
 async function runGate(name, operation) {
   const startedAt = Date.now();
+
   try {
     const details = await operation();
+
     const result = {
       gate: name,
       status: "passed",
       durationMs: Date.now() - startedAt,
       details,
     };
+
     console.log(JSON.stringify({ event: "gate_complete", ...result }));
+
     return result;
   } catch (error) {
     const result = {
@@ -93,7 +107,9 @@ async function runGate(name, operation) {
       durationMs: Date.now() - startedAt,
       error: error.message,
     };
+
     console.error(JSON.stringify({ event: "gate_complete", ...result }));
+
     return result;
   }
 }
@@ -112,6 +128,7 @@ async function main() {
         "--timeout-ms",
         "150000",
       ]);
+
       requireCondition(result.commitsSent >= 1, "expected at least one commit");
       requireCondition(result.prematureStops === 0, "answer stopped before explicit commit");
       requireCondition(result.candidateTranscripts.length >= 1, "expected a candidate transcript");
@@ -120,6 +137,7 @@ async function main() {
         transcript.includes("differential diagnosis") && transcript.includes("imaging"),
         "second half of the paused answer was not preserved",
       );
+
       return { transcriptCharacters: result.candidateTranscripts[0].length };
     }),
   );
@@ -136,9 +154,11 @@ async function main() {
         "--timeout-ms",
         "150000",
       ]);
+
       requireCondition(result.commitsSent >= 1, "expected at least one commit");
       requireCondition(result.prematureStops === 0, "provider ended the turn before commit");
       requireCondition(result.stoppedBeforeQuestion === 2, "interview did not advance once");
+
       return { commits: result.commitsSent, advancedToQuestion: 2 };
     }),
   );
@@ -155,10 +175,12 @@ async function main() {
         "--timeout-ms",
         "150000",
       ]);
+
       requireCondition(result.commitsSent >= 1, "tap-equivalent commit was not sent");
       requireCondition(result.prematureStops === 0, "noise caused a premature stop");
       requireCondition(result.candidateTranscripts[0]?.length > 60, "no usable noisy transcript");
       requireCondition(result.stoppedBeforeQuestion === 2, "noisy answer did not advance");
+
       return {
         noisePercent: 12,
         transcriptCharacters: result.candidateTranscripts[0].length,
@@ -171,6 +193,7 @@ async function main() {
       const model = simulatePlaybackBuffer({ maximumJitterMs: 350 });
       requireCondition(model.passed, "buffer model underrun or overflow");
       requireCondition(model.maximumArrivalGapMs >= 350, "jitter fixture was not applied");
+
       return model;
     }),
   );
@@ -187,17 +210,22 @@ async function main() {
         "--timeout-ms",
         "600000",
       ]);
+
       requireCondition(result.phase === "complete", "interview did not complete");
       requireCondition(result.answersSimulated === 6, "expected six primary answers");
       requireCondition(result.primaryQuestions.length === 6, "expected six primary questions");
       requireCondition(
         result.primaryQuestions.every(
-          (question) => !/(?:thank you|review is being prepared|concludes? (?:our|the))/i.test(question),
+          (question) =>
+            !/(?:thank you|review is being prepared|concludes? (?:our|the))/i.test(question),
         ),
         "completion text was used as a primary question",
       );
       requireCondition(result.commitsSent >= 6, "expected at least six commits");
-      requireCondition(result.candidateTranscripts.length >= 6, "expected at least six transcripts");
+      requireCondition(
+        result.candidateTranscripts.length >= 6,
+        "expected at least six transcripts",
+      );
       requireCondition(result.prematureStops === 0, "a candidate answer stopped prematurely");
       requireCondition(result.outputAudio.oddFrames === 0, "received malformed PCM frame");
       const stored = await verifyStoredReport(connection, result.report);
@@ -205,6 +233,7 @@ async function main() {
         stored.evaluation?.exchanges?.length === 6,
         "stored report lacks six exchanges",
       );
+
       return {
         reportId: result.report.reportId,
         transcripts: result.candidateTranscripts.length,
@@ -215,6 +244,7 @@ async function main() {
   );
 
   const failed = gates.filter(({ status }) => status === "failed");
+
   const report = {
     generatedAt: new Date().toISOString(),
     scope: {
@@ -227,9 +257,11 @@ async function main() {
     failed: failed.length,
     gates,
   };
+
   const reportPath = path.join(projectDirectory, "simulation-report.json");
   fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify({ event: "suite_complete", reportPath, ...report }));
+
   if (failed.length > 0) process.exitCode = 1;
 }
 

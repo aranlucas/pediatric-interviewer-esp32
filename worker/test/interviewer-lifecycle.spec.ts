@@ -1,208 +1,48 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const genaiMocks = vi.hoisted(() => ({ liveConnect: vi.fn() }));
-const openingSpeechMocks = vi.hoisted(() => ({ synthesize: vi.fn() }));
-
-vi.mock("agents", () => {
-  class TestAgent {
-    state: unknown;
-    env = {
-      GEMINI_API_KEY: "test-gemini-key",
-      INTERVIEW_REPORTS: {},
-    };
-    name = "test-interview";
-    sql = vi.fn(() => []);
-
-    setState(next: unknown): void {
-      this.state = next;
-    }
-
-    async keepAlive(): Promise<() => void> {
-      return () => undefined;
-    }
-
-    async keepAliveWhile<T>(operation: () => Promise<T>): Promise<T> {
-      return operation();
-    }
-
-    async retry<T>(operation: (attempt: number) => Promise<T>): Promise<T> {
-      return operation(1);
-    }
-  }
-
-  return { Agent: TestAgent };
-});
-
-vi.mock("@google/genai/web", () => ({
-  GoogleGenAI: class {
-    live = { connect: genaiMocks.liveConnect };
-  },
-  Modality: { AUDIO: "AUDIO" },
-  ThinkingLevel: { MINIMAL: "MINIMAL" },
-}));
-
-vi.mock("../src/opening-speech", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/opening-speech")>();
-  return {
-    ...actual,
-    synthesizeOpeningSpeech: openingSpeechMocks.synthesize,
-  };
-});
-
-import { type Connection } from "agents";
+import { z } from "zod";
+import { testInterviewer, fakeLiveSession } from "./interviewer-harness";
 import {
   CANDIDATE_TURN_TIMEOUT_MS,
   GEMINI_CONNECT_TIMEOUT_MS,
-  PediatricInterviewer,
   PROVIDER_RESPONSE_TIMEOUT_MS,
-  type PediatricInterviewerState,
-} from "../src/interviewer";
+  type PendingProviderTurn,
+  type InterviewServices,
+  type InterviewConnection,
+  type LiveSession,
+} from "../src/interviewer-core";
 import { buildInterviewTopic } from "../src/interview-config";
 
-type PendingProviderTurn =
-  | { id: number; kind: "client_content"; turn: { turns: string; turnComplete: true } }
-  | { id: number; kind: "candidate_text"; text: string }
-  | {
-      id: number;
-      kind: "candidate_audio";
-      chunks: ArrayBuffer[];
-      bytes: number;
-      committed: boolean;
-      replayable: boolean;
-    };
+const genaiMocks = { liveConnect: vi.fn<InterviewServices["connect"]>() };
 
-type Runtime = {
-  state: PediatricInterviewerState;
-  initialState: PediatricInterviewerState;
-  device?: Connection;
-  gemini?: unknown;
-  finalizationPromise?: Promise<void>;
-  liveGeneration: number;
-  pendingProviderTurn?: PendingProviderTurn;
-  turnFinalizationGeneration?: number;
-  deferredTransportFailure?: {
-    connection?: Connection;
-    generation: number;
-    reason: string;
-  };
-  connecting: boolean;
-  lastStatus: "idle" | "thinking" | "listening" | "speaking" | "evaluating" | "complete" | "error";
-  openingStage:
-    | "warming_up"
-    | "presenting_case"
-    | "asking_first_question"
-    | "complete";
-  openingCaseText: string;
-  pendingQuestion: string;
-  pendingAnswer: string;
-  pendingFollowUps: Array<{ question: string; answer: string }>;
-  activeQuestion: string;
-  inputTranscript: string;
-  outputTranscript: string;
-  turnProducedAudio: boolean;
-  turnAudioDeliveryFailed: boolean;
-  resumptionHandleUsable: boolean;
-  sql: ReturnType<typeof vi.fn>;
-  armProviderResponseDeadline: (
-    pending: PendingProviderTurn,
-    generation?: number,
-  ) => void;
-  clearPendingProviderTurn: () => void;
-  handleGeminiTransportFailure: (
-    connection: Connection | undefined,
-    generation: number,
-    reason: string,
-  ) => void;
-  handleGeminiMessage: (message: unknown, generation: number) => void;
-  handleGeminiMessageSafely: (
-    message: unknown,
-    generation: number,
-    connection?: Connection,
-  ) => void;
-  runGeminiCallbackSafely: (
-    operation: "message" | "error" | "close",
-    generation: number,
-    connection: Connection | undefined,
-    callback: () => void,
-  ) => void;
-  preparePendingTurnForReconnect: (connection: Connection | undefined) => void;
-  replayPendingProviderTurn: (
-    session: unknown,
-    connection: Connection | undefined,
-    generation: number,
-    pending: PendingProviderTurn,
-  ) => boolean;
-  forwardAudio: (connection: Connection, audio: ArrayBuffer) => void;
-  openGeminiSession: (
-    connection: Connection | undefined,
-    topic: ReturnType<typeof buildInterviewTopic>,
-    configuration: {
-      questionCount: number;
-      difficulty: "easy" | "standard" | "hard";
-      topicIds: PediatricInterviewerState["topicIds"];
-    },
-    generation: number,
-  ) => Promise<unknown>;
-  onStart: () => Promise<void>;
-  onConnect: (connection: Connection) => void;
-  scheduleGeminiReconnect: (connection: Connection | undefined, reason: string) => void;
-  resumeFreshGeminiSession: (connection: Connection) => void;
-  authoritativeRecoveryQuestion: () => string;
-  openingCaseSpeechForPlayback: (text: string) => Promise<{
-    pcm: Uint8Array;
-    sampleRate: number;
-  }>;
-  openingPlaybackIsCurrent: (
-    generation: number,
-    stage: "case" | "first_question",
-  ) => boolean;
-  failOpeningAudio: (
-    connection: Connection,
-    generation: number,
-    stage: "case" | "first_question",
-  ) => void;
-  readResumptionHandle: (generation: string | undefined) => string | undefined;
-  writeResumptionHandle: (generation: string | undefined, handle: string) => boolean;
-  clearResumptionHandle: (generation?: string) => boolean;
-  closeLiveSession: (reason: string, ownerConnection?: Connection) => void;
-  finishInterview: (connection: Connection) => Promise<void>;
-  finishGeminiTurn: (connection: Connection, generation: number) => Promise<void>;
-  askGemini: (connection: Connection, turn: unknown) => void;
-  buildFinalizationSnapshot: (
-    reportId: string,
-    interviewGeneration: string,
-  ) => { exchanges: PediatricInterviewerState["exchanges"] };
-  validateStateChange: (
-    nextState: PediatricInterviewerState,
-    source: Connection | "server",
-  ) => void;
-};
+const openingSpeechMocks = { synthesize: vi.fn<InterviewServices["synthesizeOpeningSpeech"]>() };
 
-function runtimeOf(interviewer: PediatricInterviewer): Runtime {
-  return interviewer as unknown as Runtime;
+function decodeFrames(frames: string[]) {
+  return frames.map((frame) => z.record(z.string(), z.json()).parse(JSON.parse(frame)));
 }
 
-function connection(id: string, sent: string[]): Connection {
+function connection(id: string, sent: string[]): InterviewConnection {
   return {
     id,
-    send: (payload) => sent.push(typeof payload === "string" ? payload : "binary"),
-  } as unknown as Connection;
+    send: (payload) =>
+      sent.push(payload instanceof ArrayBuffer || ArrayBuffer.isView(payload) ? "binary" : payload),
+  };
 }
 
-function newInterviewer(): { interviewer: PediatricInterviewer; runtime: Runtime } {
-  const interviewer = new PediatricInterviewer();
-  const runtime = runtimeOf(interviewer);
-  runtime.state = structuredClone(runtime.initialState);
-  return { interviewer, runtime };
+function newInterviewer() {
+  const interviewer = testInterviewer({
+    connect: genaiMocks.liveConnect,
+    synthesizeOpeningSpeech: openingSpeechMocks.synthesize,
+  });
+
+  return { interviewer, runtime: interviewer };
 }
 
 beforeEach(() => {
   genaiMocks.liveConnect.mockReset();
-  openingSpeechMocks.synthesize.mockReset();
-  openingSpeechMocks.synthesize.mockResolvedValue({
-    pcm: Uint8Array.from([1, 0, 2, 0]),
-    sampleRate: 24_000,
-  });
+  openingSpeechMocks.synthesize
+    .mockReset()
+    .mockResolvedValue({ pcm: Uint8Array.from([1, 0, 2, 0]), sampleRate: 24_000 });
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -227,15 +67,19 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       ...runtime.state,
       phase: "complete",
       reportId: "report-reconnect",
-      evaluation: { outcome: "pass" } as PediatricInterviewerState["evaluation"],
+      evaluation: {
+        outcome: "pass",
+        examinerSummary: "synthetic",
+        scoreSummary: [],
+        exchanges: [],
+      },
     };
     const sent: string[] = [];
 
     interviewer.onConnect(connection("replacement", sent));
 
-    const messages = sent
-      .filter((payload) => payload !== "binary")
-      .map((payload) => JSON.parse(payload) as Record<string, unknown>);
+    const messages = decodeFrames(sent.filter((payload) => payload !== "binary"));
+
     expect(messages).toContainEqual(
       expect.objectContaining({
         type: "interview_state",
@@ -253,7 +97,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
   });
 
   it("does not let an old finalizer clear a replacement device", () => {
-    const { interviewer, runtime } = newInterviewer();
+    const { runtime } = newInterviewer();
     const oldConnection = connection("old", []);
     const replacement = connection("replacement", []);
     runtime.device = replacement;
@@ -279,10 +123,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     runtime.onConnect(replacement);
 
     expect(runtime.device).toBe(replacement);
-    expect(runtime.scheduleGeminiReconnect).toHaveBeenCalledWith(
-      replacement,
-      "client reconnected",
-    );
+    expect(runtime.scheduleGeminiReconnect).toHaveBeenCalledWith(replacement, "client reconnected");
   });
 
   it("rejects a new start while report finalization is in flight", async () => {
@@ -295,7 +136,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       JSON.stringify({ type: "start_call", topic_id: "behavior_guidance" }),
     );
 
-    const messages = sent.map((payload) => JSON.parse(payload) as Record<string, unknown>);
+    const messages = decodeFrames(sent);
     expect(messages).toContainEqual(
       expect.objectContaining({
         type: "error",
@@ -379,13 +220,13 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
   it("materializes a durable partial exchange once in the immutable report snapshot", () => {
     const { runtime } = newInterviewer();
+
     const exchange = {
       question: "What is your primary assessment?",
       answer: "I would assess pain and immediate safety.",
-      followUps: [
-        { question: "What comes next?", answer: "I would examine and obtain imaging." },
-      ],
+      followUps: [{ question: "What comes next?", answer: "I would examine and obtain imaging." }],
     };
+
     runtime.state = {
       ...runtime.state,
       interviewGeneration: "snapshot-generation",
@@ -408,18 +249,23 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
   it("does not reuse a handle from another interview generation", () => {
     const { runtime } = newInterviewer();
-    runtime.sql = vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
-      const statement = strings.join(" ");
-      if (statement.includes("PRAGMA")) {
-        return [{ name: "id" }, { name: "interview_generation" }];
-      }
-      if (statement.includes("SELECT")) {
-        return values[0] === "current-generation"
-          ? [{ resumption_handle: "current-handle" }]
-          : [];
-      }
-      return [];
-    });
+    runtime.sql = vi.fn(
+      (strings: TemplateStringsArray, ...values: Array<string | number | boolean | null>) => {
+        const statement = strings.join(" ");
+
+        if (statement.includes("PRAGMA")) {
+          return [{ name: "id" }, { name: "interview_generation" }];
+        }
+
+        if (statement.includes("SELECT")) {
+          return values[0] === "current-generation"
+            ? [{ resumption_handle: "current-handle" }]
+            : [];
+        }
+
+        return [];
+      },
+    );
 
     expect(runtime.readResumptionHandle("current-generation")).toBe("current-handle");
     expect(runtime.readResumptionHandle("old-generation")).toBeUndefined();
@@ -496,21 +342,19 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     expect(runtime.state.casePresentation).toBe(
       "Here is your case. A four-year-old presents with pain.",
     );
-    expect(runtime.state.currentQuestion).toBe("How would you assess this child's immediate needs?");
+    expect(runtime.state.currentQuestion).toBe(
+      "How would you assess this child's immediate needs?",
+    );
     expect(runtime.state.exchanges).toHaveLength(0);
     expect(runtime.askGemini).not.toHaveBeenCalled();
-    expect(
-      sent
-        .map((payload) => JSON.parse(payload))
-        .filter((payload) => payload.type === "transcript_end"),
-    ).toEqual([
+    expect(decodeFrames(sent).filter((payload) => payload.type === "transcript_end")).toEqual([
       {
         type: "transcript_end",
         role: "assistant",
         text: "How would you assess this child's immediate needs?",
       },
     ]);
-    expect(sent.map((payload) => JSON.parse(payload))).toContainEqual({
+    expect(decodeFrames(sent)).toContainEqual({
       type: "status",
       status: "listening",
     });
@@ -555,22 +399,21 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     expect(openingSpeechMocks.synthesize).toHaveBeenCalledOnce();
     expect(runtime.state.openingStage).toBe("asking_first_question");
     expect(
-      sent
-        .filter((payload) => payload !== "binary")
-        .map((payload) => JSON.parse(payload))
-        .filter((payload) => payload.type === "transcript_end"),
+      decodeFrames(sent.filter((payload) => payload !== "binary")).filter(
+        (payload) => payload.type === "transcript_end",
+      ),
     ).toEqual([
       {
         type: "transcript_end",
         role: "assistant",
-        text:
-          "Here is your case. A four-year-old child presents with pain and escalating dental anxiety during an urgent visit.",
+        text: "Here is your case. A four-year-old child presents with pain and escalating dental anxiety during an urgent visit.",
       },
     ]);
   });
 
   it("shares one in-flight synthesis when prewarming durable case speech", async () => {
     const { runtime } = newInterviewer();
+
     const caseText =
       "Here is your case. A four-year-old child presents with pain and dental anxiety.";
 
@@ -581,10 +424,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
     expect(first).toBe(second);
     expect(openingSpeechMocks.synthesize).toHaveBeenCalledOnce();
-    expect(openingSpeechMocks.synthesize).toHaveBeenCalledWith(
-      "test-gemini-key",
-      caseText,
-    );
+    expect(openingSpeechMocks.synthesize).toHaveBeenCalledWith("test-gemini-key", caseText);
   });
 
   it("uses bounded TTS when the first question has a transcript but no Live audio", async () => {
@@ -617,10 +457,9 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     );
     expect(sent).toContain("binary");
     expect(
-      sent
-        .filter((payload) => payload !== "binary")
-        .map((payload) => JSON.parse(payload))
-        .filter((payload) => payload.type === "transcript_end"),
+      decodeFrames(sent.filter((payload) => payload !== "binary")).filter(
+        (payload) => payload.type === "transcript_end",
+      ),
     ).toContainEqual({
       type: "transcript_end",
       role: "assistant",
@@ -668,19 +507,15 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       activeConnection,
       expect.objectContaining({ turns: expect.stringContaining("BEGIN_INTERVIEW") }),
     );
-    expect(sent.map((payload) => JSON.parse(payload))).toContainEqual({
+    expect(decodeFrames(sent)).toContainEqual({
       type: "playback_interrupt",
     });
-    expect(
-      sent
-        .map((payload) => JSON.parse(payload))
-        .some((payload) => payload.type === "transcript_end"),
-    ).toBe(false);
+    expect(decodeFrames(sent).some((payload) => payload.type === "transcript_end")).toBe(false);
   });
 
   it("preserves the exact opening checkpoint for a client reconnect", async () => {
     const { runtime } = newInterviewer();
-    const provider = { close: vi.fn() };
+    const provider = fakeLiveSession();
     runtime.state = {
       ...runtime.state,
       phase: "interviewing",
@@ -710,17 +545,14 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     const replacement = connection("replacement", []);
     runtime.scheduleGeminiReconnect = vi.fn();
     runtime.onConnect(replacement);
-    expect(runtime.scheduleGeminiReconnect).toHaveBeenCalledWith(
-      replacement,
-      "client reconnected",
-    );
+    expect(runtime.scheduleGeminiReconnect).toHaveBeenCalledWith(replacement, "client reconnected");
   });
 
   it("asks the first clinical question directly after a fresh Live reconnect", () => {
     const { runtime } = newInterviewer();
     const sent: string[] = [];
     const activeConnection = connection("active", sent);
-    const session = { sendRealtimeInput: vi.fn() };
+    const session = fakeLiveSession();
     runtime.device = activeConnection;
     runtime.gemini = session;
     runtime.state = {
@@ -742,7 +574,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     });
     expect(openingSpeechMocks.synthesize).not.toHaveBeenCalled();
     expect(runtime.openingStage).toBe("asking_first_question");
-    expect(sent.map((payload) => JSON.parse(payload))).toContainEqual({
+    expect(decodeFrames(sent)).toContainEqual({
       type: "status",
       status: "thinking",
     });
@@ -796,13 +628,15 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     const { runtime } = newInterviewer();
     const sent: string[] = [];
     const activeConnection = connection("active", sent);
+
     const pending: PendingProviderTurn = {
       id: 20,
       kind: "candidate_text",
       text: "My candidate answer",
     };
+
     runtime.device = activeConnection;
-    runtime.gemini = {};
+    runtime.gemini = fakeLiveSession();
     runtime.state = {
       ...runtime.state,
       phase: "interviewing",
@@ -818,10 +652,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     });
     runtime.handleGeminiTransportFailure = vi.fn();
 
-    runtime.handleGeminiMessage(
-      { serverContent: { turnComplete: true } },
-      21,
-    );
+    runtime.handleGeminiMessage({ serverContent: { turnComplete: true } }, 21);
 
     await vi.waitFor(() => {
       expect(runtime.handleGeminiTransportFailure).toHaveBeenCalledWith(
@@ -831,10 +662,8 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       );
     });
     expect(runtime.pendingProviderTurn).toBe(pending);
-    expect(runtime.clearResumptionHandle).toHaveBeenCalledWith(
-      "turn-finalization-generation",
-    );
-    expect(sent.map((payload) => JSON.parse(payload))).toContainEqual({
+    expect(runtime.clearResumptionHandle).toHaveBeenCalledWith("turn-finalization-generation");
+    expect(decodeFrames(sent)).toContainEqual({
       type: "turn_recovery",
       action: "retrying",
       message: "That turn could not be saved. Reconnecting and retrying it safely…",
@@ -843,15 +672,18 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
   it("bounds a silent provider turn and starts owned reconnect recovery", () => {
     vi.useFakeTimers();
+
     try {
       const { runtime } = newInterviewer();
       const sent: string[] = [];
       const activeConnection = connection("active", sent);
+
       const pending: PendingProviderTurn = {
         id: 21,
         kind: "candidate_text",
         text: "My answer",
       };
+
       runtime.state = {
         ...runtime.state,
         phase: "interviewing",
@@ -870,10 +702,10 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         8,
         "response_timeout",
       );
-      expect(sent.map((payload) => JSON.parse(payload))).toContainEqual({
+      expect(decodeFrames(sent)).toContainEqual({
         type: "playback_interrupt",
       });
-      expect(sent.map((payload) => JSON.parse(payload))).toContainEqual(
+      expect(decodeFrames(sent)).toContainEqual(
         expect.objectContaining({ type: "turn_recovery", action: "retrying" }),
       );
     } finally {
@@ -883,14 +715,17 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
   it("refreshes the response inactivity deadline on meaningful provider progress", () => {
     vi.useFakeTimers();
+
     try {
       const { runtime } = newInterviewer();
       const activeConnection = connection("active", []);
+
       const pending: PendingProviderTurn = {
         id: 24,
         kind: "candidate_text",
         text: "My answer",
       };
+
       runtime.state = { ...runtime.state, phase: "interviewing" };
       runtime.device = activeConnection;
       runtime.liveGeneration = 13;
@@ -919,14 +754,19 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
   it("replays committed PCM as one manually delimited candidate turn", () => {
     vi.useFakeTimers();
+
     try {
       const { runtime } = newInterviewer();
       const sent: string[] = [];
       const activeConnection = connection("active", sent);
       const realtimeInputs: unknown[] = [];
-      const session = {
-        sendRealtimeInput: vi.fn((input: unknown) => realtimeInputs.push(input)),
-      };
+
+      const session = fakeLiveSession({
+        sendRealtimeInput: vi.fn((input: Parameters<LiveSession["sendRealtimeInput"]>[0]) =>
+          realtimeInputs.push(input),
+        ),
+      });
+
       const pending: PendingProviderTurn = {
         id: 22,
         kind: "candidate_audio",
@@ -935,6 +775,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         committed: true,
         replayable: true,
       };
+
       runtime.state = {
         ...runtime.state,
         phase: "interviewing",
@@ -952,7 +793,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         { audio: { data: "AwQ=", mimeType: "audio/pcm;rate=24000" } },
         { activityEnd: {} },
       ]);
-      expect(sent.map((payload) => JSON.parse(payload))).toContainEqual({
+      expect(decodeFrames(sent)).toContainEqual({
         type: "status",
         status: "thinking",
       });
@@ -967,9 +808,13 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     const sent: string[] = [];
     const activeConnection = connection("active", sent);
     const realtimeInputs: unknown[] = [];
-    const session = {
-      sendRealtimeInput: vi.fn((input: unknown) => realtimeInputs.push(input)),
-    };
+
+    const session = fakeLiveSession({
+      sendRealtimeInput: vi.fn((input: Parameters<LiveSession["sendRealtimeInput"]>[0]) =>
+        realtimeInputs.push(input),
+      ),
+    });
+
     runtime.state = {
       ...runtime.state,
       phase: "interviewing",
@@ -987,9 +832,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       turns: "RUNTIME_CONTROL. Continue the current interview.",
       turnComplete: true,
     });
-    expect(realtimeInputs).toEqual([
-      { text: "RUNTIME_CONTROL. Continue the current interview." },
-    ]);
+    expect(realtimeInputs).toEqual([{ text: "RUNTIME_CONTROL. Continue the current interview." }]);
     runtime.clearPendingProviderTurn();
     runtime.lastStatus = "listening";
 
@@ -1014,9 +857,13 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     const sent: string[] = [];
     const activeConnection = connection("active", sent);
     const realtimeInputs: unknown[] = [];
-    const session = {
-      sendRealtimeInput: vi.fn((input: unknown) => realtimeInputs.push(input)),
-    };
+
+    const session = fakeLiveSession({
+      sendRealtimeInput: vi.fn((input: Parameters<LiveSession["sendRealtimeInput"]>[0]) =>
+        realtimeInputs.push(input),
+      ),
+    });
+
     runtime.state = { ...runtime.state, phase: "interviewing" };
     runtime.device = activeConnection;
     runtime.gemini = session;
@@ -1044,7 +891,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       kind: "candidate_text",
       text: "I would use tell-show-do.",
     });
-    expect(sent.map((payload) => JSON.parse(payload))).toContainEqual({
+    expect(decodeFrames(sent)).toContainEqual({
       type: "candidate_text_ack",
       accepted: true,
       turnComplete: true,
@@ -1064,7 +911,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       currentQuestion: "What communication strategy would you use?",
     };
     runtime.device = activeConnection;
-    runtime.gemini = { sendToolResponse };
+    runtime.gemini = fakeLiveSession({ sendToolResponse });
     runtime.liveGeneration = 22;
     runtime.openingStage = "complete";
     runtime.pendingQuestion = "How would you assess this child?";
@@ -1106,6 +953,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
   it("drops an incomplete audio turn without resuming its provider handle", () => {
     const { runtime } = newInterviewer();
+
     const pending: PendingProviderTurn = {
       id: 23,
       kind: "candidate_audio",
@@ -1114,6 +962,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       committed: false,
       replayable: true,
     };
+
     runtime.state = {
       ...runtime.state,
       phase: "interviewing",
@@ -1132,7 +981,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     const { runtime } = newInterviewer();
     const sent: string[] = [];
     const activeConnection = connection("active", sent);
-    const session = { sendRealtimeInput: vi.fn() };
+    const session = fakeLiveSession();
     runtime.state = { ...runtime.state, phase: "interviewing" };
     runtime.device = activeConnection;
     runtime.gemini = session;
@@ -1150,7 +999,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     const activeConnection = connection("active", sent);
     runtime.state = { ...runtime.state, phase: "interviewing" };
     runtime.device = activeConnection;
-    runtime.gemini = {};
+    runtime.gemini = fakeLiveSession();
     runtime.liveGeneration = 23;
     runtime.lastStatus = "listening";
 
@@ -1162,17 +1011,16 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     expect(runtime.inputTranscript).toBe("partial answer");
     expect(runtime.lastStatus).toBe("listening");
     expect(
-      sent
-        .filter((payload) => payload !== "binary")
-        .map((payload) => JSON.parse(payload))
-        .some((payload) => payload.type === "status" && payload.status === "thinking"),
+      decodeFrames(sent.filter((payload) => payload !== "binary")).some(
+        (payload) => payload.type === "status" && payload.status === "thinking",
+      ),
     ).toBe(false);
   });
 
   it("defers provider failure until terminal turn persistence releases its generation", () => {
     const { runtime } = newInterviewer();
     const activeConnection = connection("active", []);
-    const session = {};
+    const session = fakeLiveSession();
     runtime.state = { ...runtime.state, phase: "interviewing" };
     runtime.liveGeneration = 24;
     runtime.gemini = session;
@@ -1195,8 +1043,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       ...runtime.state,
       phase: "interviewing",
       interviewGeneration: "wake-generation",
-      openingStage:
-        "awaiting_confirmation" as unknown as PediatricInterviewerState["openingStage"],
+      openingStage: "awaiting_confirmation",
       casePresentation: "Here is your case. A four-year-old presents with pain.",
       currentQuestion:
         "Here is your case. A four-year-old presents with pain. Are you ready to begin?",
@@ -1207,9 +1054,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
     expect(runtime.openingStage).toBe("asking_first_question");
     expect(runtime.state.openingStage).toBe("asking_first_question");
-    expect(runtime.openingCaseText).toBe(
-      "Here is your case. A four-year-old presents with pain.",
-    );
+    expect(runtime.openingCaseText).toBe("Here is your case. A four-year-old presents with pain.");
     expect(runtime.lastStatus).toBe("thinking");
     expect(runtime.sql).toHaveBeenCalled();
   });
@@ -1244,9 +1089,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       pendingExchange: {
         question: "What is your primary assessment?",
         answer: "I would assess pain and safety.",
-        followUps: [
-          { question: "What next?", answer: "I would examine and obtain imaging." },
-        ],
+        followUps: [{ question: "What next?", answer: "I would examine and obtain imaging." }],
         activeQuestion: "What additional safety issue matters?",
       },
     };
@@ -1265,8 +1108,10 @@ describe("PediatricInterviewer lifecycle ownership", () => {
   it("replays only the authoritative pending probe after a fresh reconnect", async () => {
     const { runtime } = newInterviewer();
     const activeConnection = connection("active", []);
+
     const staleDisplay =
       "Here is your case. A four-year-old presents with pain. Are you ready to begin?";
+
     const pendingProbe = "What additional safety issue matters?";
     runtime.state = {
       ...runtime.state,
@@ -1289,10 +1134,11 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     runtime.resumeFreshGeminiSession(activeConnection);
 
     expect(runtime.askGemini).toHaveBeenCalledOnce();
-    const turn = vi.mocked(runtime.askGemini).mock.calls[0]?.[1] as {
-      turns: string;
-      turnComplete: true;
-    };
+
+    const turn = vi.mocked(runtime.askGemini).mock.calls[0]?.[1];
+
+    if (!turn) throw new Error("Expected a recovery turn");
+
     expect(turn.turnComplete).toBe(true);
     expect(turn.turns).toContain(pendingProbe);
     expect(turn.turns).not.toContain("Here is your case");
@@ -1301,17 +1147,19 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
   it("bounds Gemini Live setup and closes a session that connects after the deadline", async () => {
     vi.useFakeTimers();
+
     try {
       const { runtime } = newInterviewer();
       runtime.state = { ...runtime.state, phase: "interviewing" };
       runtime.liveGeneration = 31;
-      let resolveConnect: ((session: unknown) => void) | undefined;
+      let resolveConnect: ((session: LiveSession) => void) | undefined;
       genaiMocks.liveConnect.mockReturnValue(
         new Promise((resolve) => {
           resolveConnect = resolve;
         }),
       );
-      const lateSession = { close: vi.fn() };
+      const lateSession = fakeLiveSession();
+
       const attempt = runtime.openGeminiSession(
         undefined,
         buildInterviewTopic(["behavior_guidance"]),
@@ -1322,6 +1170,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         },
         31,
       );
+
       const rejection = expect(attempt).rejects.toThrow(
         `Gemini Live setup exceeded ${GEMINI_CONNECT_TIMEOUT_MS} ms`,
       );
@@ -1340,14 +1189,19 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
   it("auto-commits a candidate turn at the bounded input deadline", async () => {
     vi.useFakeTimers();
+
     try {
       const { runtime } = newInterviewer();
       const sent: string[] = [];
       const activeConnection = connection("active", sent);
       const realtimeInputs: unknown[] = [];
-      const session = {
-        sendRealtimeInput: vi.fn((input: unknown) => realtimeInputs.push(input)),
-      };
+
+      const session = fakeLiveSession({
+        sendRealtimeInput: vi.fn((input: Parameters<LiveSession["sendRealtimeInput"]>[0]) =>
+          realtimeInputs.push(input),
+        ),
+      });
+
       runtime.state = { ...runtime.state, phase: "interviewing" };
       runtime.device = activeConnection;
       runtime.gemini = session;
@@ -1363,7 +1217,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         kind: "candidate_audio",
         committed: true,
       });
-      expect(sent.map((payload) => JSON.parse(payload))).toContainEqual(
+      expect(decodeFrames(sent)).toContainEqual(
         expect.objectContaining({ type: "turn_recovery", action: "auto_committed" }),
       );
       runtime.clearPendingProviderTurn();

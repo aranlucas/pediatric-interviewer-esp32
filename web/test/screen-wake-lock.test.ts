@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  holdScreenWakeLock,
-  screenWakeLockWarning,
-} from "../lib/screen-wake-lock";
+import { holdScreenWakeLock, screenWakeLockWarning } from "../lib/screen-wake-lock";
 
 const IOS_SAFARI_USER_AGENT =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) " +
@@ -24,12 +21,14 @@ class FakeVisibilityDocument {
 
   setVisibility(visibilityState: DocumentVisibilityState) {
     this.visibilityState = visibilityState;
+
     for (const listener of this.listeners) listener();
   }
 }
 
 function fakeSentinel() {
   let releaseListener: (() => void) | undefined;
+
   const sentinel = {
     released: false,
     addEventListener: vi.fn(
@@ -40,6 +39,7 @@ function fakeSentinel() {
       releaseListener?.();
     }),
   };
+
   return sentinel;
 }
 
@@ -48,13 +48,14 @@ describe("screen wake lock", () => {
     const visibilityDocument = new FakeVisibilityDocument();
     const sentinel = fakeSentinel();
     const onStateChange = vi.fn();
-    const request = vi.fn(async () => sentinel as unknown as WakeLockSentinel);
+    const request = vi.fn(async () => sentinel);
 
     const stop = holdScreenWakeLock({
       document: visibilityDocument,
       onStateChange,
       wakeLock: { request },
     });
+
     await vi.waitFor(() => expect(request).toHaveBeenCalledWith("screen"));
     expect(onStateChange).toHaveBeenCalledWith("active");
 
@@ -66,15 +67,17 @@ describe("screen wake lock", () => {
     const visibilityDocument = new FakeVisibilityDocument();
     const firstSentinel = fakeSentinel();
     const secondSentinel = fakeSentinel();
+
     const request = vi
       .fn()
-      .mockResolvedValueOnce(firstSentinel as unknown as WakeLockSentinel)
-      .mockResolvedValueOnce(secondSentinel as unknown as WakeLockSentinel);
+      .mockResolvedValueOnce(firstSentinel)
+      .mockResolvedValueOnce(secondSentinel);
 
     const stop = holdScreenWakeLock({
       document: visibilityDocument,
       wakeLock: { request },
     });
+
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
 
     visibilityDocument.setVisibility("hidden");
@@ -90,15 +93,17 @@ describe("screen wake lock", () => {
     const visibilityDocument = new FakeVisibilityDocument();
     const firstSentinel = fakeSentinel();
     const secondSentinel = fakeSentinel();
+
     const request = vi
       .fn()
-      .mockResolvedValueOnce(firstSentinel as unknown as WakeLockSentinel)
-      .mockResolvedValueOnce(secondSentinel as unknown as WakeLockSentinel);
+      .mockResolvedValueOnce(firstSentinel)
+      .mockResolvedValueOnce(secondSentinel);
 
     const stop = holdScreenWakeLock({
       document: visibilityDocument,
       wakeLock: { request },
     });
+
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
 
     await firstSentinel.release();
@@ -127,9 +132,7 @@ describe("screen wake lock", () => {
       wakeLock: { request: vi.fn().mockRejectedValue(new Error("denied")) },
     });
 
-    await vi.waitFor(() =>
-      expect(onStateChange).toHaveBeenCalledWith("request-failed"),
-    );
+    await vi.waitFor(() => expect(onStateChange).toHaveBeenCalledWith("request-failed"));
   });
 });
 

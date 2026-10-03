@@ -1,5 +1,12 @@
+/** The lifecycle only needs release notification and advisory lock ownership. */
+export interface ScreenLock {
+  readonly released: boolean;
+  release(): Promise<void>;
+  addEventListener(type: "release", listener: () => void, options?: AddEventListenerOptions): void;
+}
+
 type ScreenWakeLockProvider = {
-  request(type: "screen"): Promise<WakeLockSentinel>;
+  request(type: "screen"): Promise<ScreenLock>;
 };
 
 type VisibilityDocument = {
@@ -14,10 +21,7 @@ type ScreenWakeLockEnvironment = {
   wakeLock?: ScreenWakeLockProvider;
 };
 
-export type ScreenWakeLockState =
-  | "active"
-  | "request-failed"
-  | "unsupported";
+export type ScreenWakeLockState = "active" | "request-failed" | "unsupported";
 
 type ScreenWakeLockBrowser = {
   maxTouchPoints?: number;
@@ -33,8 +37,8 @@ export function screenWakeLockWarning(
 
   const isAppleMobile =
     /iPad|iPhone|iPod/.test(browser.userAgent) ||
-    (/Macintosh/.test(browser.userAgent) &&
-      (browser.maxTouchPoints ?? 0) > 1);
+    (/Macintosh/.test(browser.userAgent) && (browser.maxTouchPoints ?? 0) > 1);
+
   const isSafari =
     /Version\/[\d.]+.*Safari/.test(browser.userAgent) &&
     !/CriOS|FxiOS|EdgiOS|OPiOS/.test(browser.userAgent);
@@ -42,18 +46,23 @@ export function screenWakeLockWarning(
   if (state === "unsupported" && isAppleMobile) {
     return "Screen stay-awake requires iOS or iPadOS 16.4 or newer. Update iOS, or temporarily set Auto-Lock to Never.";
   }
+
   if (state === "unsupported" && isSafari) {
     return "Screen stay-awake requires Safari 16.4 or newer. Update Safari, or keep this device awake manually.";
   }
+
   if (isAppleMobile && browser.standalone) {
     return "Safari could not keep the screen awake in this Home Screen app. Update to iOS or iPadOS 18.4 or newer, or reopen the interview in Safari.";
   }
+
   if (isAppleMobile || isSafari) {
     return "Safari could not keep the screen awake. Keep this tab visible and temporarily set Auto-Lock to Never.";
   }
+
   if (state === "unsupported") {
     return "This browser cannot keep the screen awake. Keep the device awake manually during the interview.";
   }
+
   return "The browser could not keep the screen awake. Keep the device awake manually during the interview.";
 }
 
@@ -62,27 +71,24 @@ export function screenWakeLockWarning(
  * Browsers release wake locks when a document is hidden, so the lock is
  * requested again when an active interview becomes visible again.
  */
-export function holdScreenWakeLock(
-  environment: ScreenWakeLockEnvironment = {},
-): () => void {
+export function holdScreenWakeLock(environment: ScreenWakeLockEnvironment = {}): () => void {
   const visibilityDocument =
-    environment.document ??
-    (typeof document === "undefined" ? undefined : document);
+    environment.document ?? (typeof document === "undefined" ? undefined : document);
+
   const wakeLock =
     environment.wakeLock ??
-    (typeof navigator !== "undefined" && "wakeLock" in navigator
-      ? navigator.wakeLock
-      : undefined);
+    (typeof navigator !== "undefined" && "wakeLock" in navigator ? navigator.wakeLock : undefined);
 
   if (!visibilityDocument || !wakeLock) {
     environment.onStateChange?.("unsupported");
+
     return () => undefined;
   }
 
   let requesting = false;
   let releaseRetries = 0;
   let stopped = false;
-  let sentinel: WakeLockSentinel | undefined;
+  let sentinel: ScreenLock | undefined;
 
   const request = async () => {
     if (
@@ -95,23 +101,31 @@ export function holdScreenWakeLock(
     }
 
     requesting = true;
+
     try {
       const nextSentinel = await wakeLock.request("screen");
+
       if (stopped) {
         await nextSentinel.release();
+
         return;
       }
+
       sentinel = nextSentinel;
       environment.onStateChange?.("active");
       nextSentinel.addEventListener(
         "release",
         () => {
           if (sentinel === nextSentinel) sentinel = undefined;
+
           if (stopped || visibilityDocument.visibilityState !== "visible") return;
+
           if (releaseRetries >= 2) {
             environment.onStateChange?.("request-failed");
+
             return;
           }
+
           releaseRetries += 1;
           // The OS may revoke an advisory lock while the tab stays visible.
           // Reacquire on a microtask so the released sentinel has fully settled.
@@ -134,20 +148,15 @@ export function holdScreenWakeLock(
     }
   };
 
-  visibilityDocument.addEventListener(
-    "visibilitychange",
-    handleVisibilityChange,
-  );
+  visibilityDocument.addEventListener("visibilitychange", handleVisibilityChange);
   void request();
 
   return () => {
     stopped = true;
-    visibilityDocument.removeEventListener(
-      "visibilitychange",
-      handleVisibilityChange,
-    );
+    visibilityDocument.removeEventListener("visibilitychange", handleVisibilityChange);
     const activeSentinel = sentinel;
     sentinel = undefined;
+
     if (activeSentinel && !activeSentinel.released) {
       void activeSentinel.release();
     }
