@@ -6,5 +6,6 @@
     "node": true,
     "es2026": true
   },
-  "ignorePatterns": [".next/**", "out/**", "build/**", "next-env.d.ts", "cloudflare-env.d.ts"]
+  "ignorePatterns": [".next/**", "out/**", "build/**", "next-env.d.ts", "cloudflare-env.d.ts"],
+  "extends": ["../.oxlintrc.json"]
 }

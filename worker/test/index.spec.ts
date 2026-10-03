@@ -8,6 +8,8 @@ import {
   resolveInterviewConfiguration,
 } from "../src/interview-config";
 import {
+  shouldRetryGeminiError,
+  GeminiProviderError,
   buildCheatsheetMarkdown,
   buildInterviewCheatsheet,
   buildInterviewMarkdown,
@@ -17,6 +19,7 @@ import {
   reportObjectKeys,
   storeInterviewReport,
   type StoredInterviewReport,
+  type InterviewExchange,
 } from "../src/interview-report";
 import { isResponseComplete, shouldEndTurn } from "../src/turn-completion";
 import {
@@ -39,10 +42,7 @@ import {
   TURN_DISPOSITION_TOOL,
 } from "../src/gemini-live-protocol";
 import { openingPresentationForDisplay, questionForDisplay } from "../src/interview-display";
-import {
-  cloneInterviewExchanges,
-  finalizeInterviewReport,
-} from "../src/interview-finalization";
+import { cloneInterviewExchanges, finalizeInterviewReport } from "../src/interview-finalization";
 import { parseInterviewerDeviceMessage } from "../src/interviewer-protocol";
 import {
   decodeOpeningSpeech,
@@ -82,6 +82,7 @@ function pcm16Wav(pcm: Uint8Array, sampleRate = 24_000): Uint8Array {
   wav.write("data", 36, "ascii");
   wav.writeUInt32LE(pcm.byteLength, 40);
   Buffer.from(pcm).copy(wav, 44);
+
   return wav;
 }
 
@@ -113,9 +114,7 @@ describe("Pediatric oral-board interviewer", () => {
       }),
     );
 
-    await expect(
-      synthesizeCloudflareSpeech({ run } as unknown as Ai, "Are you ready to begin?"),
-    ).resolves.toEqual({
+    await expect(synthesizeCloudflareSpeech({ run }, "Are you ready to begin?")).resolves.toEqual({
       pcm: Uint8Array.from([1, 0, 2, 0]),
       sampleRate: CLOUDFLARE_TTS_SAMPLE_RATE,
     });
@@ -138,9 +137,9 @@ describe("Pediatric oral-board interviewer", () => {
   it("rejects malformed Cloudflare PCM before device playback", async () => {
     const run = vi.fn().mockResolvedValue(new Response(Uint8Array.from([1, 2, 3])));
 
-    await expect(
-      synthesizeCloudflareSpeech({ run } as unknown as Ai, "Synthetic speech"),
-    ).rejects.toThrow("invalid PCM16 audio");
+    await expect(synthesizeCloudflareSpeech({ run }, "Synthetic speech")).rejects.toThrow(
+      "invalid PCM16 audio",
+    );
   });
 
   it("builds a non-stored, bounded structured opening-case interaction", () => {
@@ -215,9 +214,7 @@ describe("Pediatric oral-board interviewer", () => {
       ),
     ).toBe(false);
     expect(
-      isValidOpeningCasePresentation(
-        "Based on what you observe, what are your initial thoughts?",
-      ),
+      isValidOpeningCasePresentation("Based on what you observe, what are your initial thoughts?"),
     ).toBe(false);
     expect(
       isValidOpeningCasePresentation(
@@ -284,9 +281,11 @@ describe("Pediatric oral-board interviewer", () => {
     );
     const output = resamplePcm16(source, 24_000, 16_000);
     expect(output.byteLength).toBe(8);
+
     const samples = Array.from({ length: 4 }, (_, index) =>
       new DataView(output.buffer).getInt16(index * 2, true),
     );
+
     expect(samples).toEqual([0, 1_500, 3_000, 4_500]);
   });
 
@@ -307,6 +306,7 @@ describe("Pediatric oral-board interviewer", () => {
       geminiLiveConfig(PEDIATRIC_TOPICS[0], { sessionResumptionHandle: "resume-token" })
         .sessionResumption,
     ).toEqual({ handle: "resume-token" });
+
     const recoveryInstruction = String(
       geminiLiveConfig(PEDIATRIC_TOPICS[0], {
         recoveryContext: {
@@ -317,23 +317,20 @@ describe("Pediatric oral-board interviewer", () => {
         },
       }).systemInstruction,
     );
+
     expect(recoveryInstruction).toContain("Do not generate or substitute a new case");
     expect(recoveryInstruction).toContain("A four-year-old presents with pain");
     expect(recoveryInstruction).toContain("persisted 2 of 6 scored exchanges");
     expect(recoveryInstruction).not.toContain("readiness confirmation");
     expect(recoveryInstruction).toContain("<SILENT_RECOVERY_CONTEXT>");
-    expect(recoveryInstruction).toContain(
-      "Never introduce, quote, paraphrase, or read it aloud",
-    );
+    expect(recoveryInstruction).toContain("Never introduce, quote, paraphrase, or read it aloud");
     expect(recoveryInstruction).toContain(
       "not a request to repeat the case merely because it discusses",
     );
     expect(recoveryInstruction).toContain(
       "Repeat the case only when the candidate explicitly asks",
     );
-    expect(recoveryInstruction).toContain(
-      "when a RESUME_INTERVIEW command explicitly directs you",
-    );
+    expect(recoveryInstruction).toContain("when a RESUME_INTERVIEW command explicitly directs you");
     expect(String(config.systemInstruction)).toContain("Never ask whether the candidate is ready");
     expect(config.thinkingConfig).toEqual({
       thinkingLevel: "MINIMAL",
@@ -353,11 +350,7 @@ describe("Pediatric oral-board interviewer", () => {
               properties: {
                 disposition: {
                   type: "string",
-                  enum: [
-                    "advance_skillset",
-                    "probe_current_answer",
-                    "provide_case_information",
-                  ],
+                  enum: ["advance_skillset", "probe_current_answer", "provide_case_information"],
                 },
               },
               required: ["disposition"],
@@ -387,9 +380,7 @@ describe("Pediatric oral-board interviewer", () => {
     expect(instruction).toContain("First probe: open and neutral");
     expect(instruction).toContain("Later probes: name the missing dimension, never its content");
     expect(instruction).toContain("Never probe the same skillset more than four times");
-    expect(instruction).toContain(
-      "classify advance_skillset even if the answer is still thin",
-    );
+    expect(instruction).toContain("classify advance_skillset even if the answer is still thin");
     expect(instruction).toContain("no more than four times per skillset");
     expect(instruction).not.toContain(
       "A shallow but complete answer gets one neutral opportunity to elaborate",
@@ -417,9 +408,13 @@ describe("Pediatric oral-board interviewer", () => {
     expect(instruction).toContain(
       "Never name, announce, restate, paraphrase, or introduce the selected topic",
     );
-    expect(instruction).toContain("On BEGIN_INTERVIEW, ask only the first focused clinical question");
+    expect(instruction).toContain(
+      "On BEGIN_INTERVIEW, ask only the first focused clinical question",
+    );
     expect(instruction).toContain("runtime presents the generated case separately");
-    expect(instruction).toContain("runtime generates and presents the clinical vignette outside Gemini Live");
+    expect(instruction).toContain(
+      "runtime generates and presents the clinical vignette outside Gemini Live",
+    );
     expect(instruction).not.toContain("Generate a new clinical vignette");
     expect(instruction).not.toContain("state the topic, present the generated vignette");
     expect(instruction).not.toContain("medical advice");
@@ -427,12 +422,8 @@ describe("Pediatric oral-board interviewer", () => {
   });
 
   it("uses the persisted exchange count to direct every classified turn", () => {
-    expect(turnDispositionToolOutput("advance_skillset", 3)).toContain(
-      "Ask clinical question 5",
-    );
-    expect(turnDispositionToolOutput("advance_skillset", 5)).toContain(
-      "scored exchange 6 of 6",
-    );
+    expect(turnDispositionToolOutput("advance_skillset", 3)).toContain("Ask clinical question 5");
+    expect(turnDispositionToolOutput("advance_skillset", 5)).toContain("scored exchange 6 of 6");
     expect(turnDispositionToolOutput("advance_skillset", 5)).toContain("Ask no further question");
     expect(turnDispositionToolOutput("probe_current_answer", 3)).toContain(
       "this turn does not advance it",
@@ -440,9 +431,7 @@ describe("Pediatric oral-board interviewer", () => {
     expect(turnDispositionToolOutput("provide_case_information", 3)).toContain(
       "this turn does not advance it",
     );
-    expect(turnDispositionToolOutput("advance_skillset", 7, 8)).toContain(
-      "scored exchange 8 of 8",
-    );
+    expect(turnDispositionToolOutput("advance_skillset", 7, 8)).toContain("scored exchange 8 of 8");
   });
 
   it("keeps device defaults while accepting configurable combo interviews", () => {
@@ -457,6 +446,7 @@ describe("Pediatric oral-board interviewer", () => {
       questionCount: 3,
       difficulty: "hard",
     });
+
     expect(configuration).toEqual({
       topicIds: ["behavior_guidance", "pulp_therapy", "growth_development", "advocacy_education"],
       questionCount: 4,
@@ -476,9 +466,11 @@ describe("Pediatric oral-board interviewer", () => {
 
   it("configures a hard combo case for the requested question target", () => {
     const combo = buildInterviewTopic(["behavior_guidance", "pulp_therapy"]);
+
     const instruction = String(
       geminiLiveConfig(combo, { questionCount: 8, difficulty: "hard" }).systemInstruction,
     );
+
     expect(instruction).toContain("Combo: Behavior Guidance + Pulp Therapy");
     expect(instruction).toContain("8-QUESTION PLAN");
     expect(instruction).toContain("Level: hard");
@@ -503,6 +495,7 @@ describe("Pediatric oral-board interviewer", () => {
       "Advocacy and Education",
       "Elements of Pediatric Dental Practice",
     ]);
+
     for (const topic of PEDIATRIC_TOPICS) {
       expect(topic.studyMaterial.length).toBeGreaterThan(20);
       expect(topic.caseScope.length).toBeGreaterThan(80);
@@ -521,9 +514,7 @@ describe("Pediatric oral-board interviewer", () => {
         exchanges: evaluation.exchanges.slice(0, 2),
       }).exchanges,
     ).toHaveLength(2);
-    expect(() =>
-      interviewEvaluationSchema.parse({ ...evaluation, exchanges: [] }),
-    ).toThrow();
+    expect(() => interviewEvaluationSchema.parse({ ...evaluation, exchanges: [] })).toThrow();
     expect(() =>
       interviewEvaluationSchema.parse({
         ...evaluation,
@@ -534,8 +525,10 @@ describe("Pediatric oral-board interviewer", () => {
 
   it("accepts descriptive skillset labels longer than 120 characters", () => {
     const evaluation = structuredClone(sampleReport().evaluation);
+
     const descriptiveSkillset =
       "Assessment and management across clinical findings, caregiver communication, patient safety, informed consent, follow-up, and escalation planning";
+
     expect(descriptiveSkillset.length).toBeGreaterThan(120);
     evaluation.scoreSummary[1] = {
       ...evaluation.scoreSummary[0],
@@ -551,14 +544,17 @@ describe("Pediatric oral-board interviewer", () => {
 
   it("pins the response schema to the number of exchanges actually answered", async () => {
     const report = sampleReport();
+
     const transcript = report.evaluation.exchanges.slice(0, 3).map(({ question, answer }) => ({
       question,
       answer,
     }));
+
     const shortEvaluation = {
       ...structuredClone(report.evaluation),
       exchanges: structuredClone(report.evaluation.exchanges).slice(0, 3),
     };
+
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
         candidates: [{ content: { parts: [{ text: JSON.stringify(shortEvaluation) }] } }],
@@ -583,9 +579,7 @@ describe("Pediatric oral-board interviewer", () => {
     expect(requestBody.systemInstruction.parts[0].text).toContain(
       "This interview ended after 3 of 8 planned questions",
     );
-    expect(requestBody.systemInstruction.parts[0].text).toContain(
-      "configured difficulty was hard",
-    );
+    expect(requestBody.systemInstruction.parts[0].text).toContain("configured difficulty was hard");
     expect(JSON.parse(requestBody.contents[0].parts[0].text).configuration).toEqual({
       questionCount: 8,
       difficulty: "hard",
@@ -594,13 +588,16 @@ describe("Pediatric oral-board interviewer", () => {
 
   it("requests a structured Gemini review and preserves the recorded transcript", async () => {
     const report = sampleReport();
+
     const transcript = report.evaluation.exchanges.map(({ question, answer }) => ({
       question,
       answer,
     }));
+
     const modelEvaluation = structuredClone(report.evaluation);
     modelEvaluation.exchanges[0].question = "Model rewrote the question.";
     modelEvaluation.exchanges[0].answer = "Model rewrote the answer.";
+
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
         candidates: [
@@ -642,10 +639,12 @@ describe("Pediatric oral-board interviewer", () => {
 
   it("rejects evaluator output that invents or drops transcript exchanges", async () => {
     const report = sampleReport();
+
     const transcript = report.evaluation.exchanges.map(({ question, answer }) => ({
       question,
       answer,
     }));
+
     const shortEvaluation = structuredClone(report.evaluation);
     shortEvaluation.exchanges.pop();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -665,17 +664,18 @@ describe("Pediatric oral-board interviewer", () => {
 
   it("sends examiner follow-ups to the evaluator and restores them verbatim", async () => {
     const report = sampleReport();
-    const transcript = report.evaluation.exchanges.map(({ question, answer }, index) => ({
-      question,
-      answer,
-      ...(index === 0
-        ? {
-            followUps: [
-              { question: "What would change that plan?", answer: "A change in cooperation." },
-            ],
-          }
-        : {}),
-    }));
+
+    const transcript = report.evaluation.exchanges.map(({ question, answer }, index) => {
+      const exchange: InterviewExchange = { question, answer };
+
+      if (index === 0)
+        exchange.followUps = [
+          { question: "What would change that plan?", answer: "A change in cooperation." },
+        ];
+
+      return exchange;
+    });
+
     // The model never echoes followUps back; the runtime reattaches them.
     const modelEvaluation = structuredClone(report.evaluation);
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -692,9 +692,9 @@ describe("Pediatric oral-board interviewer", () => {
 
     expect(evaluation.exchanges[0].followUps).toEqual(transcript[0].followUps);
     expect(evaluation.exchanges[1].followUps).toBeUndefined();
-    const requestBody = JSON.parse(
-      String(vi.mocked(globalThis.fetch).mock.calls[0][1]?.body),
-    );
+
+    const requestBody = JSON.parse(String(vi.mocked(globalThis.fetch).mock.calls[0][1]?.body));
+
     const evaluationInput = JSON.parse(requestBody.contents[0].parts[0].text);
     expect(evaluationInput.exchanges[0].followUps).toHaveLength(1);
     // Prompted content must be credited but must not score the same as
@@ -713,6 +713,7 @@ describe("Pediatric oral-board interviewer", () => {
       { question: "What would change that plan?", answer: "A change in cooperation." },
     ];
     const cheatsheet = sampleCheatsheet();
+
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
         candidates: [{ content: { parts: [{ text: JSON.stringify(cheatsheet) }] } }],
@@ -754,16 +755,20 @@ describe("Pediatric oral-board interviewer", () => {
   it("omits the cheat sheet object when generation failed", async () => {
     const withoutCheatsheet = sampleReport();
     const puts: string[] = [];
+
     const bucket = {
       put: async (key: string) => {
         puts.push(key);
       },
       delete: async () => undefined,
-    } as unknown as R2Bucket;
+    };
 
     const stored = await storeInterviewReport(bucket, withoutCheatsheet);
 
-    expect(puts).toEqual([reportObjectKeys(withoutCheatsheet).json, reportObjectKeys(withoutCheatsheet).markdown]);
+    expect(puts).toEqual([
+      reportObjectKeys(withoutCheatsheet).json,
+      reportObjectKeys(withoutCheatsheet).markdown,
+    ]);
     expect(stored.cheatsheetKey).toBeUndefined();
   });
 
@@ -812,12 +817,14 @@ describe("Pediatric oral-board interviewer", () => {
   it("stores private JSON and Markdown objects under the report ID", async () => {
     const report = sampleReport();
     const puts: Array<{ key: string; value: string; options: R2PutOptions }> = [];
+
     const bucket = {
       async put(key: string, value: string, options: R2PutOptions) {
         puts.push({ key, value, options });
-        return {} as R2Object;
+
+        return null;
       },
-    } as unknown as R2Bucket;
+    };
 
     await expect(storeInterviewReport(bucket, report)).resolves.toEqual({
       jsonKey: "pediatric-oral-boards/reports/report-123.json",
@@ -838,15 +845,17 @@ describe("Pediatric oral-board interviewer", () => {
   it("keeps successful deterministic writes in place for an idempotent retry", async () => {
     const report = sampleReport();
     const deleted: string[][] = [];
+
     const bucket = {
       async put(key: string) {
         if (key.endsWith(".md")) throw new Error("R2 unavailable");
-        return {} as R2Object;
+
+        return null;
       },
       async delete(keys: string[]) {
         deleted.push(keys);
       },
-    } as unknown as R2Bucket;
+    };
 
     await expect(storeInterviewReport(bucket, report)).rejects.toThrow("R2 unavailable");
     expect(deleted).toEqual([]);
@@ -855,11 +864,15 @@ describe("Pediatric oral-board interviewer", () => {
   it("clones nested exchanges and finalizes one typed report snapshot", async () => {
     const report = sampleReport();
     const topic = buildInterviewTopic(["pulp_therapy"]);
-    const transcript = report.evaluation.exchanges.map(({ question, answer, followUps }) => ({
-      question,
-      answer,
-      ...(followUps ? { followUps } : {}),
-    }));
+
+    const transcript = report.evaluation.exchanges.map(({ question, answer, followUps }) => {
+      const exchange: InterviewExchange = { question, answer };
+
+      if (followUps) exchange.followUps = followUps;
+
+      return exchange;
+    });
+
     const source = [
       {
         question: "What is your first step?",
@@ -867,6 +880,7 @@ describe("Pediatric oral-board interviewer", () => {
         followUps: [{ question: "Why?", answer: "To prioritize safety." }],
       },
     ];
+
     const cloned = cloneInterviewExchanges(source);
     cloned[0].followUps![0].answer = "Changed after snapshot.";
     expect(source[0].followUps[0].answer).toBe("To prioritize safety.");
@@ -883,13 +897,15 @@ describe("Pediatric oral-board interviewer", () => {
         }),
       );
     const stored: Array<{ key: string; value: string }> = [];
+
     const bucket = {
       put: vi.fn(async (key: string, value: string) => {
         stored.push({ key, value });
       }),
-    } as unknown as R2Bucket;
-    const retry = async <T>(operation: (attempt: number) => Promise<T>): Promise<T> =>
-      operation(1);
+    };
+
+    const retry = async <T>(operation: (attempt: number) => Promise<T>): Promise<T> => operation(1);
+
     const casePresentation =
       "Here is your case. A four-year-old presents with swelling around a restored molar.";
 
@@ -917,9 +933,9 @@ describe("Pediatric oral-board interviewer", () => {
       "pediatric-oral-boards/reports/report-snapshot.md",
       "pediatric-oral-boards/reports/report-snapshot-cheatsheet.md",
     ]);
-    const storedJson = JSON.parse(
-      stored.find(({ key }) => key.endsWith(".json"))?.value ?? "{}",
-    );
+
+    const storedJson = JSON.parse(stored.find(({ key }) => key.endsWith(".json"))?.value ?? "{}");
+
     expect(storedJson.casePresentation).toBe(casePresentation);
     const storedMarkdown = stored.find(({ key }) => key.endsWith(".md"))?.value ?? "";
     expect(storedMarkdown).toContain("## Original case presentation");
@@ -1041,6 +1057,7 @@ describe("Gemini Live turn boundaries", () => {
       { text: "late audio/transcript content" },
       { turnComplete: true },
     ];
+
     expect(stream.filter((signal) => shouldEndTurn(signal, false))).toHaveLength(1);
     expect(shouldEndTurn(stream[0], true)).toBe(false);
     expect(shouldEndTurn(stream[2], true)).toBe(true);
@@ -1148,9 +1165,11 @@ describe("Gemini Live lifecycle guards", () => {
     const frameBytes = 4_800;
     const startedAt = 1_000;
     const acceptedFrames = Math.floor(MAX_INPUT_PCM_BYTES_PER_SECOND / frameBytes);
+
     for (let index = 0; index < acceptedFrames; index += 1) {
       expect(guard.accept(frameBytes, startedAt + index)).toBe(true);
     }
+
     expect(guard.accept(frameBytes, startedAt + acceptedFrames)).toBe(false);
     expect(guard.accept(frameBytes, startedAt + 1_001)).toBe(true);
   });
@@ -1163,5 +1182,23 @@ describe("Gemini Live lifecycle guards", () => {
     expect(isBoundedProviderAudio("AA==")).toBe(true);
     expect(isBoundedProviderAudio("")).toBe(false);
     expect(isBoundedProviderAudio("A".repeat(512 * 1024 + 1))).toBe(false);
+  });
+});
+
+describe("provider error retry boundary", () => {
+  it("preserves arbitrary JavaScript rejection values without treating them as provider status", () => {
+    for (const rejection of [
+      undefined,
+      null,
+      "synthetic failure",
+      42,
+      { retryable: false },
+      new Error("synthetic"),
+    ]) {
+      expect(shouldRetryGeminiError(rejection)).toBe(true);
+    }
+
+    expect(shouldRetryGeminiError(new GeminiProviderError("synthetic", 400, false))).toBe(false);
+    expect(shouldRetryGeminiError(new GeminiProviderError("synthetic", 503, true))).toBe(true);
   });
 });

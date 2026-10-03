@@ -1,6 +1,9 @@
 export const TOTAL_QUESTIONS = 6;
+
 export const MIN_QUESTIONS = 3;
+
 export const MAX_QUESTIONS = 10;
+
 export const QUESTION_COUNT_OPTIONS = Array.from(
   { length: MAX_QUESTIONS - MIN_QUESTIONS + 1 },
   (_, index) => MIN_QUESTIONS + index,
@@ -11,7 +14,9 @@ export const DIFFICULTY_OPTIONS = [
   { id: "standard", label: "Standard", detail: "Realistic board-style uncertainty" },
   { id: "hard", label: "Hard", detail: "Complex trade-offs and evolving findings" },
 ] as const;
+
 export type InterviewDifficulty = (typeof DIFFICULTY_OPTIONS)[number]["id"];
+
 export const DEFAULT_DIFFICULTY: InterviewDifficulty = "standard";
 
 export const TOPICS = [
@@ -27,7 +32,11 @@ export const TOPICS = [
     label: "Diagnosis, Oral Pathology, Oral Radiology & Oral Medicine",
     short: "Diagnosis & Pathology",
   },
-  { id: "prevention_health_promotion", label: "Prevention & Health Promotion", short: "Prevention" },
+  {
+    id: "prevention_health_promotion",
+    label: "Prevention & Health Promotion",
+    short: "Prevention",
+  },
   {
     id: "caries_management_restorative",
     label: "Caries Diagnosis, Management & Restorative Treatment",
@@ -48,6 +57,7 @@ export const TOPICS = [
 ] as const;
 
 export type TopicId = (typeof TOPICS)[number]["id"];
+
 export type InterviewStatus =
   | "idle"
   | "thinking"
@@ -99,14 +109,20 @@ export type InterviewState = {
 
 export function averageScore(evaluation?: Evaluation): number | null {
   if (!evaluation?.scoreSummary.length) return null;
-  return evaluation.scoreSummary.reduce((total, item) => total + item.score, 0) /
-    evaluation.scoreSummary.length;
+
+  return (
+    evaluation.scoreSummary.reduce((total, item) => total + item.score, 0) /
+    evaluation.scoreSummary.length
+  );
 }
 
 export function outcomeLabel(outcome?: Evaluation["outcome"]): string {
   if (outcome === "pass") return "Pass";
+
   if (outcome === "borderline") return "Borderline";
+
   if (outcome === "not_yet") return "Not yet";
+
   return "Pending";
 }
 
@@ -116,14 +132,13 @@ export function questionCountForSelection(requested: number, topicCount: number)
 
 export function topicSelectionLabel(topicIds: readonly TopicId[]): string {
   const topics = TOPICS.filter((topic) => topicIds.includes(topic.id));
+
   if (topics.length === 1) return topics[0].short;
+
   return `${topics.length}-topic combo`;
 }
 
-export function statusCopy(
-  status: InterviewStatus,
-  questionCount = TOTAL_QUESTIONS,
-): { label: string; detail: string } {
+export function statusCopy(status: InterviewStatus, questionCount = TOTAL_QUESTIONS) {
   switch (status) {
     case "listening":
       return { label: "Listening", detail: "Speak naturally. Angry Cat advances when you pause." };
@@ -168,10 +183,7 @@ export function interviewKeepsScreenAwake(status: InterviewStatus): boolean {
   );
 }
 
-export function interviewIsRunning(
-  status: InterviewStatus,
-  starting = false,
-): boolean {
+export function interviewIsRunning(status: InterviewStatus, starting = false): boolean {
   return (
     starting ||
     status === "thinking" ||

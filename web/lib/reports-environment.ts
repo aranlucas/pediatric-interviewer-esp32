@@ -11,7 +11,8 @@ export type ReportsEnv = CloudflareEnv & {
 export async function reportsEnvironment(): Promise<ReportsEnv | null> {
   try {
     const { env } = await getCloudflareContext({ async: true });
-    return env as ReportsEnv;
+
+    return env;
   } catch {
     return null;
   }
@@ -19,14 +20,16 @@ export async function reportsEnvironment(): Promise<ReportsEnv | null> {
 
 export function reportsTimezone(env: ReportsEnv): string {
   const timezone = env.REPORTS_TIMEZONE?.trim() || DEFAULT_REPORTS_TIMEZONE;
+
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format();
+
     return timezone;
   } catch {
     return DEFAULT_REPORTS_TIMEZONE;
   }
 }
 
-export function publicReportsEnabled(env: ReportsEnv): boolean {
+export function publicReportsEnabled(env: { PUBLIC_REPORTS_ENABLED?: string }): boolean {
   return env.PUBLIC_REPORTS_ENABLED?.trim().toLowerCase() === "true";
 }

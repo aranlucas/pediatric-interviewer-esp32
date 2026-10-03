@@ -10,13 +10,14 @@ export type WorkerLogLevel = "info" | "warn" | "error";
 export function workerLog(
   level: WorkerLogLevel,
   event: string,
-  fields: Record<string, unknown> = {},
+  fields: Record<string, string | number | boolean | null | undefined | readonly string[]> = {},
 ): void {
   const record = {
     ...fields,
     message: event,
     event,
   };
+
   if (level === "error") {
     console.error(record);
   } else if (level === "warn") {

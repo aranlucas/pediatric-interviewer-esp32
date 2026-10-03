@@ -28,6 +28,7 @@ function formatCompletedAt(value: string, timezone: string): string {
 
 function scoreLabel(score: number | null): string {
   if (score === null) return "—";
+
   return `${Number.isInteger(score) ? score.toFixed(0) : score.toFixed(1)}/3`;
 }
 
@@ -38,7 +39,9 @@ function outcomeLabel(outcome: string): string {
 function ReportsBrand({ detail = false }: { detail?: boolean }) {
   return (
     <Link className="report-library-brand" href={detail ? "/reports" : "/"}>
-      <span className="brand-mark small" aria-hidden="true">AC</span>
+      <span className="brand-mark small" aria-hidden="true">
+        AC
+      </span>
       <span>
         <strong>Angry Cat</strong>
         <small>{detail ? "Report library" : "Oral Boards"}</small>
@@ -51,12 +54,14 @@ export function ReportsConfigurationError() {
   return (
     <main className="report-library-gate">
       <section className="report-access-card" role="alert">
-        <div className="report-access-icon"><ShieldCheck aria-hidden="true" /></div>
+        <div className="report-access-icon">
+          <ShieldCheck aria-hidden="true" />
+        </div>
         <h1>Report library is not configured</h1>
-        <p>
-          The web service needs its R2 report binding before this page can be opened.
-        </p>
-        <Link className="report-gate-link" href="/">Return to the interviewer</Link>
+        <p>The web service needs its R2 report binding before this page can be opened.</p>
+        <Link className="report-gate-link" href="/">
+          Return to the interviewer
+        </Link>
       </section>
     </main>
   );
@@ -66,15 +71,21 @@ export function ReportsDisabled() {
   return (
     <main className="report-library-gate">
       <section className="report-access-card">
-        <div className="report-access-icon"><ShieldCheck aria-hidden="true" /></div>
+        <div className="report-access-icon">
+          <ShieldCheck aria-hidden="true" />
+        </div>
         <h1>Public report library is disabled</h1>
         <p>
           This deployment keeps completed interview reports private by default. Only a separately
           curated public archive can be enabled by its operator.
         </p>
         <div className="report-gate-actions">
-          <Link className="report-gate-link" href="/">Return to the interviewer</Link>
-          <Link className="report-gate-secondary-link" href="/privacy">Read privacy details</Link>
+          <Link className="report-gate-link" href="/">
+            Return to the interviewer
+          </Link>
+          <Link className="report-gate-secondary-link" href="/privacy">
+            Read privacy details
+          </Link>
         </div>
       </section>
     </main>
@@ -158,6 +169,7 @@ export function ReportLibraryDetail({
   timezone: string;
 }) {
   const activeDownload = `/api/report-library/${report.reportId}?kind=${kind}`;
+
   return (
     <main className="report-library-shell report-detail-shell">
       <nav className="report-library-nav" aria-label="Report navigation">
@@ -174,7 +186,9 @@ export function ReportLibraryDetail({
         <div className="report-detail-title">
           <div>
             <h1>{report.topicLabel}</h1>
-            <p>{formatCompletedAt(report.generatedAt, timezone)} · {report.reportId}</p>
+            <p>
+              {formatCompletedAt(report.generatedAt, timezone)} · {report.reportId}
+            </p>
           </div>
           <div className="report-detail-grade">
             <strong>{scoreLabel(report.averageScore)}</strong>
@@ -182,8 +196,16 @@ export function ReportLibraryDetail({
           </div>
         </div>
         <dl className="report-detail-meta">
-          <div><dt>Questions</dt><dd>{report.answeredQuestions}/{report.configuredQuestions}</dd></div>
-          <div><dt>Difficulty</dt><dd>{report.difficulty ?? "—"}</dd></div>
+          <div>
+            <dt>Questions</dt>
+            <dd>
+              {report.answeredQuestions}/{report.configuredQuestions}
+            </dd>
+          </div>
+          <div>
+            <dt>Difficulty</dt>
+            <dd>{report.difficulty ?? "—"}</dd>
+          </div>
         </dl>
       </header>
 
@@ -191,8 +213,9 @@ export function ReportLibraryDetail({
         <div className="report-scope-note report-detail-scope-note">
           <ShieldCheck size={19} aria-hidden="true" />
           <p>
-            This is a curated public training artifact. Do not use real patient, child, guardian,
-            or other identifying information in practice answers. <Link href="/privacy">Privacy and data use</Link>
+            This is a curated public training artifact. Do not use real patient, child, guardian, or
+            other identifying information in practice answers.{" "}
+            <Link href="/privacy">Privacy and data use</Link>
           </p>
         </div>
         <div className="report-document-toolbar">

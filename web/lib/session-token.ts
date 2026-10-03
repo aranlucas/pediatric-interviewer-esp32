@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export type BrowserSessionToken = {
   expiresAt: number;
   room: string;
@@ -32,18 +34,18 @@ export function requestBrowserSessionToken(
 ): Promise<BrowserSessionToken> {
   const key = `${room ?? "new"}:${attempt}`;
   const pending = pendingRequests.get(key);
+
   if (pending) return pending;
 
   const promise = Promise.resolve()
-    .then(() => request(
-      room ? `/api/session?room=${encodeURIComponent(room)}` : "/api/session",
-      {
+    .then(() =>
+      request(room ? `/api/session?room=${encodeURIComponent(room)}` : "/api/session", {
         method: "POST",
         cache: "no-store",
         credentials: "same-origin",
         signal: AbortSignal.timeout(SESSION_HANDSHAKE_TIMEOUT_MS),
-      },
-    ))
+      }),
+    )
     .then(async (response) => {
       if (!response.ok) {
         throw new SessionSetupError(
@@ -53,31 +55,30 @@ export function requestBrowserSessionToken(
           response.status,
         );
       }
-      let payload: Partial<BrowserSessionToken>;
-      try {
-        payload = (await response.json()) as Partial<BrowserSessionToken>;
-      } catch {
-        throw new SessionSetupError(
-          "Secure interviewer setup returned an invalid response. Please retry.",
-        );
-      }
+
+      const parsed = z
+        .object({
+          room: z.string().regex(WEB_ROOM_PATTERN),
+          token: z.string().min(1),
+          expiresAt: z.number().finite(),
+        })
+        .safeParse(await response.json().catch(() => null));
+
       if (
-        typeof payload.room !== "string" ||
-        !WEB_ROOM_PATTERN.test(payload.room) ||
-        (room !== null && payload.room !== room) ||
-        typeof payload.token !== "string" ||
-        !payload.token ||
-        typeof payload.expiresAt !== "number" ||
-        !Number.isFinite(payload.expiresAt) ||
-        payload.expiresAt <= Date.now() + 30_000
+        !parsed.success ||
+        (room !== null && parsed.data.room !== room) ||
+        parsed.data.expiresAt <= Date.now() + 30_000
       ) {
         throw new SessionSetupError(
           "Secure interviewer setup returned an invalid response. Please retry.",
         );
       }
+
+      const payload = parsed.data;
+
       return { room: payload.room, token: payload.token, expiresAt: payload.expiresAt };
     })
-    .catch((error: unknown) => {
+    .catch((error) => {
       if (error instanceof SessionSetupError) throw error;
       throw new Error("Could not reach secure interviewer setup. Check your connection and retry.");
     })
@@ -86,5 +87,6 @@ export function requestBrowserSessionToken(
     });
 
   pendingRequests.set(key, promise);
+
   return promise;
 }

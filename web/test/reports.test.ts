@@ -66,6 +66,7 @@ describe("completed report library", () => {
     const olderId = "11111111-1111-4111-8111-111111111111";
     const newerId = "22222222-2222-4222-8222-222222222222";
     const uploaded = new Date("2026-08-23T02:47:00.000Z");
+
     const list = vi
       .fn()
       .mockResolvedValueOnce({
@@ -77,11 +78,13 @@ describe("completed report library", () => {
         objects: [{ key: `pediatric-oral-boards/public-reports/${newerId}.json`, uploaded }],
         truncated: false,
       });
+
     const get = vi.fn(async (key: string) => {
       const reportId = key.includes(newerId) ? newerId : olderId;
-      const generatedAt = reportId === newerId
-        ? "2026-08-23T03:00:00.000Z"
-        : "2026-08-23T01:00:00.000Z";
+
+      const generatedAt =
+        reportId === newerId ? "2026-08-23T03:00:00.000Z" : "2026-08-23T01:00:00.000Z";
+
       const body = JSON.stringify({
         reportId,
         generatedAt,
@@ -89,10 +92,11 @@ describe("completed report library", () => {
         topic: { label: "Behavior Guidance" },
         evaluation: { outcome: "pass", exchanges: [], scoreSummary: [] },
       });
+
       return { size: body.length, text: async () => body };
     });
 
-    const reports = await listCompletedReports({ list, get } as unknown as R2Bucket);
+    const reports = await listCompletedReports({ list, get });
 
     expect(list).toHaveBeenNthCalledWith(1, {
       prefix: "pediatric-oral-boards/public-reports/",
@@ -113,12 +117,13 @@ describe("completed report library", () => {
       sessionId: "web-0123456789abcdef0123456789abcdef",
       evaluation: { outcome: "pass" },
     });
+
     const get = vi.fn().mockResolvedValue({
       size: body.length,
       text: async () => body,
     });
 
-    const publicBody = await getPublicReportJson({ get } as unknown as R2Bucket, REPORT_ID);
+    const publicBody = await getPublicReportJson({ get }, REPORT_ID);
 
     expect(JSON.parse(publicBody!)).toEqual({
       reportId: REPORT_ID,

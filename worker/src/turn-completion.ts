@@ -30,5 +30,6 @@ export function isResponseComplete(signal: CompletionSignal): boolean {
  */
 export function shouldEndTurn(signal: CompletionSignal, openingInProgress: boolean): boolean {
   void openingInProgress;
+
   return Boolean(signal.turnComplete);
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { parseInterviewMessage, parseInterviewStatus } from "@/lib/interview-messages";
+
 import Image from "next/image";
 import { useAgent } from "agents/react";
 import {
@@ -26,10 +28,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  BrowserInterviewAudio,
-  DEFAULT_OUTPUT_VOLUME,
-} from "@/lib/browser-audio";
+import { BrowserInterviewAudio, DEFAULT_OUTPUT_VOLUME } from "@/lib/browser-audio";
 import {
   averageScore,
   DEFAULT_DIFFICULTY,
@@ -49,10 +48,7 @@ import {
   TOTAL_QUESTIONS,
   topicSelectionLabel,
 } from "@/lib/interview";
-import {
-  holdScreenWakeLock,
-  screenWakeLockWarning,
-} from "@/lib/screen-wake-lock";
+import { holdScreenWakeLock, screenWakeLockWarning } from "@/lib/screen-wake-lock";
 import {
   ConnectionIndicator,
   ControlButton,
@@ -64,22 +60,13 @@ import { InterviewReview } from "@/components/interview-review";
 import { BrowserSessionGate } from "@/components/browser-session-gate";
 
 type TranscriptItem = { id: number; role: "examiner" | "candidate"; text: string };
+
 type AgentSocket = {
   OPEN?: number;
   bufferedAmount?: number;
   send: (data: string | ArrayBuffer) => void;
   readyState: number;
 };
-
-const INTERVIEW_STATUSES = new Set<InterviewStatus>([
-  "idle",
-  "thinking",
-  "listening",
-  "evaluating",
-  "speaking",
-  "complete",
-  "error",
-]);
 
 const EMPTY_STATE: InterviewState = {
   phase: "idle",
@@ -93,6 +80,7 @@ const AGENT_HOST = (process.env.NEXT_PUBLIC_AGENT_HOST ?? "esp32-angry-cat.aranl
   .replace(/^wss?:\/\//u, "")
   .replace(/^https?:\/\//u, "")
   .replace(/\/+$/u, "");
+
 const MAX_AUDIO_BUFFERED_BYTES = 256_000;
 
 const topicIcons = [
@@ -191,19 +179,37 @@ function InterviewExperience({
     }
   }, [status, updateTextComposerOpen]);
 
-  const sendJson = useCallback((message: Record<string, unknown>): boolean => {
-    const socket = agentRef.current;
-    if (!socket || socket.readyState !== (socket.OPEN ?? 1)) return false;
-    try {
-      socket.send(JSON.stringify(message));
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
+  const sendJson = useCallback(
+    (
+      message:
+        | { type: "commit_turn" | "recover_report" | "end_call" }
+        | { type: "candidate_text"; text: string }
+        | {
+            type: "start_call";
+            topic_id?: string;
+            topic_ids: readonly string[];
+            question_count: number;
+            difficulty: InterviewDifficulty;
+          },
+    ): boolean => {
+      const socket = agentRef.current;
+
+      if (!socket || socket.readyState !== (socket.OPEN ?? 1)) return false;
+
+      try {
+        socket.send(JSON.stringify(message));
+
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [],
+  );
 
   const sendAudio = useCallback((data: ArrayBuffer) => {
     const socket = agentRef.current;
+
     if (
       !socket ||
       socket.readyState !== (socket.OPEN ?? 1) ||
@@ -211,6 +217,7 @@ function InterviewExperience({
     ) {
       return;
     }
+
     try {
       socket.send(data);
     } catch {
@@ -223,7 +230,9 @@ function InterviewExperience({
       onCaptureUnavailable: () => {
         setAudioAvailable(false);
         updateTextComposerOpen(true);
-        setError("Microphone disconnected. Continue with typed answers; reconnect it before your next interview.");
+        setError(
+          "Microphone disconnected. Continue with typed answers; reconnect it before your next interview.",
+        );
       },
       onLevel: setLevel,
       onAutoCommit: () => {
@@ -239,8 +248,12 @@ function InterviewExperience({
 
   const appendTranscript = useCallback((role: TranscriptItem["role"], text: string) => {
     const clean = text.replace(/\s+/g, " ").trim();
+
     if (!clean) return;
-    setTranscript((items) => [...items.slice(-7), { id: ++transcriptId.current, role, text: clean }]);
+    setTranscript((items) => [
+      ...items.slice(-7),
+      { id: ++transcriptId.current, role, text: clean },
+    ]);
   }, []);
 
   const handleAudioFrame = useCallback(async (data: ArrayBuffer) => {
@@ -248,17 +261,22 @@ function InterviewExperience({
       await audioRef.current?.playPcm16(data);
     } catch {
       setAudioAvailable(false);
-      setError("Examiner audio was interrupted. Continue with typed answers or retry the interview.");
+      setError(
+        "Examiner audio was interrupted. Continue with typed answers or retry the interview.",
+      );
     }
   }, []);
 
   const handleMessage = useCallback(
-    (event: MessageEvent) => {
-      const data = event.data as unknown;
+    (event: MessageEvent<string | ArrayBuffer | Blob>) => {
+      const data = event.data;
+
       if (data instanceof ArrayBuffer) {
         void handleAudioFrame(data);
+
         return;
       }
+
       if (data instanceof Blob) {
         void data
           .arrayBuffer()
@@ -267,18 +285,24 @@ function InterviewExperience({
             setAudioAvailable(false);
             setError("Examiner audio could not be decoded. Continue with typed answers.");
           });
+
         return;
       }
-      if (typeof data !== "string") return;
+
       try {
-        const message = JSON.parse(data) as Record<string, unknown>;
-        if (message.type === "status" && typeof message.status === "string") {
-          if (!INTERVIEW_STATUSES.has(message.status as InterviewStatus)) return;
-          const next = message.status as InterviewStatus;
+        const message = parseInterviewMessage(data);
+        const parsedStatus = parseInterviewStatus(message.status);
+
+        if (message.type === "status" && parsedStatus !== null) {
+          const next = parsedStatus;
           serverStatusRef.current = next;
+
           if (next !== "error") setError("");
           updateStatus(next);
-          audioRef.current?.setListening(shouldCaptureInterviewAudio(next, textComposerOpenRef.current));
+          audioRef.current?.setListening(
+            shouldCaptureInterviewAudio(next, textComposerOpenRef.current),
+          );
+
           if (next === "complete") setView("review");
         } else if (message.type === "playback_interrupt") {
           audioRef.current?.interruptPlayback();
@@ -302,10 +326,8 @@ function InterviewExperience({
             ),
           );
         } else if (message.type === "candidate_text_ack" && message.accepted === false) {
-          const next = statusAfterRejectedTextAnswer(
-            serverStatusRef.current,
-            statusRef.current,
-          );
+          const next = statusAfterRejectedTextAnswer(serverStatusRef.current, statusRef.current);
+
           updateStatus(next);
           updateTextComposerOpen(true);
           setError("The typed answer arrived outside the listening window. Please try again.");
@@ -334,8 +356,10 @@ function InterviewExperience({
       hadConnectionRef.current = true;
       setConnected(true);
       setConnectionState("connected");
+
       const persistedEvaluation =
         stateRef.current.phase === "evaluating" || stateRef.current.phase === "evaluation_failed";
+
       if (pendingEndRef.current) {
         setError("Connection restored. Ending your interview safely…");
         audioRef.current?.interruptPlayback();
@@ -360,6 +384,7 @@ function InterviewExperience({
     onClose: () => {
       setConnected(false);
       setConnectionState(hadConnectionRef.current ? "reconnecting" : "connecting");
+
       if (pendingEndRef.current) {
         setError("Reconnecting to finish ending your interview…");
       } else if (stateRef.current.phase !== "idle" && stateRef.current.phase !== "complete") {
@@ -378,11 +403,13 @@ function InterviewExperience({
     onStateUpdate: (next) => {
       stateRef.current = next;
       setState(next);
+
       if (next.phase !== "idle") {
         setSelectedTopics(next.topicIds?.length ? next.topicIds : [next.topicId]);
         setQuestionCount(next.questionCount ?? TOTAL_QUESTIONS);
         setDifficulty(next.difficulty ?? DEFAULT_DIFFICULTY);
       }
+
       if (next.phase === "complete") {
         recoveryPendingRef.current = false;
         updateStatus("complete");
@@ -392,12 +419,14 @@ function InterviewExperience({
         updateStatus("error");
         setError("Your answers are safe, but the review was not saved. Retry the review.");
       }
+
       if (
         recoveryPendingRef.current &&
         next.exchanges.length > 0 &&
         ["evaluating", "evaluation_failed"].includes(next.phase)
       ) {
         recoveryPendingRef.current = false;
+
         if (!sendJson({ type: "recover_report" })) {
           setError("Connection restored, but report recovery could not be sent. Please retry.");
           updateStatus("error");
@@ -425,6 +454,7 @@ function InterviewExperience({
 
   useEffect(() => {
     const audio = audioRef.current;
+
     return () => {
       startGenerationRef.current += 1;
       startingRef.current = false;
@@ -435,29 +465,34 @@ function InterviewExperience({
 
   useEffect(() => {
     if (!connected || !pendingEndRef.current) return;
+
     if (!sendJson({ type: "end_call" })) {
-      setError("Connection returned, but ending the interview could not be sent. Retry connection.");
+      setError(
+        "Connection returned, but ending the interview could not be sent. Retry connection.",
+      );
+
       return;
     }
+
     pendingEndRef.current = false;
     setEndPending(false);
     setError("");
     const hasAnswers = stateRef.current.exchanges.length > 0;
     updateStatus(hasAnswers ? "evaluating" : "idle");
+
     if (!hasAnswers) setView("topics");
   }, [connected, sendJson, updateStatus]);
 
   const keepScreenAwake = interviewKeepsScreenAwake(status);
   useEffect(() => {
     if (!keepScreenAwake) return;
+
     return holdScreenWakeLock({
       onStateChange: (wakeLockState) => {
         setWakeLockWarning(
           screenWakeLockWarning(wakeLockState, {
             maxTouchPoints: navigator.maxTouchPoints,
-            standalone:
-              (navigator as Navigator & { standalone?: boolean }).standalone ===
-              true,
+            standalone: "standalone" in navigator && navigator.standalone === true,
             userAgent: navigator.userAgent,
           }),
         );
@@ -468,24 +503,28 @@ function InterviewExperience({
   const activeTopics = TOPICS.filter((topic) => selectedTopics.includes(topic.id));
   const activeTopic = activeTopics[0] ?? TOPICS[0];
   const activeTopicLabel = topicSelectionLabel(selectedTopics);
+
   const plannedQuestionCount =
-    state.phase === "idle" ? questionCount : state.questionCount ?? questionCount;
+    state.phase === "idle" ? questionCount : (state.questionCount ?? questionCount);
+
   const questionNumber =
-    state.phase === "idle"
-      ? 0
-      : Math.min(state.exchanges.length + 1, plannedQuestionCount);
+    state.phase === "idle" ? 0 : Math.min(state.exchanges.length + 1, plannedQuestionCount);
+
   const copy = statusCopy(status, plannedQuestionCount);
   const catIsTalking = status === "speaking" || browserSpeaking;
   const setupLocked = interviewLocksSetup(status, state.phase, starting);
   const interviewViewAvailable = state.phase !== "idle" || starting;
   const answerControlsAvailable = ["thinking", "listening", "speaking"].includes(status);
+
   const statusDetail =
     error ||
     (!audioAvailable && status === "listening"
       ? "Microphone unavailable. Type your answer below."
       : copy.detail);
+
   const difficultyDetail =
     DIFFICULTY_OPTIONS.find((option) => option.id === difficulty)?.detail ?? "";
+
   const startButtonLabel = starting
     ? "Starting interview…"
     : status === "evaluating"
@@ -507,75 +546,84 @@ function InterviewExperience({
       const next = current.includes(topicId)
         ? current.filter((id) => id !== topicId)
         : [...current, topicId];
+
       setQuestionCount((count) => questionCountForSelection(count, Math.max(1, next.length)));
+
       return next;
     });
   }, []);
 
-  const startInterview = useCallback(
-    async () => {
-      if (selectedTopics.length === 0 || !connected || setupLocked) return;
-      const generation = startGenerationRef.current + 1;
-      startGenerationRef.current = generation;
-      startingRef.current = true;
-      setStarting(true);
-      pendingEndRef.current = false;
-      setEndPending(false);
-      setError("");
-      setWakeLockWarning("");
-      setTranscript([]);
-      setReviewPage(0);
-      updateTextComposerOpen(false);
-      setView("interview");
-      updateStatus("thinking");
-      let microphoneReady = false;
-      try {
-        microphoneReady = (await audioRef.current?.start(sendAudio)) ?? false;
-        setAudioAvailable(microphoneReady);
-        if (!microphoneReady) {
-          updateTextComposerOpen(true);
-          setError("Microphone access was unavailable. You can still listen and type answers.");
-        }
-      } catch {
-        setAudioAvailable(false);
+  const startInterview = useCallback(async () => {
+    if (selectedTopics.length === 0 || !connected || setupLocked) return;
+    const generation = startGenerationRef.current + 1;
+    startGenerationRef.current = generation;
+    startingRef.current = true;
+    setStarting(true);
+    pendingEndRef.current = false;
+    setEndPending(false);
+    setError("");
+    setWakeLockWarning("");
+    setTranscript([]);
+    setReviewPage(0);
+    updateTextComposerOpen(false);
+    setView("interview");
+    updateStatus("thinking");
+    let microphoneReady = false;
+
+    try {
+      microphoneReady = (await audioRef.current?.start(sendAudio)) ?? false;
+      setAudioAvailable(microphoneReady);
+
+      if (!microphoneReady) {
         updateTextComposerOpen(true);
-        setError("Browser audio is unavailable. Continue with typed answers and live captions.");
+        setError("Microphone access was unavailable. You can still listen and type answers.");
       }
-      if (generation !== startGenerationRef.current || !startingRef.current) return;
-      if (!sendJson({
+    } catch {
+      setAudioAvailable(false);
+      updateTextComposerOpen(true);
+      setError("Browser audio is unavailable. Continue with typed answers and live captions.");
+    }
+
+    if (generation !== startGenerationRef.current || !startingRef.current) return;
+
+    if (
+      !sendJson({
         type: "start_call",
         topic_id: selectedTopics[0],
         topic_ids: selectedTopics,
         question_count: questionCount,
         difficulty,
-      })) {
-        startingRef.current = false;
-        setStarting(false);
-        audioRef.current?.stop();
-        setError("The interviewer connection is not ready. Retry before starting again.");
-        updateStatus("error");
-        setView("topics");
-        return;
-      }
+      })
+    ) {
       startingRef.current = false;
       setStarting(false);
-      if (!microphoneReady) audioRef.current?.setListening(false);
-    },
-    [
-      connected,
-      difficulty,
-      questionCount,
-      selectedTopics,
-      sendAudio,
-      sendJson,
-      setupLocked,
-      updateStatus,
-      updateTextComposerOpen,
-    ],
-  );
+      audioRef.current?.stop();
+      setError("The interviewer connection is not ready. Retry before starting again.");
+      updateStatus("error");
+      setView("topics");
+
+      return;
+    }
+
+    startingRef.current = false;
+    setStarting(false);
+
+    if (!microphoneReady) audioRef.current?.setListening(false);
+  }, [
+    connected,
+    difficulty,
+    questionCount,
+    selectedTopics,
+    sendAudio,
+    sendJson,
+    setupLocked,
+    updateStatus,
+    updateTextComposerOpen,
+  ]);
 
   const endInterview = useCallback(() => {
     audioRef.current?.setListening(false);
+
     if (startingRef.current) {
       startGenerationRef.current += 1;
       startingRef.current = false;
@@ -584,9 +632,12 @@ function InterviewExperience({
       setError("");
       updateStatus("idle");
       setView("topics");
+
       return;
     }
+
     const currentState = stateRef.current;
+
     if (currentState.phase === "evaluation_failed") {
       if (sendJson({ type: "recover_report" })) {
         setError("");
@@ -594,25 +645,33 @@ function InterviewExperience({
       } else {
         setError("The connection is not ready. Reconnect before retrying the review.");
       }
+
       return;
     }
+
     if (!sendJson({ type: "end_call" })) {
       pendingEndRef.current = true;
       setEndPending(true);
       audioRef.current?.interruptPlayback();
-      setError("Connection interrupted. Your request to end will be sent automatically after reconnecting.");
+      setError(
+        "Connection interrupted. Your request to end will be sent automatically after reconnecting.",
+      );
+
       return;
     }
+
     pendingEndRef.current = false;
     setEndPending(false);
     const hasAnswers = currentState.exchanges.length > 0;
     updateStatus(hasAnswers ? "evaluating" : "idle");
+
     if (!hasAnswers) setView("topics");
   }, [sendJson, updateStatus]);
 
   const toggleMute = useCallback(() => {
     setMuted((current) => {
       audioRef.current?.setMuted(!current);
+
       return !current;
     });
   }, []);
@@ -626,12 +685,16 @@ function InterviewExperience({
     (event: FormEvent) => {
       event.preventDefault();
       const text = typedAnswer.trim();
+
       if (!text || statusRef.current !== "listening") return;
       audioRef.current?.setListening(false);
+
       if (!sendJson({ type: "candidate_text", text })) {
         setError("The interviewer connection is not ready. Please retry your answer.");
+
         return;
       }
+
       setTypedAnswer("");
       updateStatus("thinking");
       updateTextComposerOpen(true);
@@ -654,7 +717,9 @@ function InterviewExperience({
     <main className="app-shell">
       <aside className="topic-rail" aria-label="Study topics">
         <div className="brand-lockup">
-          <div className="brand-mark" aria-hidden="true">AC</div>
+          <div className="brand-mark" aria-hidden="true">
+            AC
+          </div>
           <div>
             <h1>Angry Cat</h1>
             <p>Oral Boards</p>
@@ -678,6 +743,7 @@ function InterviewExperience({
           {TOPICS.map((topic, index) => {
             const Icon = topicIcons[index];
             const selected = selectedTopics.includes(topic.id);
+
             return (
               <button
                 type="button"
@@ -761,8 +827,8 @@ function InterviewExperience({
         <div className="rail-note">
           <BookOpenText size={19} />
           <span>
-            Multiple selections become one coherent combo case. Each selected domain gets a
-            question target.
+            Multiple selections become one coherent combo case. Each selected domain gets a question
+            target.
           </span>
         </div>
         <div className="rail-privacy-note">
@@ -830,11 +896,7 @@ function InterviewExperience({
               <QuestionProgress current={questionNumber} total={plannedQuestionCount} />
             </div>
 
-            <div
-              className="cat-stage"
-              data-status={status}
-              data-talking={catIsTalking}
-            >
+            <div className="cat-stage" data-status={status} data-talking={catIsTalking}>
               <div className="cat-glow" />
               <div className="cat-art">
                 <Image
@@ -846,11 +908,7 @@ function InterviewExperience({
                   sizes="(max-width: 640px) 185px, (max-height: 850px) 235px, 310px"
                   fetchPriority="high"
                 />
-                <svg
-                  className="cat-mouth"
-                  viewBox="0 0 88 56"
-                  aria-hidden="true"
-                >
+                <svg className="cat-mouth" viewBox="0 0 88 56" aria-hidden="true">
                   <path
                     className="cat-mouth-cavity"
                     d="M5 8C15 2 28 1 44 1s29 1 39 7c-2 26-17 43-39 43S7 34 5 8Z"
@@ -881,15 +939,30 @@ function InterviewExperience({
                 {state.currentQuestion ||
                   "Angry Cat is preparing a new oral-board vignette for your selected topic."}
               </h2>
-              <div className="voice-state" data-status={status} role="status" aria-live="polite" aria-atomic="true">
+              <div
+                className="voice-state"
+                data-status={status}
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
                 <div className="voice-icon">
-                  {status === "evaluating" ? <ClipboardCheck /> : status === "error" ? <CircleAlert /> : <Mic />}
+                  {status === "evaluating" ? (
+                    <ClipboardCheck />
+                  ) : status === "error" ? (
+                    <CircleAlert />
+                  ) : (
+                    <Mic />
+                  )}
                 </div>
                 <div>
                   <strong>{copy.label}</strong>
                   <p>{statusDetail}</p>
                 </div>
-                <Waveform level={status === "listening" ? level : browserSpeaking ? 0.72 : 0.18} active={status !== "idle"} />
+                <Waveform
+                  level={status === "listening" ? level : browserSpeaking ? 0.72 : 0.18}
+                  active={status !== "idle"}
+                />
               </div>
               {keepScreenAwake && wakeLockWarning && (
                 <div className="screen-wake-warning" role="status">
@@ -945,12 +1018,12 @@ function InterviewExperience({
                 {status === "evaluating"
                   ? "Preparing review…"
                   : state.phase === "evaluation_failed"
-                  ? "Retry review"
-                  : endPending
-                    ? "Ending after reconnect"
-                    : starting
-                      ? "Cancel start"
-                      : "End interview"}
+                    ? "Retry review"
+                    : endPending
+                      ? "Ending after reconnect"
+                      : starting
+                        ? "Cancel start"
+                        : "End interview"}
               </button>
               <ControlButton
                 icon={MessageCircleMore}
@@ -959,9 +1032,7 @@ function InterviewExperience({
                 disabled={!answerControlsAvailable}
                 controls="typed-answer-panel"
                 expanded={textComposerOpen}
-                onClick={() =>
-                  updateTextComposerOpen(!textComposerOpenRef.current)
-                }
+                onClick={() => updateTextComposerOpen(!textComposerOpenRef.current)}
               />
               <ControlButton
                 icon={Captions}
@@ -1007,7 +1078,9 @@ function InterviewExperience({
               aria-valuetext={`${Math.round(level * 100)} percent`}
             >
               <span>Audio level</span>
-              <div><i style={{ transform: `scaleX(${Math.max(0.04, level)})` }} /></div>
+              <div>
+                <i style={{ transform: `scaleX(${Math.max(0.04, level)})` }} />
+              </div>
             </div>
           </>
         )}
@@ -1031,9 +1104,36 @@ function InterviewExperience({
       />
 
       <nav className="mobile-tabs" aria-label="App views">
-        <button type="button" data-active={view === "topics"} aria-current={view === "topics" ? "page" : undefined} disabled={setupLocked} onClick={() => setView("topics")}><BookOpenText aria-hidden="true" />Topics</button>
-        <button type="button" data-active={view === "interview"} aria-current={view === "interview" ? "page" : undefined} disabled={!interviewViewAvailable} onClick={() => setView("interview")}><Headphones aria-hidden="true" />Interview</button>
-        <button type="button" data-active={view === "review"} aria-current={view === "review" ? "page" : undefined} disabled={!evaluation} onClick={() => setView("review")}><ClipboardCheck aria-hidden="true" />Review</button>
+        <button
+          type="button"
+          data-active={view === "topics"}
+          aria-current={view === "topics" ? "page" : undefined}
+          disabled={setupLocked}
+          onClick={() => setView("topics")}
+        >
+          <BookOpenText aria-hidden="true" />
+          Topics
+        </button>
+        <button
+          type="button"
+          data-active={view === "interview"}
+          aria-current={view === "interview" ? "page" : undefined}
+          disabled={!interviewViewAvailable}
+          onClick={() => setView("interview")}
+        >
+          <Headphones aria-hidden="true" />
+          Interview
+        </button>
+        <button
+          type="button"
+          data-active={view === "review"}
+          aria-current={view === "review" ? "page" : undefined}
+          disabled={!evaluation}
+          onClick={() => setView("review")}
+        >
+          <ClipboardCheck aria-hidden="true" />
+          Review
+        </button>
       </nav>
     </main>
   );

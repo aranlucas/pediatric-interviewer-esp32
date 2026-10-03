@@ -17,11 +17,13 @@ export class PcmFramer {
     if (frameBytes < 2 || frameBytes % 2 !== 0) {
       throw new Error("PCM frame size must be a positive, even number.");
     }
+
     this.frame = new Uint8Array(frameBytes);
   }
 
   *write(input: Uint8Array): Generator<Uint8Array<ArrayBuffer>> {
     let offset = 0;
+
     while (offset < input.byteLength) {
       const copied = Math.min(this.frameBytes - this.length, input.byteLength - offset);
       this.frame.set(input.subarray(offset, offset + copied), this.length);
@@ -41,6 +43,7 @@ export class PcmFramer {
     const length = this.length - (this.length % 2);
     const tail = length > 0 ? this.frame.slice(0, length) : null;
     this.clear();
+
     return tail;
   }
 
@@ -58,9 +61,11 @@ export function resamplePcm16(
   if (input.byteLength < 2 || input.byteLength % 2 !== 0) {
     throw new Error("Audio provider returned invalid 16-bit PCM audio.");
   }
+
   if (inputRate <= 0 || outputRate <= 0) {
     throw new Error("PCM sample rates must be positive.");
   }
+
   if (inputRate === outputRate) return input.slice();
 
   const inputSamples = input.byteLength / 2;
@@ -77,5 +82,6 @@ export function resamplePcm16(
     const fraction = position - lower;
     output[index] = Math.round(source[lower] + (source[upper] - source[lower]) * fraction);
   }
+
   return new Uint8Array(output.buffer);
 }

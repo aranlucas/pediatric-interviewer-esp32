@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getCloudflareContext } = vi.hoisted(() => ({
-  getCloudflareContext: vi.fn(),
-}));
+import {
+  createReportDownloadHandler,
+  type ReportDownloadEnv,
+} from "../lib/report-download-handler";
 
-vi.mock("@opennextjs/cloudflare", () => ({ getCloudflareContext }));
+const getCloudflareContext = vi.fn<() => Promise<{ env: ReportDownloadEnv }>>();
 
-import { GET as downloadReport } from "../app/api/report-library/[reportId]/route";
+const downloadReport = createReportDownloadHandler(async () => (await getCloudflareContext()).env);
 
 const REPORT_ID = "01234567-89ab-4cde-8123-0123456789ab";
 
@@ -19,6 +20,7 @@ describe("report library downloads", () => {
     const get = vi.fn().mockResolvedValue({
       body: new Response("# Public report").body,
     });
+
     getCloudflareContext.mockResolvedValue({
       env: { INTERVIEW_REPORTS: { get }, PUBLIC_REPORTS_ENABLED: "true" },
     });
@@ -33,9 +35,7 @@ describe("report library downloads", () => {
     expect(response.headers.get("Content-Type")).toContain("text/markdown");
     expect(response.headers.get("Content-Disposition")).toContain(`${REPORT_ID}.md`);
     expect(response.headers.get("Cache-Control")).toContain("public");
-    expect(get).toHaveBeenCalledWith(
-      `pediatric-oral-boards/public-reports/${REPORT_ID}.md`,
-    );
+    expect(get).toHaveBeenCalledWith(`pediatric-oral-boards/public-reports/${REPORT_ID}.md`);
   });
 
   it("redacts private session metadata from an enabled public JSON download", async () => {
@@ -44,10 +44,12 @@ describe("report library downloads", () => {
       sessionId: "web-0123456789abcdef0123456789abcdef",
       evaluation: { outcome: "pass" },
     });
+
     const get = vi.fn().mockResolvedValue({
       size: body.length,
       text: async () => body,
     });
+
     getCloudflareContext.mockResolvedValue({
       env: { INTERVIEW_REPORTS: { get }, PUBLIC_REPORTS_ENABLED: "true" },
     });
@@ -62,9 +64,7 @@ describe("report library downloads", () => {
       reportId: REPORT_ID,
       evaluation: { outcome: "pass" },
     });
-    expect(get).toHaveBeenCalledWith(
-      `pediatric-oral-boards/public-reports/${REPORT_ID}.json`,
-    );
+    expect(get).toHaveBeenCalledWith(`pediatric-oral-boards/public-reports/${REPORT_ID}.json`);
   });
 
   it("returns not found for a missing public artifact", async () => {
@@ -79,9 +79,7 @@ describe("report library downloads", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(get).toHaveBeenCalledWith(
-      `pediatric-oral-boards/public-reports/${REPORT_ID}.json`,
-    );
+    expect(get).toHaveBeenCalledWith(`pediatric-oral-boards/public-reports/${REPORT_ID}.json`);
   });
 
   it("does not read the bucket while public reports are disabled", async () => {

@@ -35,7 +35,7 @@ export type InterviewRetryOptions = {
   maxAttempts: number;
   baseDelayMs: number;
   maxDelayMs: number;
-  shouldRetry?: (error: unknown, nextAttempt: number) => boolean;
+  shouldRetry?: typeof shouldRetryGeminiError;
 };
 
 export type InterviewRetry = <T>(
@@ -51,12 +51,14 @@ export type FinalizedInterview = {
 export function cloneInterviewExchanges(
   exchanges: readonly InterviewExchange[],
 ): InterviewExchange[] {
-  return exchanges.map((exchange) => ({
-    ...exchange,
-    ...(exchange.followUps
-      ? { followUps: exchange.followUps.map((followUp) => ({ ...followUp })) }
-      : {}),
-  }));
+  return exchanges.map((exchange) => {
+    const copy = { ...exchange };
+
+    if (exchange.followUps)
+      copy.followUps = exchange.followUps.map((followUp) => ({ ...followUp }));
+
+    return copy;
+  });
 }
 
 /**
@@ -66,7 +68,7 @@ export function cloneInterviewExchanges(
  */
 export async function finalizeInterviewReport(
   snapshot: InterviewFinalizationSnapshot,
-  reports: R2Bucket,
+  reports: import("./interview-report").ReportStore,
   retry: InterviewRetry,
 ): Promise<FinalizedInterview> {
   const evaluation = await retry(
@@ -89,6 +91,7 @@ export async function finalizeInterviewReport(
   // The cheat sheet is a study aid, not the result. A failure here must never
   // cost the candidate the report they just earned.
   let cheatsheet: InterviewCheatsheet | undefined;
+
   try {
     cheatsheet = await retry(
       () => buildInterviewCheatsheet(snapshot.apiKey, snapshot.topic, evaluation),
@@ -117,7 +120,6 @@ export async function finalizeInterviewReport(
       questionCount: snapshot.questionCount,
       difficulty: snapshot.difficulty,
     },
-    ...(snapshot.casePresentation ? { casePresentation: snapshot.casePresentation } : {}),
     topic: {
       id: snapshot.topic.id,
       label: snapshot.topic.label,
@@ -128,8 +130,11 @@ export async function finalizeInterviewReport(
       competencies: snapshot.topic.competencies.map((competency) => ({ ...competency })),
     },
     evaluation,
-    ...(cheatsheet ? { cheatsheet } : {}),
   };
+
+  if (snapshot.casePresentation) report.casePresentation = snapshot.casePresentation;
+
+  if (cheatsheet) report.cheatsheet = cheatsheet;
 
   await retry(() => storeInterviewReport(reports, report), {
     maxAttempts: 3,
@@ -137,5 +142,9 @@ export async function finalizeInterviewReport(
     maxDelayMs: 2_000,
   });
 
-  return { evaluation, ...(cheatsheet ? { cheatsheet } : {}) };
+  const result: FinalizedInterview = { evaluation };
+
+  if (cheatsheet) result.cheatsheet = cheatsheet;
+
+  return result;
 }

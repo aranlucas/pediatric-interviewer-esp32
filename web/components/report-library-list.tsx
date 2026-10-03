@@ -21,10 +21,12 @@ export function ReportLibraryList({
 }) {
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
+
   const visibleReports = useMemo(
     () => reports.filter((report) => reportMatchesQuery(report, query, timezone)),
     [query, reports, timezone],
   );
+
   const clearSearch = () => {
     setQuery("");
     searchInputRef.current?.focus();
@@ -96,9 +98,7 @@ export function ReportLibraryList({
                     {report.answeredQuestions}/{report.configuredQuestions}
                   </td>
                   <td data-label="Files">
-                    <span className="report-file-count">
-                      {report.fileCount}
-                    </span>
+                    <span className="report-file-count">{report.fileCount}</span>
                   </td>
                 </tr>
               ))}
@@ -110,7 +110,9 @@ export function ReportLibraryList({
           <Search aria-hidden="true" />
           <h2>No matching reports</h2>
           <p>Try another topic, outcome, date, or grade.</p>
-          <button type="button" onClick={clearSearch}>Clear search</button>
+          <button type="button" onClick={clearSearch}>
+            Clear search
+          </button>
         </div>
       )}
     </>

@@ -1,13 +1,39 @@
+import { z } from "zod";
+
 import { isReportId } from "@/lib/server-auth";
 
+type ReportBody = Pick<R2ObjectBody, "size" | "text">;
+
+type ListedReport = Pick<R2Object, "key" | "uploaded">;
+
+export interface ReportReader {
+  get(key: string): Promise<ReportBody | null>;
+}
+
+export interface ReportArchive extends ReportReader {
+  list(options: { prefix: string; limit: number; cursor?: string }): Promise<{
+    objects: ListedReport[];
+    truncated: boolean;
+    cursor?: string;
+  }>;
+}
+
 const PUBLIC_REPORT_PREFIX = "pediatric-oral-boards/public-reports/";
+
 const PUBLIC_REPORT_KEY_PATTERN =
   /^pediatric-oral-boards\/public-reports\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(-cheatsheet)?\.(json|md)$/iu;
+
 const MAX_REPORT_BYTES = 1_000_000;
+
 const MAX_MARKDOWN_BYTES = 500_000;
+
 export const MAX_PUBLIC_REPORTS = 200;
 
-type JsonRecord = Record<string, unknown>;
+const reportJsonSchema = z.record(z.string(), z.json());
+
+type JsonRecord = z.infer<typeof reportJsonSchema>;
+
+type JsonValue = z.infer<ReturnType<typeof z.json>>;
 
 type ReportArtifacts = {
   reportId: string;
@@ -37,37 +63,47 @@ export type CompletedReport = {
 
 export type ReportDocumentKind = "report" | "cheatsheet";
 
-function record(value: unknown): JsonRecord | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonRecord)
-    : null;
+function record(value: JsonValue | undefined): JsonRecord | null {
+  const parsed = reportJsonSchema.safeParse(value);
+
+  return parsed.success ? parsed.data : null;
 }
 
-function cleanString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
+function cleanString(value: JsonValue | undefined): string | null {
+  const parsed = z.string().safeParse(value);
+
+  return parsed.success && parsed.data.trim() ? parsed.data.trim() : null;
 }
 
-function finiteNumber(value: unknown): number | null {
+function finiteNumber(value: JsonValue | undefined): number | null {
   const number = Number(value);
+
   return Number.isFinite(number) ? number : null;
 }
 
-function validDate(value: unknown, fallback: string): string {
-  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) return fallback;
-  return new Date(value).toISOString();
+function validDate(value: JsonValue | undefined, fallback: string): string {
+  const parsed = z.string().safeParse(value);
+
+  if (!parsed.success || !Number.isFinite(Date.parse(parsed.data))) return fallback;
+
+  return new Date(parsed.data).toISOString();
 }
 
-function reportArtifacts(objects: R2Object[]): ReportArtifacts[] {
+function reportArtifacts(objects: ListedReport[]): ReportArtifacts[] {
   const grouped = new Map<string, ReportArtifacts>();
+
   for (const object of objects) {
     const match = PUBLIC_REPORT_KEY_PATTERN.exec(object.key);
+
     if (!match) continue;
     const [, rawReportId, cheatsheetSuffix, extension] = match;
     const reportId = rawReportId.toLowerCase();
+
     const current = grouped.get(reportId) ?? {
       reportId,
       lastModified: object.uploaded.toISOString(),
     };
+
     if (cheatsheetSuffix) current.cheatsheet = object.key;
     else if (extension.toLowerCase() === "json") {
       current.json = object.key;
@@ -75,14 +111,17 @@ function reportArtifacts(objects: R2Object[]): ReportArtifacts[] {
     } else current.markdown = object.key;
     grouped.set(reportId, current);
   }
+
   return [...grouped.values()].filter((entry) => entry.json);
 }
 
-async function parseReportObject(object: R2ObjectBody): Promise<JsonRecord> {
+async function parseReportObject(object: ReportBody): Promise<JsonRecord> {
   if (object.size > MAX_REPORT_BYTES) throw new Error("stored report is too large");
-  const parsed = JSON.parse(await object.text()) as unknown;
-  const value = record(parsed);
+  const parsed = reportJsonSchema.safeParse(JSON.parse(await object.text()));
+  const value = parsed.success ? parsed.data : null;
+
   if (!value) throw new Error("stored report is not a JSON object");
+
   return value;
 }
 
@@ -95,15 +134,19 @@ export function summarizeStoredReport(
   const evaluation = record(report.evaluation);
   const exchanges = Array.isArray(evaluation?.exchanges) ? evaluation.exchanges : [];
   const scoreSummary = Array.isArray(evaluation?.scoreSummary) ? evaluation.scoreSummary : [];
+
   const scores = scoreSummary.flatMap((entry) => {
     const score = finiteNumber(record(entry)?.score);
+
     return score === null ? [] : [score];
   });
+
   const averageScore = scores.length
     ? scores.reduce((total, score) => total + score, 0) / scores.length
     : null;
-  const configuredQuestions =
-    finiteNumber(configuration?.questionCount) ?? exchanges.length;
+
+  const configuredQuestions = finiteNumber(configuration?.questionCount) ?? exchanges.length;
+
   return {
     reportId: artifacts.reportId,
     generatedAt: validDate(report.generatedAt, artifacts.lastModified),
@@ -123,43 +166,51 @@ export function summarizeStoredReport(
   };
 }
 
-async function listReportObjects(bucket: R2Bucket): Promise<R2Object[]> {
-  const objects: R2Object[] = [];
+async function listReportObjects(bucket: ReportArchive): Promise<ListedReport[]> {
+  const objects: ListedReport[] = [];
   const reportIds = new Set<string>();
   let cursor: string | undefined;
+
   do {
     const page = await bucket.list({
       prefix: PUBLIC_REPORT_PREFIX,
       limit: 1_000,
       cursor,
     });
+
     for (const object of page.objects) {
       const match = PUBLIC_REPORT_KEY_PATTERN.exec(object.key);
+
       if (!match) continue;
       const reportId = match[1].toLowerCase();
+
       if (!reportIds.has(reportId) && reportIds.size >= MAX_PUBLIC_REPORTS) {
         return objects;
       }
+
       reportIds.add(reportId);
       objects.push(object);
     }
+
     if (page.truncated && !page.cursor) {
       throw new Error("R2 report listing was truncated without a cursor");
     }
+
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
+
   return objects;
 }
 
-export async function listCompletedReports(bucket: R2Bucket): Promise<CompletedReport[]> {
-  const artifacts = reportArtifacts(await listReportObjects(bucket)).slice(
-    0,
-    MAX_PUBLIC_REPORTS,
-  );
+export async function listCompletedReports(bucket: ReportArchive): Promise<CompletedReport[]> {
+  const artifacts = reportArtifacts(await listReportObjects(bucket)).slice(0, MAX_PUBLIC_REPORTS);
+
   const reports = await Promise.all(
     artifacts.map(async (entry) => {
       const object = await bucket.get(entry.json!);
+
       if (!object) return null;
+
       try {
         return summarizeStoredReport(await parseReportObject(object), entry);
       } catch {
@@ -167,11 +218,10 @@ export async function listCompletedReports(bucket: R2Bucket): Promise<CompletedR
       }
     }),
   );
+
   return reports
     .filter((report): report is CompletedReport => report !== null)
-    .toSorted(
-      (left, right) => Date.parse(right.generatedAt) - Date.parse(left.generatedAt),
-    );
+    .toSorted((left, right) => Date.parse(right.generatedAt) - Date.parse(left.generatedAt));
 }
 
 export async function getCompletedReport(
@@ -181,20 +231,27 @@ export async function getCompletedReport(
   if (!isReportId(reportId)) return null;
   const normalizedId = reportId.toLowerCase();
   const prefix = `${PUBLIC_REPORT_PREFIX}${normalizedId}`;
+
   const [jsonObject, markdownObject, cheatsheetObject] = await Promise.all([
     bucket.get(`${prefix}.json`),
     bucket.head(`${prefix}.md`),
     bucket.head(`${prefix}-cheatsheet.md`),
   ]);
+
   if (!jsonObject) return null;
+
   try {
-    return summarizeStoredReport(await parseReportObject(jsonObject), {
+    const artifacts: ReportArtifacts = {
       reportId: normalizedId,
       json: `${prefix}.json`,
-      ...(markdownObject ? { markdown: `${prefix}.md` } : {}),
-      ...(cheatsheetObject ? { cheatsheet: `${prefix}-cheatsheet.md` } : {}),
       lastModified: jsonObject.uploaded.toISOString(),
-    });
+    };
+
+    if (markdownObject) artifacts.markdown = `${prefix}.md`;
+
+    if (cheatsheetObject) artifacts.cheatsheet = `${prefix}-cheatsheet.md`;
+
+    return summarizeStoredReport(await parseReportObject(jsonObject), artifacts);
   } catch {
     return null;
   }
@@ -206,33 +263,42 @@ export function publicReportObjectKey(
 ): string | null {
   if (!isReportId(reportId)) return null;
   const prefix = `${PUBLIC_REPORT_PREFIX}${reportId.toLowerCase()}`;
+
   if (kind === "json") return `${prefix}.json`;
+
   return kind === "cheatsheet" ? `${prefix}-cheatsheet.md` : `${prefix}.md`;
 }
 
 export async function getReportMarkdown(
-  bucket: R2Bucket,
+  bucket: ReportReader,
   reportId: string,
   kind: ReportDocumentKind,
 ): Promise<string | null> {
   const key = publicReportObjectKey(reportId, kind);
+
   if (!key) return null;
   const object = await bucket.get(key);
+
   if (!object) return null;
+
   if (object.size > MAX_MARKDOWN_BYTES) throw new Error("stored Markdown is too large");
+
   return object.text();
 }
 
 export async function getPublicReportJson(
-  bucket: R2Bucket,
+  bucket: ReportReader,
   reportId: string,
 ): Promise<string | null> {
   const key = publicReportObjectKey(reportId, "json");
+
   if (!key) return null;
   const object = await bucket.get(key);
+
   if (!object) return null;
   const report = await parseReportObject(object);
   const publicReport = { ...report };
   delete publicReport.sessionId;
+
   return `${JSON.stringify(publicReport, null, 2)}\n`;
 }

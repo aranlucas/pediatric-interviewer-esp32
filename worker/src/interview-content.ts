@@ -290,6 +290,7 @@ export const PEDIATRIC_TOPICS = [
 ] as const satisfies readonly InterviewTopic[];
 
 export type PediatricTopic = (typeof PEDIATRIC_TOPICS)[number];
+
 export type PediatricTopicId = PediatricTopic["id"];
 
 export function findTopic(value: string | null | undefined): PediatricTopic {
