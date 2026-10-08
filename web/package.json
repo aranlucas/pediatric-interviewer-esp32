@@ -18,7 +18,7 @@
     "build:worker": "opennextjs-cloudflare build && wrangler build --experimental-new-config --experimental-cf-build-output"
   },
   "dependencies": {
-    "agents": "^0.24.0",
+    "agents": "^0.26.0",
     "lucide-react": "^1.38.0",
     "next": "^16.3.4",
     "react": "^19.2.8",
