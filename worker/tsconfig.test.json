@@ -1,4 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["src/**/*.ts", "test/**/*.ts", "worker-configuration.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "cloudflare.config.ts",
+    "wrangler.config.ts",
+    ".cloudflare/types/**/*.d.ts"
+  ]
 }

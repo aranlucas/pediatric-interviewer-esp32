@@ -8,7 +8,12 @@
     "skipLibCheck": true,
     "strict": true,
     "target": "ES2022",
-    "types": ["./worker-configuration.d.ts", "node"]
+    "types": ["node"]
   },
-  "include": ["src/**/*.ts", "worker-configuration.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "cloudflare.config.ts",
+    "wrangler.config.ts",
+    ".cloudflare/types/**/*.d.ts"
+  ]
 }

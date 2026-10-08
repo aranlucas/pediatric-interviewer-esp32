@@ -67,7 +67,8 @@ const nextConfig: NextConfig = {
 export default nextConfig;
 
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+import { prepareOpenNextConfig } from "./tools/opennext-config.ts";
 
 if (process.env.NODE_ENV === "development") {
-  initOpenNextCloudflareForDev();
+  initOpenNextCloudflareForDev({ configPath: await prepareOpenNextConfig() });
 }

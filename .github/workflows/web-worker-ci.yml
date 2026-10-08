@@ -29,14 +29,14 @@ jobs:
       - run: pnpm audit --prod
       - run: pnpm test
       - run: pnpm check
-      - run: pnpm exec wrangler deploy --dry-run
+      - run: pnpm exec cf deploy --dry-run
 
   web:
     name: Web
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # Build-time placeholder only. Production uses `wrangler secret put`.
+      # Build-time placeholder only. Production supplies secrets with `cf deploy --secrets-file`.
       WEB_TOKEN_SECRET: ci-only-not-a-production-secret-000000
     defaults:
       run:
@@ -50,5 +50,5 @@ jobs:
       - run: pnpm audit --prod
       - run: pnpm test
       - run: pnpm check
-      - run: pnpm exec opennextjs-cloudflare build
-      - run: pnpm exec wrangler deploy --dry-run
+      - run: pnpm build:worker
+      - run: pnpm exec cf deploy --prebuilt --dry-run

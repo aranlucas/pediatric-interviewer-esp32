@@ -1,8 +1,10 @@
 import { defineWranglerConfig } from "wrangler/experimental-config";
 
+export const assetsDirectory = ".open-next/assets";
+
 export default defineWranglerConfig({
   types: {
-    generate: false,
+    generate: true,
   },
-  assetsDirectory: ".open-next/assets",
+  assetsDirectory,
 });

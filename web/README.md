@@ -12,7 +12,7 @@ at Standard difficulty.
 - The browser captures 24 kHz mono PCM16 in an AudioWorklet, streams it through the Agents SDK connection, and schedules returned PCM16 through Web Audio.
 - The Agents SDK connects to the `esp32-angry-cat` Worker using a 128-bit `web-<32 hex>` Durable Object name. A same-origin session route creates that room server-side, issues a two-hour room-scoped HMAC connection token, and stores separate signed owner and report capabilities in Secure, HttpOnly cookies. Refreshing an existing room requires its owner capability.
 - Session authentication is fetched once per explicit connection attempt and passed through the SDK's supported static query contract. Transient sockets therefore use the library's exponential reconnect backoff instead of minting a new token on every failed handshake; a terminal failure exposes one explicit token-refresh action.
-- `WEB_TOKEN_SECRET` is a Worker secret shared by the web OpenNext Worker and the interviewer Worker. Configure it with `wrangler secret put WEB_TOKEN_SECRET`; it must never be a `NEXT_PUBLIC_*` variable.
+- `WEB_TOKEN_SECRET` is a Worker secret shared by the web OpenNext Worker and the interviewer Worker. Supply it with `cf deploy --secrets-file .dev.vars.production`; it must never be a `NEXT_PUBLIC_*` variable.
 - Interview reports remain private R2 objects at rest. The current interview downloads them through `/api/reports/<report-id>?kind=report|cheatsheet`; the web Worker proxies the request over the `INTERVIEWER_SERVICE` binding with an Authorization bearer token.
 - `/reports` is disabled by default. If `PUBLIC_REPORTS_ENABLED=true`, it is a public, read-only library of only redacted artifacts deliberately copied under `pediatric-oral-boards/public-reports/`. It never lists the private `pediatric-oral-boards/reports/` prefix, and public JSON downloads defensively remove the private `sessionId` field.
 - The interviewer and report pages link to `/privacy`, which explains the practice-only data boundary. Never enter patient, guardian, or other identifying information.
@@ -27,12 +27,32 @@ pnpm test
 pnpm cf-typegen
 pnpm typecheck
 pnpm build
-pnpm exec opennextjs-cloudflare build
 pnpm build:worker
 pnpm exec cf deploy --prebuilt --dry-run
 pnpm preview
 pnpm deploy
 ```
+
+`cloudflare.config.ts` is the source of truth for Worker settings and bindings.
+`cf workers types` writes ignored types under `.cloudflare/types/`; the small
+`cloudflare-env.d.ts` file gives OpenNext its expected interface name.
+
+OpenNext currently needs a legacy configuration for its build and Next.js dev
+proxy. `tools/opennext-config.ts` derives the ignored `.opennext-wrangler.json`
+from the Cloudflare config and bundler settings. Do not edit that generated file.
+
+With `cf@1.0.0-beta.13`, `cf build` in a Next.js package runs `next build` without
+producing Cloudflare Build Output. `pnpm build:worker` runs OpenNext and then the
+same Wrangler bundler delegate used by `cf`, producing `.cloudflare/output/v0/`.
+`pnpm preview` uses that delegate to serve the built Worker locally. Deployments
+and CI validation use `cf deploy --prebuilt`. The Wrangler dependency and
+`wrangler.config.ts` remain required for this bundler; the hand-maintained
+`wrangler.jsonc` has been removed.
+
+The pnpm patch in `patches/@opennextjs__cloudflare@1.20.9.patch` includes
+Next.js 16.4's required `preview-props.json` in OpenNext's manifest bundle,
+matching [the upstream fix](https://github.com/opennextjs/opennextjs-cloudflare/pull/1356).
+Remove the patch after upgrading to an adapter release that includes that fix.
 
 Provide the current Worker host while building or developing:
 
@@ -41,12 +61,12 @@ NEXT_PUBLIC_AGENT_HOST=esp32-angry-cat.<account>.workers.dev \
 pnpm dev
 ```
 
-The local OpenNext preview requires local Cloudflare bindings/secrets for the
-session and room-scoped report routes. Put a development-only `WEB_TOKEN_SECRET`
+The local OpenNext development server and preview require Cloudflare bindings
+and local secrets for the session and room-scoped report routes. Put a development-only `WEB_TOKEN_SECRET`
 value of at least 32 characters in `.dev.vars` (which is gitignored). Without it,
 the affected interview UI stays visible but shows a recoverable secure-setup
 error instead of silently falling back to an insecure token. The
-`INTERVIEW_REPORTS` binding is marked `remote: true`, so local `/reports` can
+`INTERVIEW_REPORTS` binding is marked `dev: { remote: true }`, so local `/reports` can
 read the real R2 bucket while the application code continues to run locally.
 The checked-in `PUBLIC_REPORTS_ENABLED=false` default keeps that page from
 listing anything until a deployment operator intentionally enables a reviewed
@@ -59,10 +79,12 @@ the `INTERVIEW_REPORTS` R2 binding, the required shared secret, and a Cloudflare
 Rate Limiting binding. The session endpoint accepts only same-origin `POST`
 requests and has a 12-request-per-client-IP-per-minute limit. Use a random secret
 of at least 32 characters. `WEB_TOKEN_SECRET` must have the exact same value on
-the interviewer Worker:
+the interviewer Worker. Put it in the gitignored `.dev.vars.production` file
+using `WEB_TOKEN_SECRET=<production value>`, then upload it with the deployment:
 
 ```sh
-pnpm exec wrangler secret put WEB_TOKEN_SECRET
+pnpm build:worker
+pnpm exec cf deploy --prebuilt --secrets-file .dev.vars.production
 ```
 
 Deploy the interviewer Worker first because it owns the Durable Object route,

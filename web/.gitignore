@@ -7,3 +7,4 @@ next-env.d.ts
 test-results/
 .env*.local
 .dev.vars*
+.opennext-wrangler.json

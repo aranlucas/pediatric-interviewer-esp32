@@ -208,7 +208,8 @@ pnpm install --frozen-lockfile
 pnpm run generate-types
 pnpm test
 pnpm run check
-pnpm exec cf deploy --dry-run
+pnpm run build
+pnpm exec cf deploy --prebuilt --dry-run
 pnpm run smoke:web
 ```
 
@@ -284,15 +285,24 @@ display behavior still require the connected ESP32 and serial diagnostics.
 
 ## Provisioning and deployment order
 
-Create the private bucket once, then provision the Worker secrets:
+Create the private bucket once:
 
 ```sh
-pnpm exec wrangler r2 bucket create pediatric-oral-boards-reports --location=wnam
-pnpm exec wrangler secret put DEVICE_TOKEN
-pnpm exec wrangler secret put GEMINI_API_KEY
-pnpm exec wrangler secret put WEB_TOKEN_SECRET
-pnpm exec wrangler secret put WEB_ORIGINS
+pnpm exec cf r2 buckets create --name pediatric-oral-boards-reports --location-hint wnam
 ```
+
+Put production values for `DEVICE_TOKEN`, `GEMINI_API_KEY`, `WEB_TOKEN_SECRET`,
+and `WEB_ORIGINS` in the gitignored `.dev.vars.production` file, using the same
+KEY=value format as the local example. Upload them with the deployment:
+
+```sh
+pnpm exec cf deploy --secrets-file .dev.vars.production
+```
+
+`cf workers types` generates ignored `.cloudflare/types/index.d.ts` directly
+from `cloudflare.config.ts`; type checks generate it before running TypeScript.
+The Wrangler dependency and `wrangler.config.ts` supply the bundler used by `cf`.
+Worker names, bindings, and Durable Object lifecycle live in `cloudflare.config.ts`.
 
 The `AI` binding is account-native and configured in `cloudflare.config.ts`; it does
 not require a secret.
@@ -304,7 +314,7 @@ Deploy in this order:
    report/recovery path.
 2. In the `web/` deployment, configure the same `WEB_TOKEN_SECRET`, the public
    web origin in the Worker `WEB_ORIGINS`, and the existing
-   `INTERVIEWER_SERVICE` service binding to `esp32-angry-cat`. The web Wrangler
+   `INTERVIEWER_SERVICE` service binding to `esp32-angry-cat`. The web Cloudflare
    config also owns its `SESSION_RATE_LIMITER` binding.
 3. Build and deploy the web service only after the Worker service exists:
 
