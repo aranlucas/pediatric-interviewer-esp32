@@ -10,7 +10,7 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "deploy": "cf deploy",
-    "dev": "cf dev",
+    "dev": "portless run --name api.pediatric-interviewer-esp32 cf dev",
     "generate-types": "cf workers types",
     "simulate:interview": "node tools/simulate-interview.mjs",
     "simulate:suite": "node tools/simulate-suite.mjs",

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm cf-typegen && next dev",
+    "dev": "pnpm cf-typegen && portless run --name pediatric-interviewer-esp32 next dev",
     "build": "pnpm cf-typegen && next build",
     "check": "pnpm lint && pnpm typecheck",
     "lint": "oxlint .",

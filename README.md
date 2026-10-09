@@ -36,6 +36,6 @@ The firmware sketch and interview client live in firmware/angry_cat_pediatric_in
 
 ## Web and Worker development
 
-The web client is in web/; the Worker code is in worker/. The current root package.json contains committed merge-conflict markers, so it is invalid JSON and the root pnpm workspace cannot currently be installed. The firmware Make workflow remains available. Repair the root manifest before using the workspace's pnpm install and package test commands.
+The web client is in `web/`; the interviewer Worker is in `worker/`. Run `pnpm install` from the repository root, then `pnpm dev` to start both through [Portless](https://github.com/vercel-labs/portless) (a dev dependency); its first run may ask for `sudo` to bind port 443 and trust a local certificate. The web client is at `https://pediatric-interviewer-esp32.localhost` and the Worker at `https://api.pediatric-interviewer-esp32.localhost`. For a fully local pair, set `NEXT_PUBLIC_AGENT_HOST=api.pediatric-interviewer-esp32.localhost` in `web/.env.local` and `WEB_ORIGINS` in the Worker's local secrets to the web origin. The ESP32 keeps its configured, reachable Worker host.
 
 Keep device tokens, provider credentials, and private interview reports out of Git.

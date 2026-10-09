@@ -3,11 +3,13 @@
   "private": true,
   "scripts": {
     "typecheck": "pnpm --dir worker typecheck && pnpm --dir web typecheck",
-    "lint": "pnpm --dir worker lint && pnpm --dir web lint"
+    "lint": "pnpm --dir worker lint && pnpm --dir web lint",
+    "dev": "pnpm --parallel --filter ./web --filter ./worker run dev"
   },
   "packageManager": "pnpm@12.10.1",
   "devDependencies": {
     "oxlint": "1.87.0",
-    "@oxlint/plugins": "1.87.0"
+    "@oxlint/plugins": "1.87.0",
+    "portless": "0.15.7"
   }
 }
