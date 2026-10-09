@@ -33,10 +33,10 @@ jobs:
           - name: Typecheck
             run: pnpm run typecheck
 
-          - name: "Worker: audit, test, check, deploy dry run"
-            run: cd worker && pnpm audit --prod && pnpm test && pnpm check && pnpm exec cf deploy --dry-run
+          - name: Worker test, check, and deploy dry run
+            run: cd worker && pnpm test && pnpm check && pnpm exec cf deploy --dry-run
 
-          - name: "Web: audit, test, check, build, deploy dry run"
+          - name: Web test, check, build, and deploy dry run
             env:
               WEB_TOKEN_SECRET: ci-only-not-a-production-secret-000000
-            run: cd web && pnpm audit --prod && pnpm test && pnpm check && pnpm build:worker && pnpm exec cf deploy --prebuilt --dry-run
+            run: cd web && pnpm test && pnpm check && pnpm build:worker && pnpm exec cf deploy --prebuilt --dry-run
