@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm, Node.js, and dependencies
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
+        with:
+          cache: true
+          require-lockfile: true
+
+      - parallel:
+          - name: Typecheck
+            run: pnpm run typecheck
+
+          - name: "Worker: audit, test, check, deploy dry run"
+            run: cd worker && pnpm audit --prod && pnpm test && pnpm check && pnpm exec cf deploy --dry-run
+
+          - name: "Web: audit, test, check, build, deploy dry run"
+            env:
+              WEB_TOKEN_SECRET: ci-only-not-a-production-secret-000000
+            run: cd web && pnpm audit --prod && pnpm test && pnpm check && pnpm build:worker && pnpm exec cf deploy --prebuilt --dry-run
