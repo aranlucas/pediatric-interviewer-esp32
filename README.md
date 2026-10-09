@@ -59,8 +59,7 @@ Use the URL printed by Portless if you have changed its proxy port, TLS, or TLD.
 Linked Git worktrees get a branch prefix, so each checkout has its own origin.
 The first HTTPS run can request local administrator permission to bind port 443,
 trust its development certificate, and synchronize local hostnames. Ctrl+C stops
-the child server and removes its route. The direct fallback below starts the
-server without the proxy.
+the child server and removes its route.
 
 `pnpm dev` starts both applications. To run one service, use `pnpm dev:web` or
 `pnpm dev:worker`. The web client's default URL is `https://pediatric-interviewer-esp32.localhost`. For a fully local
@@ -75,5 +74,5 @@ provides local routing and HTTPS. Do not use production secrets for this setup.
 
 HTTPS supports the existing Secure cookies and browser microphone requirements.
 This `.localhost` route is for a browser on the development computer; the physical
-ESP32 retains its configured, reachable Worker host. Use `pnpm dev:direct` for both direct servers, or `pnpm --dir web dev:direct`
-and `pnpm --dir worker dev:direct` individually. Firmware commands are unchanged.
+ESP32 retains its configured, reachable Worker host. Use `pnpm dev:web` or
+`pnpm dev:worker` to run one local service individually. Firmware commands are unchanged.
