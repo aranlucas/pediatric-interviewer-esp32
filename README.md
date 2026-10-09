@@ -36,43 +36,6 @@ The firmware sketch and interview client live in firmware/angry_cat_pediatric_in
 
 ## Web and Worker development
 
-The web client is in `web/`; the interviewer Worker is in `worker/`. Run `pnpm install` from the repository root. The web development command runs Cloudflare type generation before starting Next.js; the firmware retains its separate Make workflow.
+The web client is in `web/`; the interviewer Worker is in `worker/`. Run `pnpm install` from the repository root, then `pnpm dev` to start both through [Portless](https://github.com/vercel-labs/portless) (a dev dependency); its first run may ask for `sudo` to bind port 443 and trust a local certificate. The web client is at `https://pediatric-interviewer-esp32.localhost` and the Worker at `https://api.pediatric-interviewer-esp32.localhost`. For a fully local pair, set `NEXT_PUBLIC_AGENT_HOST=api.pediatric-interviewer-esp32.localhost` in `web/.env.local` and `WEB_ORIGINS` in the Worker's local secrets to the web origin. The ESP32 keeps its configured, reachable Worker host.
 
 Keep device tokens, provider credentials, and private interview reports out of Git.
-
-## Local URLs with Portless
-
-The Worker and Next.js client run as separate processes so they receive different
-backend ports. The web command preserves its Cloudflare type-generation step.
-
-The standard development command uses [Portless](https://github.com/vercel-labs/portless).
-Install its pinned CLI once with Node.js 24 or newer, then run this repository's command after the
-normal dependency and environment setup:
-
-```sh
-npm install -g portless@0.15.7
-pnpm dev
-```
-
-The main checkout uses `https://api.pediatric-interviewer-esp32.localhost` with the default proxy settings.
-Use the URL printed by Portless if you have changed its proxy port, TLS, or TLD.
-Linked Git worktrees get a branch prefix, so each checkout has its own origin.
-The first HTTPS run can request local administrator permission to bind port 443,
-trust its development certificate, and synchronize local hostnames. Ctrl+C stops
-the child server and removes its route.
-
-`pnpm dev` starts both applications. To run one service, use `pnpm dev:web` or
-`pnpm dev:worker`. The web client's default URL is `https://pediatric-interviewer-esp32.localhost`. For a fully local
-pair, set `NEXT_PUBLIC_AGENT_HOST=api.pediatric-interviewer-esp32.localhost` in
-`web/.env.local`, and set `WEB_ORIGINS` in the interviewer's local secret file to the
-exact web origin. Use the printed branch-prefixed hostnames for linked worktrees.
-Keep HTTPS enabled for this app's existing Secure cookies and agent connection policy.
-The local OpenNext and interviewer Workers still need the same development-only
-`WEB_TOKEN_SECRET` and their existing Cloudflare bindings. Follow the current
-web/Worker binding setup for private reports and session routes; Portless only
-provides local routing and HTTPS. Do not use production secrets for this setup.
-
-HTTPS supports the existing Secure cookies and browser microphone requirements.
-This `.localhost` route is for a browser on the development computer; the physical
-ESP32 retains its configured, reachable Worker host. Use `pnpm dev:web` or
-`pnpm dev:worker` to run one local service individually. Firmware commands are unchanged.

@@ -10,7 +10,7 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "deploy": "cf deploy",
-    "dev": "portless run --name api.pediatric-interviewer-esp32 sh -c 'exec wrangler dev --experimental-new-config --ip 127.0.0.1 --port \"$PORT\"'",
+    "dev": "portless run --name api.pediatric-interviewer-esp32 cf dev",
     "generate-types": "cf workers types",
     "simulate:interview": "node tools/simulate-interview.mjs",
     "simulate:suite": "node tools/simulate-suite.mjs",
