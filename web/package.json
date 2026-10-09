@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm cf-typegen && next dev",
+    "dev": "portless run --name pediatric-interviewer-esp32 pnpm dev:direct",
     "build": "pnpm cf-typegen && next build",
     "check": "pnpm lint && pnpm typecheck",
     "lint": "oxlint .",
@@ -16,7 +16,8 @@
     "deploy": "pnpm build:worker && cf deploy --prebuilt",
     "cf-typegen": "cf workers types",
     "typecheck": "pnpm cf-typegen && tsc --noEmit",
-    "build:worker": "pnpm cf-typegen && node tools/cloudflare.mjs build"
+    "build:worker": "pnpm cf-typegen && node tools/cloudflare.mjs build",
+    "dev:direct": "pnpm cf-typegen && next dev"
   },
   "dependencies": {
     "agents": "^0.27.0",

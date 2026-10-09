@@ -10,14 +10,15 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "deploy": "cf deploy",
-    "dev": "cf dev",
+    "dev": "portless run --name api.pediatric-interviewer-esp32 sh -c 'exec wrangler dev --experimental-new-config --ip 127.0.0.1 --port \"$PORT\"'",
     "generate-types": "cf workers types",
     "simulate:interview": "node tools/simulate-interview.mjs",
     "simulate:suite": "node tools/simulate-suite.mjs",
     "smoke:web": "node tools/smoke-web.mjs",
     "test": "vitest run",
     "typecheck": "pnpm generate-types && tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-    "build": "cf build"
+    "build": "cf build",
+    "dev:direct": "cf dev"
   },
   "dependencies": {
     "@google/genai": "^2.28.0",

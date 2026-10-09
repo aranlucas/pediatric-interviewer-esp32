@@ -3,7 +3,11 @@
   "private": true,
   "scripts": {
     "typecheck": "pnpm --dir worker typecheck && pnpm --dir web typecheck",
-    "lint": "pnpm --dir worker lint && pnpm --dir web lint"
+    "lint": "pnpm --dir worker lint && pnpm --dir web lint",
+    "dev": "pnpm --parallel --filter './web' --filter './worker' run dev",
+    "dev:direct": "pnpm --parallel --filter './web' --filter './worker' run dev:direct",
+    "dev:web": "pnpm --dir web dev",
+    "dev:worker": "pnpm --dir worker dev"
   },
   "packageManager": "pnpm@12.10.1",
   "devDependencies": {
