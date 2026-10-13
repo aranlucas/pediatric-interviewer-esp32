@@ -172,6 +172,8 @@ async function listReportObjects(bucket: ReportArchive): Promise<ListedReport[]>
   let cursor: string | undefined;
 
   do {
+    // The next page depends on the cursor returned by the previous request.
+    // eslint-disable-next-line no-await-in-loop
     const page = await bucket.list({
       prefix: PUBLIC_REPORT_PREFIX,
       limit: 1_000,

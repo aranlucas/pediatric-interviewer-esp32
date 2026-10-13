@@ -36,7 +36,7 @@ function base64UrlDecode(value: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-async function hmacKey(secret: string, usages: KeyUsage[]): Promise<CryptoKey> {
+function hmacKey(secret: string, usages: KeyUsage[]): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     "raw",
     encoder.encode(secret),

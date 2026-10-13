@@ -1,6 +1,8 @@
 import { getPublicReportJson, publicReportObjectKey } from "@/lib/reports";
 import { publicReportsEnabled } from "@/lib/reports-environment";
 
+import type { ErrorResponse, ReportRouteContext } from "@/lib/route-types";
+
 export type ReportDownloadEnv = {
   INTERVIEW_REPORTS?: {
     get(key: string): Promise<Pick<R2ObjectBody, "body" | "size" | "text"> | null>;
@@ -8,7 +10,7 @@ export type ReportDownloadEnv = {
   PUBLIC_REPORTS_ENABLED?: string;
 };
 
-function json(data: { error: string }, status: number): Response {
+function json(data: ErrorResponse, status: number): Response {
   return Response.json(data, {
     status,
     headers: { "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" },
@@ -18,7 +20,7 @@ function json(data: { error: string }, status: number): Response {
 export function createReportDownloadHandler(environment: () => Promise<ReportDownloadEnv | null>) {
   return async function GET(
     request: Request,
-    { params }: { params: Promise<{ reportId: string }> },
+    { params }: ReportRouteContext,
   ): Promise<Response> {
     const { reportId } = await params;
     const kind = new URL(request.url).searchParams.get("kind");

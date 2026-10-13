@@ -3,12 +3,11 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { simulatePlaybackBuffer } from "./audio-buffer-model.mjs";
 import { interviewerSettings } from "./interviewer-settings.mjs";
 
-const toolDirectory = path.dirname(fileURLToPath(import.meta.url));
+const toolDirectory = import.meta.dirname;
 
 const projectDirectory = path.dirname(toolDirectory);
 
@@ -19,7 +18,7 @@ function requireCondition(condition, message) {
 function normalized(value) {
   return String(value)
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ");
+    .replaceAll(/[^a-z0-9]+/g, " ");
 }
 
 function runLiveSimulation(name, arguments_) {
@@ -116,9 +115,7 @@ async function runGate(name, operation) {
 
 async function main() {
   const connection = await interviewerSettings();
-  const gates = [];
-
-  gates.push(
+  const gates = [
     await runGate("two_second_thinking_pause", async () => {
       const result = await runLiveSimulation("two_second_thinking_pause", [
         "--turns",
@@ -140,9 +137,6 @@ async function main() {
 
       return { transcriptCharacters: result.candidateTranscripts[0].length };
     }),
-  );
-
-  gates.push(
     await runGate("four_second_explicit_commit", async () => {
       const result = await runLiveSimulation("four_second_explicit_commit", [
         "--turns",
@@ -161,9 +155,6 @@ async function main() {
 
       return { commits: result.commitsSent, advancedToQuestion: 2 };
     }),
-  );
-
-  gates.push(
     await runGate("cafe_noise_tap_commit", async () => {
       const result = await runLiveSimulation("cafe_noise_tap_commit", [
         "--turns",
@@ -186,19 +177,13 @@ async function main() {
         transcriptCharacters: result.candidateTranscripts[0].length,
       };
     }),
-  );
-
-  gates.push(
-    await runGate("playback_350ms_jitter", async () => {
+    await runGate("playback_350ms_jitter", () => {
       const model = simulatePlaybackBuffer({ maximumJitterMs: 350 });
       requireCondition(model.passed, "buffer model underrun or overflow");
       requireCondition(model.maximumArrivalGapMs >= 350, "jitter fixture was not applied");
 
       return model;
     }),
-  );
-
-  gates.push(
     await runGate("six_turn_report_to_r2", async () => {
       const result = await runLiveSimulation("six_turn_report_to_r2", [
         "--turns",
@@ -241,7 +226,7 @@ async function main() {
         outputAudioFrames: result.outputAudio.frames,
       };
     }),
-  );
+  ];
 
   const failed = gates.filter(({ status }) => status === "failed");
 

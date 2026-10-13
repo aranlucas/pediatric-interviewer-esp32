@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { randomBytes, randomUUID } from "node:crypto";
 
-import WebSocket from "ws";
+import { WebSocket } from "ws";
 
 const WEB_ORIGIN = process.env.WEB_ORIGIN ?? "https://angry-cat-oral-boards.aranlucas.workers.dev";
 

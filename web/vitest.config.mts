@@ -1,4 +1,3 @@
-import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 import tsconfigPaths from "vite-tsconfig-paths";
@@ -7,7 +6,7 @@ export default defineConfig({
   plugins: [tsconfigPaths(), react()],
   resolve: {
     alias: {
-      "@": fileURLToPath(new URL(".", import.meta.url)),
+      "@": import.meta.dirname,
     },
   },
   test: {

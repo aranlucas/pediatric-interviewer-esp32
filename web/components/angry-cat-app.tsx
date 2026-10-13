@@ -3,6 +3,7 @@
 import { parseInterviewMessage, parseInterviewStatus } from "@/lib/interview-messages";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useAgent } from "agents/react";
 import {
   Activity,
@@ -26,7 +27,7 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BrowserInterviewAudio, DEFAULT_OUTPUT_VOLUME } from "@/lib/browser-audio";
 import {
@@ -60,6 +61,17 @@ import { InterviewReview } from "@/components/interview-review";
 import { BrowserSessionGate } from "@/components/browser-session-gate";
 
 type TranscriptItem = { id: number; role: "examiner" | "candidate"; text: string };
+
+type InterviewCommand =
+  | { type: "commit_turn" | "recover_report" | "end_call" }
+  | { type: "candidate_text"; text: string }
+  | {
+      type: "start_call";
+      topic_id?: string;
+      topic_ids: readonly string[];
+      question_count: number;
+      difficulty: InterviewDifficulty;
+    };
 
 type AgentSocket = {
   OPEN?: number;
@@ -111,17 +123,19 @@ export function AngryCatApp() {
   );
 }
 
+type InterviewExperienceProps = {
+  connectionEnabled: boolean;
+  room: string;
+  sessionToken: string;
+  onRefreshSession: () => void;
+};
+
 function InterviewExperience({
   connectionEnabled,
   room,
   sessionToken,
   onRefreshSession,
-}: {
-  connectionEnabled: boolean;
-  room: string;
-  sessionToken: string;
-  onRefreshSession: () => void;
-}) {
+}: InterviewExperienceProps) {
   const [view, setView] = useState<"topics" | "interview" | "review">("topics");
   const [state, setState] = useState<InterviewState>(EMPTY_STATE);
   const [status, setStatus] = useState<InterviewStatus>("idle");
@@ -158,39 +172,26 @@ function InterviewExperience({
   const startingRef = useRef(false);
   const startGenerationRef = useRef(0);
 
-  const updateStatus = useCallback((next: InterviewStatus) => {
-    statusRef.current = next;
-    setStatus(next);
-  }, []);
-
   const updateTextComposerOpen = useCallback((open: boolean) => {
     textComposerOpenRef.current = open;
     setTextComposerOpen(open);
     audioRef.current?.setListening(shouldCaptureInterviewAudio(statusRef.current, open));
   }, []);
 
+  const updateStatus = useCallback((next: InterviewStatus) => {
+    statusRef.current = next;
+    setStatus(next);
+
+    if (next === "evaluating" || next === "complete") updateTextComposerOpen(false);
+  }, [updateTextComposerOpen]);
+
   useEffect(() => {
     if (textComposerOpen) typedAnswerRef.current?.focus();
   }, [textComposerOpen]);
 
-  useEffect(() => {
-    if (status === "evaluating" || status === "complete") {
-      updateTextComposerOpen(false);
-    }
-  }, [status, updateTextComposerOpen]);
-
   const sendJson = useCallback(
     (
-      message:
-        | { type: "commit_turn" | "recover_report" | "end_call" }
-        | { type: "candidate_text"; text: string }
-        | {
-            type: "start_call";
-            topic_id?: string;
-            topic_ids: readonly string[];
-            question_count: number;
-            difficulty: InterviewDifficulty;
-          },
+      message: InterviewCommand,
     ): boolean => {
       const socket = agentRef.current;
 
@@ -225,8 +226,8 @@ function InterviewExperience({
     }
   }, []);
 
-  if (!audioRef.current) {
-    audioRef.current = new BrowserInterviewAudio({
+  useEffect(() => {
+    const audio = new BrowserInterviewAudio({
       onCaptureUnavailable: () => {
         setAudioAvailable(false);
         updateTextComposerOpen(true);
@@ -244,10 +245,19 @@ function InterviewExperience({
       },
       onSpeakingChange: setBrowserSpeaking,
     });
-  }
+    audioRef.current = audio;
+
+    return () => {
+      startGenerationRef.current += 1;
+      startingRef.current = false;
+      pendingEndRef.current = false;
+      audio.stop();
+      audioRef.current = undefined;
+    };
+  }, [sendJson, updateStatus, updateTextComposerOpen]);
 
   const appendTranscript = useCallback((role: TranscriptItem["role"], text: string) => {
-    const clean = text.replace(/\s+/g, " ").trim();
+    const clean = text.replaceAll(/\s+/g, " ").trim();
 
     if (!clean) return;
     setTranscript((items) => [
@@ -449,24 +459,17 @@ function InterviewExperience({
 
   useEffect(() => {
     agentRef.current = agent;
+    // The SDK returns a mutable WebSocket; binaryType configures its external transport.
+    // eslint-disable-next-line react/immutability
     agent.binaryType = "arraybuffer";
   }, [agent]);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-
-    return () => {
-      startGenerationRef.current += 1;
-      startingRef.current = false;
-      pendingEndRef.current = false;
-      audio?.stop();
-    };
-  }, []);
 
   useEffect(() => {
     if (!connected || !pendingEndRef.current) return;
 
     if (!sendJson({ type: "end_call" })) {
+      // Reconcile the queued request with external WebSocket readiness after reconnect.
+      // eslint-disable-next-line react/set-state-in-effect
       setError(
         "Connection returned, but ending the interview could not be sent. Retry connection.",
       );
@@ -500,8 +503,7 @@ function InterviewExperience({
     });
   }, [keepScreenAwake]);
 
-  const activeTopics = TOPICS.filter((topic) => selectedTopics.includes(topic.id));
-  const activeTopic = activeTopics[0] ?? TOPICS[0];
+  const activeTopic = TOPICS.find((topic) => selectedTopics.includes(topic.id)) ?? TOPICS[0];
   const activeTopicLabel = topicSelectionLabel(selectedTopics);
 
   const plannedQuestionCount =
@@ -791,17 +793,22 @@ function InterviewExperience({
             <span>Difficulty</span>
             <div role="radiogroup" aria-label="Difficulty level">
               {DIFFICULTY_OPTIONS.map((option) => (
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={difficulty === option.id}
+                <label
                   data-selected={difficulty === option.id}
-                  disabled={setupLocked}
+                  data-disabled={setupLocked}
                   key={option.id}
-                  onClick={() => setDifficulty(option.id)}
                 >
+                  <input
+                    className="visually-hidden"
+                    type="radio"
+                    name="difficulty"
+                    value={option.id}
+                    checked={difficulty === option.id}
+                    disabled={setupLocked}
+                    onChange={() => setDifficulty(option.id)}
+                  />
                   {option.label}
-                </button>
+                </label>
               ))}
             </div>
             <small>{difficultyDetail}</small>
@@ -814,7 +821,7 @@ function InterviewExperience({
           >
             {startButtonLabel}
           </button>
-          <div className="setup-connection" role="status" aria-live="polite">
+          <div className="setup-connection">
             <ConnectionIndicator state={connectionState} />
             {connectionState !== "connected" && error && <p role="alert">{error}</p>}
             {connectionState === "error" && (
@@ -835,10 +842,10 @@ function InterviewExperience({
           <ShieldCheck size={18} aria-hidden="true" />
           <span>
             Practice data only: never enter real patient, child, guardian, or identifying
-            information. <a href="/privacy">Privacy and data use</a>
+            information. <Link href="/privacy">Privacy and data use</Link>
           </span>
         </div>
-        <a
+        <Link
           className="reports-hub-link"
           href="/reports"
           aria-disabled={setupLocked}
@@ -849,7 +856,7 @@ function InterviewExperience({
         >
           <ClipboardCheck size={18} aria-hidden="true" />
           Open public reports
-        </a>
+        </Link>
       </aside>
 
       <section
@@ -939,14 +946,13 @@ function InterviewExperience({
                 {state.currentQuestion ||
                   "Angry Cat is preparing a new oral-board vignette for your selected topic."}
               </h2>
-              <div
+              <output
                 className="voice-state"
                 data-status={status}
-                role="status"
                 aria-live="polite"
                 aria-atomic="true"
               >
-                <div className="voice-icon">
+                <span className="voice-icon">
                   {status === "evaluating" ? (
                     <ClipboardCheck />
                   ) : status === "error" ? (
@@ -954,21 +960,21 @@ function InterviewExperience({
                   ) : (
                     <Mic />
                   )}
-                </div>
-                <div>
+                </span>
+                <span>
                   <strong>{copy.label}</strong>
-                  <p>{statusDetail}</p>
-                </div>
+                  <span className="voice-state-detail">{statusDetail}</span>
+                </span>
                 <Waveform
                   level={status === "listening" ? level : browserSpeaking ? 0.72 : 0.18}
                   active={status !== "idle"}
                 />
-              </div>
+              </output>
               {keepScreenAwake && wakeLockWarning && (
-                <div className="screen-wake-warning" role="status">
+                <output className="screen-wake-warning">
                   <CircleAlert size={18} aria-hidden="true" />
                   <span>{wakeLockWarning}</span>
-                </div>
+                </output>
               )}
             </section>
 
@@ -1068,15 +1074,14 @@ function InterviewExperience({
               </div>
             </div>
 
-            <div
-              className="audio-meter"
-              role="progressbar"
-              aria-label="Microphone level"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(level * 100)}
-              aria-valuetext={`${Math.round(level * 100)} percent`}
-            >
+            <div className="audio-meter">
+              <progress
+                className="visually-hidden"
+                aria-label="Microphone level"
+                max={100}
+                value={Math.round(level * 100)}
+                aria-valuetext={`${Math.round(level * 100)} percent`}
+              />
               <span>Audio level</span>
               <div>
                 <i style={{ transform: `scaleX(${Math.max(0.04, level)})` }} />

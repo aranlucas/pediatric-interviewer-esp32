@@ -34,9 +34,11 @@ function fakeSentinel() {
     addEventListener: vi.fn(
       (_type: "release", listener: () => void) => (releaseListener = listener),
     ),
-    release: vi.fn(async () => {
+    release: vi.fn(() => {
       sentinel.released = true;
       releaseListener?.();
+
+      return Promise.resolve();
     }),
   };
 
@@ -48,7 +50,7 @@ describe("screen wake lock", () => {
     const visibilityDocument = new FakeVisibilityDocument();
     const sentinel = fakeSentinel();
     const onStateChange = vi.fn();
-    const request = vi.fn(async () => sentinel);
+    const request = vi.fn().mockResolvedValue(sentinel);
 
     const stop = holdScreenWakeLock({
       document: visibilityDocument,

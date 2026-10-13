@@ -35,13 +35,13 @@ const CASE = "Here is your case. This is a synthetic training scenario.";
 const PCM = new Uint8Array([1, 0, 2, 0]);
 
 function deferred<T>() {
-  let resolve!: (value: T) => void;
+  let resolveDeferred!: (value: T) => void;
 
-  const promise = new Promise<T>((accept) => {
-    resolve = accept;
+  const promise = new Promise<T>((resolve) => {
+    resolveDeferred = resolve;
   });
 
-  return { promise, resolve };
+  return { promise, resolve: resolveDeferred };
 }
 
 function client(id: string) {

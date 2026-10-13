@@ -79,7 +79,7 @@ describe("completed report library", () => {
         truncated: false,
       });
 
-    const get = vi.fn(async (key: string) => {
+    const get = vi.fn((key: string) => {
       const reportId = key.includes(newerId) ? newerId : olderId;
 
       const generatedAt =
@@ -93,7 +93,7 @@ describe("completed report library", () => {
         evaluation: { outcome: "pass", exchanges: [], scoreSummary: [] },
       });
 
-      return { size: body.length, text: async () => body };
+      return Promise.resolve({ size: body.length, text: () => Promise.resolve(body) });
     });
 
     const reports = await listCompletedReports({ list, get });
@@ -120,7 +120,7 @@ describe("completed report library", () => {
 
     const get = vi.fn().mockResolvedValue({
       size: body.length,
-      text: async () => body,
+      text: () => Promise.resolve(body),
     });
 
     const publicBody = await getPublicReportJson({ get }, REPORT_ID);

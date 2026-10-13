@@ -24,7 +24,7 @@ export function appendBoundedTranscript(
   const needsWordBoundary =
     !/\s$/u.test(current) &&
     !/^[\s,.;:!?…\])}'’"—-]/u.test(fragment) &&
-    !/[\[({'’"—-]$/u.test(current);
+    !/[[({'’"—-]$/u.test(current);
 
   return `${current}${needsWordBoundary ? " " : ""}${fragment}`.slice(0, limit);
 }

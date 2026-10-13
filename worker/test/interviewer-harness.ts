@@ -34,25 +34,19 @@ export function testInterviewer(
       state = structuredClone(next);
     },
     sql: vi.fn(() => []),
-    keepAlive: vi.fn(async () => () => undefined),
-    keepAliveWhile: async (operation) => operation(),
-    retry: async (operation) => operation(1),
+    keepAlive: vi.fn().mockResolvedValue(() => undefined),
+    keepAliveWhile: async (operation) => await operation(),
+    retry: async (operation) => await operation(1),
     ...hostOverrides,
   };
 
   return new InterviewerCore(host, {
-    connect: async () => {
-      throw new Error("No synthetic Live provider configured");
-    },
-    generateOpeningCase: async () => {
-      throw new Error("No synthetic case provider configured");
-    },
-    synthesizeOpeningSpeech: async () => {
-      throw new Error("No synthetic speech provider configured");
-    },
-    synthesizeCloudflareSpeech: async () => {
-      throw new Error("No synthetic Cloudflare speech configured");
-    },
+    connect: () => Promise.reject(new Error("No synthetic Live provider configured")),
+    generateOpeningCase: () => Promise.reject(new Error("No synthetic case provider configured")),
+    synthesizeOpeningSpeech: () =>
+      Promise.reject(new Error("No synthetic speech provider configured")),
+    synthesizeCloudflareSpeech: () =>
+      Promise.reject(new Error("No synthetic Cloudflare speech configured")),
     finalizeInterviewReport,
     ...services,
   });

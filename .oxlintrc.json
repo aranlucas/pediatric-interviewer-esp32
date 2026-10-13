@@ -1,8 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "extends": [
-    "./node_modules/@aranlucas/oxforge/configs/recommended.json"
-  ],
+  "extends": ["./node_modules/@aranlucas/oxforge/configs/recommended.json"],
   "rules": {
     "oxc/no-accumulating-spread": "error",
     "eslint/curly": "off",

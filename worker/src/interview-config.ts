@@ -63,12 +63,16 @@ export function normalizeDifficulty(value: string | undefined): InterviewDifficu
   );
 }
 
-export function resolveInterviewConfiguration(input: {
+type InterviewConfigurationInput = {
   topicIds?: readonly string[];
   legacyTopicId?: string;
   questionCount?: number;
   difficulty?: string;
-}): InterviewConfiguration | null {
+};
+
+export function resolveInterviewConfiguration(
+  input: InterviewConfigurationInput,
+): InterviewConfiguration | null {
   const topicIds = resolveTopicIds(input.topicIds, input.legacyTopicId);
 
   if (!topicIds) return null;

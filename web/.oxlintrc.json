@@ -14,5 +14,8 @@
     ".cloudflare/**",
     ".open-next/**"
   ],
-  "extends": ["../.oxlintrc.json"]
+  "extends": ["../.oxlintrc.json"],
+  "rules": {
+    "react/react-in-jsx-scope": "off"
+  }
 }

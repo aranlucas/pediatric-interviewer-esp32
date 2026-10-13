@@ -128,7 +128,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
   it("rejects a new start while report finalization is in flight", async () => {
     const { interviewer, runtime } = newInterviewer();
-    runtime.finalizationPromise = new Promise<void>(() => undefined);
+    runtime.finalizationPromise = new Promise<void>(() => {});
     const sent: string[] = [];
 
     await interviewer.onMessage(
@@ -178,12 +178,13 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         activeQuestion: "What else would you evaluate?",
       },
     };
-    runtime.finishInterview = vi.fn(async () => {
+    runtime.finishInterview = vi.fn(() => {
       runtime.state = {
         ...runtime.state,
         phase: "complete",
         reportId: "pending-only-report",
       };
+      return Promise.resolve();
     });
 
     const response = await interviewer.onRequest(
@@ -210,7 +211,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         activeQuestion: "What else would you evaluate?",
       },
     };
-    runtime.finishInterview = vi.fn(async () => undefined);
+    runtime.finishInterview = vi.fn().mockResolvedValue(undefined);
 
     await interviewer.onMessage(activeConnection, JSON.stringify({ type: "end_call" }));
 
@@ -647,9 +648,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     runtime.liveGeneration = 21;
     runtime.pendingProviderTurn = pending;
     runtime.clearResumptionHandle = vi.fn(() => true);
-    runtime.finishGeminiTurn = vi.fn(async () => {
-      throw new Error("finalization failed");
-    });
+    runtime.finishGeminiTurn = vi.fn().mockRejectedValue(new Error("finalization failed"));
     runtime.handleGeminiTransportFailure = vi.fn();
 
     runtime.handleGeminiMessage({ serverContent: { turnComplete: true } }, 21);

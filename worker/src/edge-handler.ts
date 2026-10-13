@@ -21,14 +21,8 @@ export type ReportObject = Pick<
 >;
 
 export interface AgentRouteOptions {
-  onBeforeRequest(
-    request: Request,
-    lobby: { className: string; name: string },
-  ): Promise<Response | undefined>;
-  onBeforeConnect(
-    request: Request,
-    lobby: { className: string; name: string },
-  ): Promise<Response | undefined>;
+  onBeforeRequest(request: Request, lobby: InterviewerLobby): Promise<Response | undefined>;
+  onBeforeConnect(request: Request, lobby: InterviewerLobby): Promise<Response | undefined>;
 }
 
 export type AgentRouter<E extends WorkerEnv> = (
@@ -47,24 +41,26 @@ const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
 };
 
-function json(
-  data:
-    | { error: string }
-    | {
-        ok: boolean;
-        protocolVersion: number;
-        capabilities: {
-          deviceWebSocket: boolean;
-          signedWebWebSocket: boolean;
-          privateReports: boolean;
-          reportRecovery: boolean;
-        };
-      },
-  status = 200,
-  extraHeaders: HeadersInit = {},
-): Response {
+type WorkerResponse =
+  | { error: string }
+  | {
+      ok: boolean;
+      protocolVersion: number;
+      capabilities: {
+        deviceWebSocket: boolean;
+        signedWebWebSocket: boolean;
+        privateReports: boolean;
+        reportRecovery: boolean;
+      };
+    };
+
+type InterviewerLobby = { className: string; name: string };
+
+type WorkerBindings<E extends WorkerEnv> = { Bindings: E };
+
+function json(data: WorkerResponse, status = 200, extraHeaders: HeadersInit = {}): Response {
   const headers = new Headers(SECURITY_HEADERS);
-  new Headers(extraHeaders).forEach((value, key) => headers.set(key, value));
+  for (const [key, value] of new Headers(extraHeaders)) headers.set(key, value);
 
   return Response.json(data, { status, headers });
 }
@@ -134,7 +130,7 @@ async function allowConnectionAttempt(env: WorkerEnv, key: string): Promise<bool
   }
 }
 
-function supportedInterviewerLobby(lobby: { className: string; name: string }): boolean {
+function supportedInterviewerLobby(lobby: InterviewerLobby): boolean {
   return lobby.className === "PEDIATRIC_INTERVIEWER" && interviewerLobbyKind(lobby.name) !== null;
 }
 
@@ -173,7 +169,7 @@ async function authorizedReport(
 }
 
 export function createWorker<E extends WorkerEnv>(routeAgentRequest: AgentRouter<E>) {
-  const app = new Hono<{ Bindings: E }>();
+  const app = new Hono<WorkerBindings<E>>();
 
   function healthResponse(): Response {
     return json({
@@ -256,6 +252,8 @@ export function createWorker<E extends WorkerEnv>(routeAgentRequest: AgentRouter
     const env = context.env;
 
     const routed = await routeAgentRequest(request, env, {
+      // The routing hook promises a response even when validation is synchronous.
+      // oxlint-disable-next-line eslint/require-await -- preserve the asynchronous router contract
       onBeforeRequest: async (agentRequest, lobby) => {
         if (!supportedInterviewerLobby(lobby)) {
           return errorResponse("not_found", 404);

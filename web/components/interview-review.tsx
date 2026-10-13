@@ -16,6 +16,23 @@ import { ConnectionIndicator, type ConnectionState } from "@/components/intervie
 
 type InterviewView = "topics" | "interview" | "review";
 
+type InterviewReviewProps = {
+  view: InterviewView;
+  evaluation?: Evaluation;
+  average: number | null;
+  reviewItems: Score[];
+  reviewPage: number;
+  reviewPageCount: number;
+  reportId: string;
+  cheatsheetAvailable: boolean;
+  questionCount: number;
+  connectionState: ConnectionState;
+  canBuildAnother: boolean;
+  onClose: () => void;
+  onBuildAnother: () => void;
+  onReviewPage: (page: number) => void;
+};
+
 export function InterviewReview({
   view,
   evaluation,
@@ -31,22 +48,7 @@ export function InterviewReview({
   onClose,
   onBuildAnother,
   onReviewPage,
-}: {
-  view: InterviewView;
-  evaluation?: Evaluation;
-  average: number | null;
-  reviewItems: Score[];
-  reviewPage: number;
-  reviewPageCount: number;
-  reportId: string;
-  cheatsheetAvailable: boolean;
-  questionCount: number;
-  connectionState: ConnectionState;
-  canBuildAnother: boolean;
-  onClose: () => void;
-  onBuildAnother: () => void;
-  onReviewPage: (page: number) => void;
-}) {
+}: InterviewReviewProps) {
   const activeReview = reviewPage === 0 ? undefined : reviewItems[reviewPage - 1];
   const [downloading, setDownloading] = useState<"report" | "cheatsheet">();
   const [downloadError, setDownloadError] = useState("");
@@ -76,9 +78,11 @@ export function InterviewReview({
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
       anchor.download = `angry-cat-${kind}-${reportId}.md`;
+      // Cloudflare and DOM declarations merge incompatible append overloads here.
+      // eslint-disable-next-line unicorn/prefer-dom-node-append
       document.body.appendChild(anchor);
       anchor.click();
-      document.body.removeChild(anchor);
+      anchor.remove();
       queueMicrotask(() => URL.revokeObjectURL(objectUrl));
     } catch (downloadFailure) {
       setDownloadError(
@@ -168,7 +172,7 @@ export function InterviewReview({
             {reviewItems.map((score, index) => (
               <button
                 type="button"
-                key={`${score.skillset}-${index}`}
+                key={`${score.skill}-${score.skillset}`}
                 onClick={() => onReviewPage(index + 1)}
                 aria-label={`Review ${score.skillset}, score ${score.score} out of 3`}
                 aria-pressed={reviewPage === index + 1}

@@ -276,9 +276,9 @@ describe("Pediatric oral-board interviewer", () => {
   it("resamples PCM when provider and device rates differ", () => {
     const source = new Uint8Array(12);
     const view = new DataView(source.buffer);
-    [0, 1_000, 2_000, 3_000, 4_000, 5_000].forEach((sample, index) =>
-      view.setInt16(index * 2, sample, true),
-    );
+    for (const [index, sample] of [0, 1_000, 2_000, 3_000, 4_000, 5_000].entries()) {
+      view.setInt16(index * 2, sample, true);
+    }
     const output = resamplePcm16(source, 24_000, 16_000);
     expect(output.byteLength).toBe(8);
 
@@ -757,10 +757,11 @@ describe("Pediatric oral-board interviewer", () => {
     const puts: string[] = [];
 
     const bucket = {
-      put: async (key: string) => {
+      put: (key: string) => {
         puts.push(key);
+        return Promise.resolve();
       },
-      delete: async () => undefined,
+      delete: () => Promise.resolve(),
     };
 
     const stored = await storeInterviewReport(bucket, withoutCheatsheet);
@@ -816,13 +817,13 @@ describe("Pediatric oral-board interviewer", () => {
 
   it("stores private JSON and Markdown objects under the report ID", async () => {
     const report = sampleReport();
-    const puts: Array<{ key: string; value: string; options: R2PutOptions }> = [];
+    const puts: ReportWriteWithOptions[] = [];
 
     const bucket = {
-      async put(key: string, value: string, options: R2PutOptions) {
+      put(key: string, value: string, options: R2PutOptions) {
         puts.push({ key, value, options });
 
-        return null;
+        return Promise.resolve(null);
       },
     };
 
@@ -847,13 +848,14 @@ describe("Pediatric oral-board interviewer", () => {
     const deleted: string[][] = [];
 
     const bucket = {
-      async put(key: string) {
-        if (key.endsWith(".md")) throw new Error("R2 unavailable");
+      put(key: string) {
+        if (key.endsWith(".md")) return Promise.reject(new Error("R2 unavailable"));
 
-        return null;
+        return Promise.resolve(null);
       },
-      async delete(keys: string[]) {
+      delete(keys: string[]) {
         deleted.push(keys);
+        return Promise.resolve();
       },
     };
 
@@ -896,15 +898,17 @@ describe("Pediatric oral-board interviewer", () => {
           candidates: [{ content: { parts: [{ text: JSON.stringify(sampleCheatsheet()) }] } }],
         }),
       );
-    const stored: Array<{ key: string; value: string }> = [];
+    const stored: ReportWrite[] = [];
 
     const bucket = {
-      put: vi.fn(async (key: string, value: string) => {
+      put: vi.fn((key: string, value: string) => {
         stored.push({ key, value });
+        return Promise.resolve();
       }),
     };
 
-    const retry = async <T>(operation: (attempt: number) => Promise<T>): Promise<T> => operation(1);
+    const retry = async <T>(operation: (attempt: number) => Promise<T>): Promise<T> =>
+      await operation(1);
 
     const casePresentation =
       "Here is your case. A four-year-old presents with swelling around a restored molar.";
@@ -1202,3 +1206,7 @@ describe("provider error retry boundary", () => {
     expect(shouldRetryGeminiError(new GeminiProviderError("synthetic", 503, true))).toBe(true);
   });
 });
+
+type ReportWrite = { key: string; value: string };
+
+type ReportWriteWithOptions = ReportWrite & { options: R2PutOptions };

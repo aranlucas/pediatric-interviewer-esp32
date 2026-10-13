@@ -1,8 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const toolDirectory = path.dirname(fileURLToPath(import.meta.url));
+const toolDirectory = import.meta.dirname;
 
 const defaultConfigPath = path.resolve(
   toolDirectory,
@@ -40,6 +39,7 @@ async function readConfigTree(configPath, visited = new Set()) {
   const files = [{ path: configPath, source }];
 
   for (const includedPath of includes(source, configPath)) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- depth-first include order and the shared visited set determine configuration precedence
     files.push(...(await readConfigTree(includedPath, visited)));
   }
 

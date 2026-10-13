@@ -56,13 +56,21 @@ export function requestBrowserSessionToken(
         );
       }
 
+      let responseBody: unknown;
+
+      try {
+        responseBody = await response.json();
+      } catch {
+        responseBody = null;
+      }
+
       const parsed = z
         .object({
           room: z.string().regex(WEB_ROOM_PATTERN),
           token: z.string().min(1),
           expiresAt: z.number().finite(),
         })
-        .safeParse(await response.json().catch(() => null));
+        .safeParse(responseBody);
 
       if (
         !parsed.success ||

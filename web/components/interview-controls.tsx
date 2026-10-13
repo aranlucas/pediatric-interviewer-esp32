@@ -1,11 +1,13 @@
 "use client";
 
-import { Mic } from "lucide-react";
+import type { Mic } from "lucide-react";
 import { useMemo } from "react";
 
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "error";
 
-export function ConnectionIndicator({ state }: { state: ConnectionState }) {
+type ConnectionIndicatorProps = { state: ConnectionState };
+
+export function ConnectionIndicator({ state }: ConnectionIndicatorProps) {
   const connected = state === "connected";
 
   const label =
@@ -18,11 +20,10 @@ export function ConnectionIndicator({ state }: { state: ConnectionState }) {
           : "Connecting";
 
   return (
-    <div
+    <output
       className="connection-indicator"
       data-connected={connected}
       data-state={state}
-      role="status"
       aria-live="polite"
     >
       <span aria-hidden="true" /> {label}
@@ -31,20 +32,22 @@ export function ConnectionIndicator({ state }: { state: ConnectionState }) {
         <b />
         <b />
       </i>
-    </div>
+    </output>
   );
 }
 
-export function QuestionProgress({ current, total }: { current: number; total: number }) {
+type QuestionProgressProps = { current: number; total: number };
+
+export function QuestionProgress({ current, total }: QuestionProgressProps) {
   return (
-    <div
-      className="question-progress"
-      role="progressbar"
-      aria-valuemin={0}
-      aria-valuemax={total}
-      aria-valuenow={current}
-      aria-valuetext={current ? `Question ${current} of ${total}` : "Getting ready"}
-    >
+    <div className="question-progress">
+      <progress
+        className="visually-hidden"
+        aria-label="Interview questions"
+        max={total}
+        value={current}
+        aria-valuetext={current ? `Question ${current} of ${total}` : "Getting ready"}
+      />
       <strong>{current ? `Question ${current} of ${total}` : "Getting ready"}</strong>
       <div aria-hidden="true">
         {Array.from({ length: total }, (_, index) => (
@@ -55,25 +58,37 @@ export function QuestionProgress({ current, total }: { current: number; total: n
   );
 }
 
-export function Waveform({ level, active }: { level: number; active: boolean }) {
+type WaveformProps = { level: number; active: boolean };
+
+export function Waveform({ level, active }: WaveformProps) {
   const bars = useMemo(
     () => [0.24, 0.48, 0.8, 0.55, 0.92, 0.62, 0.35, 0.7, 1, 0.58, 0.32, 0.72, 0.43, 0.2],
     [],
   );
 
   return (
-    <div className="waveform" data-active={active} aria-hidden="true">
-      {bars.map((height, index) => (
+    <span className="waveform" data-active={active} aria-hidden="true">
+      {bars.map((height) => (
         <i
-          key={index}
+          key={height}
           style={{
             transform: `scaleY(${(8 + height * 30 * Math.max(0.18, level)) / 38})`,
           }}
         />
       ))}
-    </div>
+    </span>
   );
 }
+
+type ControlButtonProps = {
+  icon: typeof Mic;
+  label: string;
+  active: boolean;
+  disabled?: boolean;
+  controls?: string;
+  expanded?: boolean;
+  onClick: () => void;
+};
 
 export function ControlButton({
   icon: Icon,
@@ -83,15 +98,7 @@ export function ControlButton({
   controls,
   expanded,
   onClick,
-}: {
-  icon: typeof Mic;
-  label: string;
-  active: boolean;
-  disabled?: boolean;
-  controls?: string;
-  expanded?: boolean;
-  onClick: () => void;
-}) {
+}: ControlButtonProps) {
   return (
     <button
       type="button"
