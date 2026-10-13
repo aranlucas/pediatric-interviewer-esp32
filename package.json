@@ -8,8 +8,8 @@
   },
   "packageManager": "pnpm@12.10.1",
   "devDependencies": {
+    "@aranlucas/oxlint-plugin-anti-slop": "0.1.0",
     "oxlint": "1.87.0",
-    "@oxlint/plugins": "1.87.0",
     "portless": "0.15.7"
   }
 }

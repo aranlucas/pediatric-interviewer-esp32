@@ -2,7 +2,7 @@
   "jsPlugins": [
     {
       "name": "anti-slop",
-      "specifier": "./tools/oxlint/anti-slop/index.ts"
+      "specifier": "@aranlucas/oxlint-plugin-anti-slop"
     }
   ],
   "ignorePatterns": [
@@ -16,8 +16,7 @@
     ".opencode/**",
     ".pi/**",
     ".roo/**",
-    ".windsurf/**",
-    "tools/oxlint/anti-slop/**"
+    ".windsurf/**"
   ],
   "rules": {
     "anti-slop/no-array-filter-map": "error",

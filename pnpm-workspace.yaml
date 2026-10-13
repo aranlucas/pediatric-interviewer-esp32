@@ -33,5 +33,7 @@ minimumReleaseAgeExclude:
   - wrangler@4.143.0 || 4.149.0
   - miniflare@5.20261006.1-alpha
   - '@cloudflare/config@0.24.1'
+  - '@aranlucas/*'
+  - '@oxlint/plugins@1.88.0'
 patchedDependencies:
   '@opennextjs/cloudflare@1.20.9': patches/@opennextjs__cloudflare@1.20.9.patch
