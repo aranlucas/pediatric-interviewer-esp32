@@ -387,7 +387,10 @@ textarea:focus-visible {
   grid-template-columns: repeat(3, 1fr);
   gap: 5px;
 }
-.difficulty-field button {
+.difficulty-field label {
+  display: grid;
+  place-items: center;
+  text-align: center;
   min-height: 44px;
   padding: 4px;
   border: 1px solid #6b759759;
@@ -403,18 +406,22 @@ textarea:focus-visible {
     color var(--duration-quick) var(--ease-smooth-out),
     transform var(--duration-quick) var(--ease-smooth-out);
 }
-.difficulty-field button[data-selected="true"] {
+.difficulty-field label[data-selected="true"] {
   color: white;
   border-color: #a080ff;
   background: #6842d9;
   box-shadow: 0 5px 15px #6e46dc38;
 }
-.difficulty-field button:hover:not(:disabled) {
+.difficulty-field label:hover:not([data-disabled="true"]) {
   transform: translateY(-1px);
 }
-.difficulty-field button:disabled {
+.difficulty-field label[data-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.6;
+}
+.difficulty-field label:focus-within {
+  outline: 2px solid #a080ff;
+  outline-offset: 2px;
 }
 .difficulty-field small {
   min-height: 2.3em;
@@ -1041,7 +1048,8 @@ textarea:focus-visible {
 .voice-state[data-status="error"] strong {
   color: #d03d3d;
 }
-.voice-state p {
+.voice-state .voice-state-detail {
+  display: block;
   margin: 3px 0 0;
   color: #596680;
   font-size: 0.84rem;
@@ -1775,7 +1783,7 @@ textarea:focus-visible {
   color: #d9e3f4;
   font-weight: 750;
 }
-.report-library-loading p {
+.report-library-loading > span:not(.loading-cat) {
   margin: 0;
 }
 
@@ -1917,7 +1925,7 @@ textarea:focus-visible {
   justify-content: space-between;
   gap: 20px;
 }
-.report-list-tools > p {
+.report-list-tools > output {
   min-width: max-content;
   margin: 0 0 12px;
   color: #52617a;
@@ -2685,7 +2693,7 @@ textarea:focus-visible {
   .voice-state strong {
     font-size: 1.05rem;
   }
-  .voice-state p {
+  .voice-state .voice-state-detail {
     white-space: normal;
     line-height: 1.35;
   }
@@ -2775,7 +2783,7 @@ textarea:focus-visible {
     display: grid;
     gap: 4px;
   }
-  .report-list-tools > p {
+  .report-list-tools > output {
     margin: 0;
   }
   .report-search-field {
@@ -2940,4 +2948,17 @@ textarea:focus-visible {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* Keep native controls available to assistive technology beside the styled visuals. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }

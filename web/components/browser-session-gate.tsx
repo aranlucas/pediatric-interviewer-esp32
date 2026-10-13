@@ -15,11 +15,13 @@ type BrowserSession = {
   sessionToken: string;
 };
 
+type BrowserSessionGateProps = {
+  children: (session: BrowserSession) => ReactNode;
+};
+
 export function BrowserSessionGate({
   children,
-}: {
-  children: (session: BrowserSession) => ReactNode;
-}) {
+}: BrowserSessionGateProps) {
   const [attempt, setAttempt] = useState(0);
   const [session, setSession] = useState<BrowserSessionToken>();
   const sessionRef = useRef<BrowserSessionToken | undefined>(undefined);
@@ -29,8 +31,6 @@ export function BrowserSessionGate({
   useEffect(() => {
     let active = true;
     const existingRoom = sessionRef.current?.room ?? null;
-    setSetupError("");
-
     const acquireSession = async (): Promise<BrowserSessionToken> => {
       try {
         return await requestBrowserSessionToken(existingRoom, attempt);
@@ -38,7 +38,7 @@ export function BrowserSessionGate({
         // An expired owner cookie cannot recover the old Durable Object. Start
         // a fresh server-owned room rather than leaving the UI permanently
         // stuck behind the failed refresh.
-        if (existingRoom && failure instanceof SessionSetupError && failure.status === 401) {
+        if (active && existingRoom && failure instanceof SessionSetupError && failure.status === 401) {
           sessionRef.current = undefined;
 
           return requestBrowserSessionToken(null, attempt);
@@ -48,26 +48,36 @@ export function BrowserSessionGate({
       }
     };
 
-    void acquireSession()
-      .then((next) => {
+    const setupSession = async (): Promise<void> => {
+      try {
+        const next = await acquireSession();
+
         if (!active) return;
         sessionRef.current = next;
         setSession(next);
         setRefreshing(false);
-      })
-      .catch((failure) => {
+      } catch (failure) {
         if (!active) return;
         setSetupError(
           failure instanceof Error
             ? failure.message
             : "Could not reach secure interviewer setup. Check your connection and retry.",
         );
-      });
+      }
+    };
+
+    void setupSession();
 
     return () => {
       active = false;
     };
   }, [attempt]);
+
+  const refreshSession = (): void => {
+    setRefreshing(true);
+    setSetupError("");
+    setAttempt((current) => current + 1);
+  };
 
   if (!session) {
     return (
@@ -82,24 +92,18 @@ export function BrowserSessionGate({
             </div>
             <h1>Secure connection unavailable</h1>
             <p>{setupError}</p>
-            <button type="button" onClick={() => setAttempt((current) => current + 1)}>
+            <button type="button" onClick={refreshSession}>
               Retry connection
             </button>
           </section>
         ) : (
-          <div className="loading-cat" role="status" aria-label="Connecting securely">
+          <output className="loading-cat" aria-label="Connecting securely">
             AC
-          </div>
+          </output>
         )}
       </main>
     );
   }
-
-  const refreshSession = (): void => {
-    setRefreshing(true);
-    setSetupError("");
-    setAttempt((current) => current + 1);
-  };
 
   return (
     <>

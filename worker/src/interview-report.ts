@@ -41,7 +41,6 @@ export class GeminiProviderError extends Error {
 }
 
 // Rejection values originate in platform/provider promises and may be any thrown value.
-// oxlint-disable-next-line anti-slop/no-unknown-parameters -- preserve JavaScript rejection semantics at this error boundary
 export function shouldRetryGeminiError(error: unknown): boolean {
   return !(error instanceof GeminiProviderError) || error.retryable;
 }
@@ -249,7 +248,7 @@ export const interviewEvaluationJsonSchema = {
 } as const;
 
 function clean(value: string, maximum: number): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, maximum);
+  return value.replaceAll(/\s+/g, " ").trim().slice(0, maximum);
 }
 
 async function readBoundedResponse(response: Response, maximumBytes: number): Promise<string> {
@@ -267,12 +266,14 @@ async function readBoundedResponse(response: Response, maximumBytes: number): Pr
 
   try {
     while (true) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- stream reads must retain ordering and enforce the byte limit before reading again
       const { done, value } = await reader.read();
 
       if (done) break;
       received += value.byteLength;
 
       if (received > maximumBytes) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- cancel the oversized stream before rejecting and releasing its reader
         await reader.cancel("response too large").catch(() => undefined);
         throw new Error(`Gemini response exceeded ${maximumBytes} bytes.`);
       }
@@ -606,7 +607,7 @@ function skillLabel(skill: InterviewEvaluation["scoreSummary"][number]["skill"])
 }
 
 function markdownText(value: string): string {
-  return value.replaceAll("|", "\\|").trim();
+  return value.replaceAll("|", String.raw`\|`).trim();
 }
 
 export function buildInterviewMarkdown(report: StoredInterviewReport): string {
@@ -806,10 +807,12 @@ export interface ReportStore {
   ): Promise<Pick<R2Object, "key"> | null | void>;
 }
 
+type StoredReportKeys = { jsonKey: string; markdownKey: string; cheatsheetKey?: string };
+
 export async function storeInterviewReport(
   bucket: ReportStore,
   report: StoredInterviewReport,
-): Promise<{ jsonKey: string; markdownKey: string; cheatsheetKey?: string }> {
+): Promise<StoredReportKeys> {
   const keys = reportObjectKeys(report);
 
   const metadata = {

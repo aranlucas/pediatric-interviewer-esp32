@@ -26,6 +26,8 @@ type AudioCallbacks = {
   onSpeakingChange: (speaking: boolean) => void;
 };
 
+type CaptureFrame = { pcm: ArrayBuffer; level: number };
+
 type PlaybackChunk = { data: ArrayBuffer; sampleRate: number };
 
 export class BrowserInterviewAudio {
@@ -56,7 +58,7 @@ export class BrowserInterviewAudio {
     private readonly platform: InterviewAudioPlatform = browserAudioPlatform,
   ) {}
 
-  async start(send: (data: ArrayBuffer) => void): Promise<boolean> {
+  start(send: (data: ArrayBuffer) => void): Promise<boolean> {
     this.send = send;
 
     if (this.startPromise) return this.startPromise;
@@ -73,7 +75,7 @@ export class BrowserInterviewAudio {
     if (this.context && this.media) {
       const tracks = this.media.getAudioTracks();
 
-      if (tracks.length > 0 && tracks.some((track) => track.readyState !== "ended")) {
+      if (tracks.some((track) => track.readyState !== "ended")) {
         await this.context.resume();
 
         return generation === this.lifecycleGeneration;
@@ -148,7 +150,7 @@ export class BrowserInterviewAudio {
       this.captureSource.connect(this.captureNode);
       this.captureNode.connect(this.silentGain).connect(context.destination);
       this.captureNode.port.onmessage = (
-        event: MessageEvent<{ pcm: ArrayBuffer; level: number }>,
+        event: MessageEvent<CaptureFrame>,
       ) => {
         this.handleCapture(event.data);
       };
@@ -166,7 +168,7 @@ export class BrowserInterviewAudio {
     }
   }
 
-  private handleCapture({ pcm, level }: { pcm: ArrayBuffer; level: number }): void {
+  private handleCapture({ pcm, level }: CaptureFrame): void {
     const now = this.platform.now();
 
     if (now - this.lastLevelEmittedAt >= 80) {
@@ -276,6 +278,8 @@ export class BrowserInterviewAudio {
         const chunk = this.playbackQueue.shift();
 
         if (!chunk) continue;
+        // Schedule chunks in arrival order so context resumes cannot reorder PCM playback.
+        // eslint-disable-next-line no-await-in-loop
         await this.schedulePcm16(chunk.data, chunk.sampleRate, this.playbackGeneration);
       }
     } finally {

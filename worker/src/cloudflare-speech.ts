@@ -26,12 +26,14 @@ async function readBoundedAudio(response: Response): Promise<Uint8Array> {
 
   try {
     while (true) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- stream reads must retain backpressure and enforce the byte limit before reading again
       const { done, value } = await reader.read();
 
       if (done) break;
       received += value.byteLength;
 
       if (received > MAX_TTS_PCM_BYTES) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- cancel the oversized stream before rejecting and releasing its reader
         await reader.cancel("audio response too large").catch(() => undefined);
         throw new Error("Cloudflare TTS returned oversized audio.");
       }
@@ -86,7 +88,7 @@ export async function synthesizeCloudflareSpeech(
   ai: SpeechBinding,
   text: string,
 ): Promise<OpeningSpeech> {
-  const normalized = text.replace(/\s+/gu, " ").trim();
+  const normalized = text.replaceAll(/\s+/gu, " ").trim();
 
   if (!normalized || normalized.length > MAX_TTS_TEXT_CHARACTERS) {
     throw new Error("Cloudflare TTS input is invalid.");

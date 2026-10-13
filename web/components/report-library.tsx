@@ -36,7 +36,9 @@ function outcomeLabel(outcome: string): string {
   return outcome.replaceAll("_", " ");
 }
 
-function ReportsBrand({ detail = false }: { detail?: boolean }) {
+type ReportsBrandProps = { detail?: boolean };
+
+function ReportsBrand({ detail = false }: ReportsBrandProps) {
   return (
     <Link className="report-library-brand" href={detail ? "/reports" : "/"}>
       <span className="brand-mark small" aria-hidden="true">
@@ -92,13 +94,15 @@ export function ReportsDisabled() {
   );
 }
 
+type ReportLibraryIndexProps = {
+  reports: CompletedReport[];
+  timezone: string;
+};
+
 export function ReportLibraryIndex({
   reports,
   timezone,
-}: {
-  reports: CompletedReport[];
-  timezone: string;
-}) {
+}: ReportLibraryIndexProps) {
   return (
     <main className="report-library-shell">
       <nav className="report-library-nav" aria-label="Report library navigation">
@@ -157,17 +161,19 @@ export function ReportLibraryIndex({
   );
 }
 
+type ReportLibraryDetailProps = {
+  report: CompletedReport;
+  markdown: string;
+  kind: ReportDocumentKind;
+  timezone: string;
+};
+
 export function ReportLibraryDetail({
   report,
   markdown,
   kind,
   timezone,
-}: {
-  report: CompletedReport;
-  markdown: string;
-  kind: ReportDocumentKind;
-  timezone: string;
-}) {
+}: ReportLibraryDetailProps) {
   const activeDownload = `/api/report-library/${report.reportId}?kind=${kind}`;
 
   return (
@@ -219,7 +225,7 @@ export function ReportLibraryDetail({
           </p>
         </div>
         <div className="report-document-toolbar">
-          <div className="report-document-tabs" role="navigation" aria-label="Report documents">
+          <nav className="report-document-tabs" aria-label="Report documents">
             <Link data-active={kind === "report"} href={`/reports/${report.reportId}?view=report`}>
               <FileText size={17} aria-hidden="true" /> Scored report
             </Link>
@@ -231,7 +237,7 @@ export function ReportLibraryDetail({
                 <BookOpenText size={17} aria-hidden="true" /> Study aid
               </Link>
             ) : null}
-          </div>
+          </nav>
           <div className="report-document-downloads">
             <a href={activeDownload}>
               <Download size={16} aria-hidden="true" /> Download .md

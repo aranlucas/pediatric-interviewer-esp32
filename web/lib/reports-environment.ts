@@ -30,6 +30,8 @@ export function reportsTimezone(env: ReportsEnv): string {
   }
 }
 
-export function publicReportsEnabled(env: { PUBLIC_REPORTS_ENABLED?: string }): boolean {
+type PublicReportsOptions = { PUBLIC_REPORTS_ENABLED?: string };
+
+export function publicReportsEnabled(env: PublicReportsOptions): boolean {
   return env.PUBLIC_REPORTS_ENABLED?.trim().toLowerCase() === "true";
 }

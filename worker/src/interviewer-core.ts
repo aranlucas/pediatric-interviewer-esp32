@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Connection } from "agents";
 import {
   type LiveConnectParameters,
   type LiveServerMessage,
@@ -14,6 +15,7 @@ import {
   normalizeQuestionCount,
   resolveInterviewConfiguration,
   type InterviewDifficulty,
+  type InterviewConfiguration,
 } from "./interview-config";
 import { openingPresentationForDisplay, questionForDisplay } from "./interview-display";
 import { parseInterviewerDeviceMessage, type DeviceStatus } from "./interviewer-protocol";
@@ -23,10 +25,11 @@ import {
   type InterviewEvaluation,
   type InterviewExchange,
   type InterviewFollowUp,
+  type ReportStore,
 } from "./interview-report";
 import {
   cloneInterviewExchanges,
-  finalizeInterviewReport,
+  type finalizeInterviewReport,
   type InterviewFinalizationSnapshot,
   type InterviewRetry,
 } from "./interview-finalization";
@@ -39,9 +42,13 @@ import {
   MAX_INPUT_PCM_BYTES,
   PcmInputRateGuard,
 } from "./live-session-lifecycle";
-import { GEMINI_TTS_MODEL, synthesizeOpeningSpeech, type OpeningSpeech } from "./opening-speech";
-import { CLOUDFLARE_TTS_MODEL, synthesizeCloudflareSpeech } from "./cloudflare-speech";
-import { generateOpeningCase, GEMINI_OPENING_CASE_MODEL } from "./opening-case";
+import {
+  GEMINI_TTS_MODEL,
+  type OpeningSpeech,
+  type synthesizeOpeningSpeech,
+} from "./opening-speech";
+import { CLOUDFLARE_TTS_MODEL, type synthesizeCloudflareSpeech } from "./cloudflare-speech";
+import { GEMINI_OPENING_CASE_MODEL, type generateOpeningCase } from "./opening-case";
 import {
   GEMINI_LIVE_MODEL,
   geminiFirstQuestionTurn,
@@ -51,6 +58,7 @@ import {
   turnDispositionToolOutput,
   TURN_DISPOSITION_TOOL,
   type TurnDisposition,
+  type LiveRecoveryContext,
 } from "./gemini-live-protocol";
 import { decodeBase64, encodeBase64, PcmFramer, resamplePcm16 } from "./pcm-audio";
 import { workerLog, type WorkerLogLevel } from "./log";
@@ -96,6 +104,26 @@ type OpeningPlaybackResult = "played" | "failed" | "stale" | "unavailable";
 
 type ClientContentTurn = { turns: string; turnComplete: true };
 
+type CandidateAudioTurn = {
+  id: number;
+  kind: "candidate_audio";
+  chunks: ArrayBuffer[];
+  bytes: number;
+  committed: boolean;
+  replayable: boolean;
+};
+
+type InterviewStatePatch = Partial<Omit<PediatricInterviewerState, "openingStage">> & {
+  openingStage?: OpeningStage;
+};
+
+type StartLiveSessionRequest = {
+  topic_id?: string;
+  topic_ids?: string[];
+  question_count?: number;
+  difficulty?: InterviewDifficulty;
+};
+
 export type PendingProviderTurn =
   | {
       id: number;
@@ -107,14 +135,7 @@ export type PendingProviderTurn =
       kind: "candidate_text";
       text: string;
     }
-  | {
-      id: number;
-      kind: "candidate_audio";
-      chunks: ArrayBuffer[];
-      bytes: number;
-      committed: boolean;
-      replayable: boolean;
-    };
+  | CandidateAudioTurn;
 
 type DeferredTransportFailure = {
   connection?: InterviewConnection;
@@ -144,7 +165,7 @@ type ReconnectTask = ReconnectRequest & {
 export type InterviewerEnv = {
   AI?: Ai;
   GEMINI_API_KEY: string;
-  INTERVIEW_REPORTS: import("./interview-report").ReportStore;
+  INTERVIEW_REPORTS: ReportStore;
 };
 
 export type InterviewPhase =
@@ -186,10 +207,10 @@ export type PediatricInterviewerState = {
 };
 
 function normalizeTranscript(value: string): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, 4_000);
+  return value.replaceAll(/\s+/g, " ").trim().slice(0, 4_000);
 }
 
-export type InterviewConnection = Pick<import("agents").Connection, "id" | "send">;
+export type InterviewConnection = Pick<Connection, "id" | "send">;
 
 type SqlValue = string | number | boolean | null;
 
@@ -409,6 +430,7 @@ export class InterviewerCore {
    * discards its old provider handle and resumes from the durable opening/
    * question checkpoint instead of guessing at a lost turn.
    */
+  // oxlint-disable-next-line eslint/require-await -- lifecycle hooks must reject asynchronously on startup failures
   async onStart(): Promise<void> {
     if (this.state.phase !== "interviewing") return;
     const openingStage = this.durableOpeningStage();
@@ -558,7 +580,7 @@ export class InterviewerCore {
   }
 
   ensureLiveMetadataStore(): void {
-    this.sql`CREATE TABLE IF NOT EXISTS pediatric_interviewer_live_metadata (
+    void this.sql`CREATE TABLE IF NOT EXISTS pediatric_interviewer_live_metadata (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       interview_generation TEXT NOT NULL DEFAULT '',
       resumption_handle TEXT,
@@ -570,7 +592,7 @@ export class InterviewerCore {
     `;
 
     if (!columns.some((column) => column.name === "interview_generation")) {
-      this.sql`
+      void this.sql`
         ALTER TABLE pediatric_interviewer_live_metadata
         ADD COLUMN interview_generation TEXT NOT NULL DEFAULT ''
       `;
@@ -608,7 +630,7 @@ export class InterviewerCore {
 
     try {
       this.ensureLiveMetadataStore();
-      this.sql`
+      void this.sql`
         INSERT OR REPLACE INTO pediatric_interviewer_live_metadata
           (id, interview_generation, resumption_handle, updated_at)
         VALUES (1, ${interviewGeneration}, ${handle}, ${Date.now()})
@@ -630,12 +652,12 @@ export class InterviewerCore {
       this.ensureLiveMetadataStore();
 
       if (interviewGeneration) {
-        this.sql`
+        void this.sql`
           DELETE FROM pediatric_interviewer_live_metadata
           WHERE id = 1 AND interview_generation = ${interviewGeneration}
         `;
       } else {
-        this.sql`DELETE FROM pediatric_interviewer_live_metadata WHERE id = 1`;
+        void this.sql`DELETE FROM pediatric_interviewer_live_metadata WHERE id = 1`;
       }
 
       return true;
@@ -716,10 +738,10 @@ export class InterviewerCore {
     return pending;
   }
 
-  beginCandidateAudioTurn(): Extract<PendingProviderTurn, { kind: "candidate_audio" }> {
+  beginCandidateAudioTurn(): CandidateAudioTurn {
     this.clearPendingProviderTurn();
 
-    const pending: Extract<PendingProviderTurn, { kind: "candidate_audio" }> = {
+    const pending: CandidateAudioTurn = {
       id: this.nextProviderTurnId(),
       kind: "candidate_audio",
       chunks: [],
@@ -734,7 +756,7 @@ export class InterviewerCore {
   }
 
   armCandidateTurnDeadline(
-    pending: Extract<PendingProviderTurn, { kind: "candidate_audio" }>,
+    pending: CandidateAudioTurn,
     connection: InterviewConnection,
     generation = this.liveGeneration,
   ): void {
@@ -859,8 +881,6 @@ export class InterviewerCore {
           ? "The connection changed before your answer finished. Please repeat it."
           : "That answer was too long to retry safely. Please give it again more briefly.",
       });
-
-      return;
     }
   }
 
@@ -1242,12 +1262,7 @@ export class InterviewerCore {
   }
 
   /** Persists a state change and mirrors it to the device's prompt view. */
-  updateInterview(
-    connection: InterviewConnection,
-    patch: Partial<Omit<PediatricInterviewerState, "openingStage">> & {
-      openingStage?: OpeningStage;
-    },
-  ): void {
+  updateInterview(connection: InterviewConnection, patch: InterviewStatePatch): void {
     if (patch.openingStage) this.openingStage = patch.openingStage;
 
     if (patch.casePresentation !== undefined) {
@@ -1262,7 +1277,7 @@ export class InterviewerCore {
    * Drives the next scripted turn of the opening sequence. Re-arms the
    * completion guard so Gemini's reply to this prompt is treated as a new turn.
    */
-  askGemini(connection: InterviewConnection, turn: { turns: string; turnComplete: true }): void {
+  askGemini(connection: InterviewConnection, turn: ClientContentTurn): void {
     this.responseCompletionHandled = false;
     const pending = this.beginClientContentTurn(turn);
     this.sendStatus(connection, "thinking");
@@ -1362,19 +1377,10 @@ export class InterviewerCore {
   async openGeminiSession(
     connection: InterviewConnection | undefined,
     topic: ReturnType<typeof buildInterviewTopic>,
-    configuration: {
-      questionCount: number;
-      difficulty: InterviewDifficulty;
-      topicIds: PediatricTopicId[];
-    },
+    configuration: InterviewConfiguration,
     generation: number,
     sessionResumptionHandle?: string,
-    recoveryContext?: {
-      casePresentation: string;
-      currentQuestion: string;
-      persistedAnswerCount: number;
-      plannedQuestionCount: number;
-    },
+    recoveryContext?: LiveRecoveryContext,
   ): Promise<LiveSession> {
     const connectPromise = this.services.connect({
       model: GEMINI_LIVE_MODEL,
@@ -1436,6 +1442,7 @@ export class InterviewerCore {
             } catch {
               // A late setup can close itself before the timeout cleanup runs.
             }
+            return undefined;
           },
           () => undefined,
         );
@@ -1497,9 +1504,10 @@ export class InterviewerCore {
     for (let attempt = 1; attempt <= MAX_LIVE_RECONNECT_ATTEMPTS; attempt += 1) {
       if (!this.isReconnectTaskCurrent(task)) return;
       this.reconnectAttempts = attempt;
-      await new Promise<void>((resolve) =>
-        setTimeout(resolve, liveReconnectDelayMs(attempt, LIVE_RECONNECT_DELAY_MS)),
-      );
+      // oxlint-disable-next-line eslint/no-await-in-loop -- reconnect attempts must wait for their individual backoff
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, liveReconnectDelayMs(attempt, LIVE_RECONNECT_DELAY_MS));
+      });
 
       if (!this.isReconnectTaskCurrent(task)) return;
 
@@ -1534,6 +1542,7 @@ export class InterviewerCore {
       this.closingGemini = false;
 
       try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- reconnect attempts must complete before the next attempt starts
         const session = await this.openGeminiSession(
           target,
           buildInterviewTopic(configuration.topicIds),
@@ -1552,6 +1561,7 @@ export class InterviewerCore {
         // `keepAliveWhile` protects only this reconnect operation. A Live
         // WebSocket also needs a long-lived hold after reconnect succeeds or
         // the Durable Object can hibernate and stop receiving SDK callbacks.
+        // oxlint-disable-next-line eslint/no-await-in-loop -- hold the successfully reconnected session before completing this attempt
         const releaseKeepAlive = await this.keepAlive();
 
         if (
@@ -1638,12 +1648,7 @@ export class InterviewerCore {
 
   async startLiveSession(
     connection: InterviewConnection,
-    request: {
-      topic_id?: string;
-      topic_ids?: string[];
-      question_count?: number;
-      difficulty?: InterviewDifficulty;
-    },
+    request: StartLiveSessionRequest,
   ): Promise<void> {
     if (this.finalizationPromise) {
       this.sendJSON(connection, {
@@ -2354,13 +2359,18 @@ export class InterviewerCore {
           };
         }
       } finally {
-        if (this.turnFinalizationGeneration !== generation) return;
-        this.turnFinalizationGeneration = undefined;
-        const deferred = this.deferredTransportFailure;
-        this.deferredTransportFailure = undefined;
+        if (this.turnFinalizationGeneration === generation) {
+          this.turnFinalizationGeneration = undefined;
+          const deferred = this.deferredTransportFailure;
+          this.deferredTransportFailure = undefined;
 
-        if (deferred && deferred.generation === generation && generation === this.liveGeneration) {
-          this.handleGeminiTransportFailure(deferred.connection, generation, deferred.reason);
+          if (
+            deferred &&
+            deferred.generation === generation &&
+            generation === this.liveGeneration
+          ) {
+            this.handleGeminiTransportFailure(deferred.connection, generation, deferred.reason);
+          }
         }
       }
     }, "turn_finalization_failed");
@@ -2463,12 +2473,15 @@ export class InterviewerCore {
           Math.round((frame.byteLength / PCM16_BYTES_PER_SECOND) * 1_000),
         );
 
-        await new Promise<void>((resolve) => setTimeout(resolve, playbackMs));
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, playbackMs);
+        });
 
         return null;
       };
 
       for (const frame of framer.write(pcm)) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- audio frames must preserve ordering and real-time playback pacing
         const issue = await sendFrame(frame);
 
         if (issue) return issue;
@@ -2912,7 +2925,7 @@ export class InterviewerCore {
 
     if (this.pendingFollowUps.length >= MAX_FOLLOW_UPS_PER_EXCHANGE) {
       // Past the cap, keep the content but stop growing the array.
-      const last = this.pendingFollowUps[this.pendingFollowUps.length - 1];
+      const last = this.pendingFollowUps.at(-1)!;
       last.answer = normalizeTranscript(`${last.answer} ${answer}`);
       this.persistPendingExchange();
 

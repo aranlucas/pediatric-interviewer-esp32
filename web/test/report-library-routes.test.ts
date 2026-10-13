@@ -5,7 +5,9 @@ import {
   type ReportDownloadEnv,
 } from "../lib/report-download-handler";
 
-const getCloudflareContext = vi.fn<() => Promise<{ env: ReportDownloadEnv }>>();
+type RouteEnvironment = { env: ReportDownloadEnv };
+
+const getCloudflareContext = vi.fn<() => Promise<RouteEnvironment>>();
 
 const downloadReport = createReportDownloadHandler(async () => (await getCloudflareContext()).env);
 
@@ -47,7 +49,7 @@ describe("report library downloads", () => {
 
     const get = vi.fn().mockResolvedValue({
       size: body.length,
-      text: async () => body,
+      text: () => Promise.resolve(body),
     });
 
     getCloudflareContext.mockResolvedValue({

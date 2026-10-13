@@ -1,12 +1,12 @@
 export default function ReportsLoading() {
   return (
     <main className="report-library-gate">
-      <div className="report-library-loading" role="status">
+      <output className="report-library-loading">
         <span className="loading-cat" aria-hidden="true">
           AC
         </span>
-        <p>Loading completed reports…</p>
-      </div>
+        <span>Loading completed reports…</span>
+      </output>
     </main>
   );
 }

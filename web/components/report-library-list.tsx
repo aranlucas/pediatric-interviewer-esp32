@@ -12,13 +12,15 @@ import {
   type ReportListItem,
 } from "@/lib/report-search";
 
+type ReportLibraryListProps = {
+  reports: ReportListItem[];
+  timezone: string;
+};
+
 export function ReportLibraryList({
   reports,
   timezone,
-}: {
-  reports: ReportListItem[];
-  timezone: string;
-}) {
+}: ReportLibraryListProps) {
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -54,9 +56,9 @@ export function ReportLibraryList({
             ) : null}
           </span>
         </label>
-        <p role="status" aria-live="polite">
+        <output aria-live="polite">
           {query ? `${visibleReports.length} of ${reports.length}` : reports.length} reports
-        </p>
+        </output>
       </div>
 
       {visibleReports.length ? (
@@ -76,7 +78,7 @@ export function ReportLibraryList({
               {visibleReports.map((report) => (
                 <tr key={report.reportId}>
                   <td data-label="Completed">
-                    <Link href={`/reports/${report.reportId}`}>
+                    <Link href={`/reports/${report.reportId}`} aria-label={`Open ${report.topicLabel} report completed ${formatReportCompletedAt(report.generatedAt, timezone)}`}>
                       <strong>{formatReportCompletedAt(report.generatedAt, timezone)}</strong>
                       <span className="report-id">{report.reportId}</span>
                       <span className="report-open-label">Open report</span>

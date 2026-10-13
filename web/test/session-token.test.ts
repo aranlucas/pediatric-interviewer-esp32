@@ -89,14 +89,14 @@ describe("session handshake boundary validation", () => {
     { room: ROOM, token: 42, expiresAt: 9e15 },
     { room: ROOM, token: "token", expiresAt: "9000000000000000" },
   ])("rejects malformed wire payload %j", async (payload) => {
-    const request = vi.fn(async () => Response.json(payload));
+    const request = vi.fn().mockResolvedValue(Response.json(payload));
     await expect(requestBrowserSessionToken(null, 1001, request)).rejects.toThrow(
       "invalid response",
     );
   });
 
   it("rejects another room even when the response is otherwise valid", async () => {
-    const request = vi.fn(async () =>
+    const request = vi.fn().mockResolvedValue(
       Response.json({
         room: "web-fedcba9876543210fedcba9876543210",
         token: "synthetic",

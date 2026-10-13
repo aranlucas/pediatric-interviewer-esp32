@@ -4,7 +4,9 @@ import { z } from "zod";
 import { createReportHandler, type ReportEnv } from "../lib/report-handler";
 import { createSessionHandler, type SessionEnv } from "../lib/session-handler";
 
-const getCloudflareContext = vi.fn<() => Promise<{ env: ReportEnv & SessionEnv }>>();
+type RouteEnvironment = { env: ReportEnv & SessionEnv };
+
+const getCloudflareContext = vi.fn<() => Promise<RouteEnvironment>>();
 
 const getReport = createReportHandler(getCloudflareContext);
 
@@ -268,16 +270,14 @@ describe("private report proxy", () => {
       },
     });
 
-    for (const token of [expired, wrongSubject]) {
-      const response = await getReport(
+    const responses = await Promise.all([expired, wrongSubject].map((token) => getReport(
         new Request(`https://oral.example/api/reports/${REPORT_ID}?kind=report`, {
           headers: { Cookie: `${REPORT_TOKEN_COOKIE}=${token}` },
         }),
         { params: Promise.resolve({ reportId: REPORT_ID }) },
-      );
+      )));
 
-      expect(response.status).toBe(401);
-    }
+    for (const response of responses) expect(response.status).toBe(401);
 
     expect(serviceFetch).not.toHaveBeenCalled();
   });

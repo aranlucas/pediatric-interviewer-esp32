@@ -2,6 +2,13 @@ import { GoogleGenAI } from "@google/genai/web";
 
 import { decodeBase64 } from "./pcm-audio";
 
+type WavFormat = {
+  channels: number;
+  sampleRate: number;
+  bitsPerSample: number;
+  blockAlign: number;
+};
+
 export const GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview" as const;
 
 const DEFAULT_SAMPLE_RATE = 24_000;
@@ -113,9 +120,7 @@ function decodePcmWav(bytes: Uint8Array): OpeningSpeech {
     throw new Error("Gemini TTS returned a truncated WAV container.");
   }
 
-  let format:
-    | { channels: number; sampleRate: number; bitsPerSample: number; blockAlign: number }
-    | undefined;
+  let format: WavFormat | undefined;
 
   let pcm: Uint8Array | undefined;
 
@@ -242,7 +247,7 @@ export async function synthesizeOpeningSpeech(
   apiKey: string,
   text: string,
 ): Promise<OpeningSpeech> {
-  const normalized = text.replace(/\s+/gu, " ").trim();
+  const normalized = text.replaceAll(/\s+/gu, " ").trim();
 
   if (!apiKey.trim() || !normalized || normalized.length > MAX_OPENING_TEXT_CHARACTERS) {
     throw new Error("Opening speech input is invalid.");

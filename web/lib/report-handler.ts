@@ -6,13 +6,15 @@ import {
   verifyAccessToken,
 } from "@/lib/server-auth";
 
+import type { EnvironmentContext, ErrorResponse, ReportRouteContext, SessionResponse } from "@/lib/route-types";
+
 export type ReportEnv = {
   INTERVIEWER_SERVICE?: { fetch(request: Request): Promise<Response> };
   WEB_TOKEN_SECRET?: string;
 };
 
 function json(
-  data: { error: string } | { expiresAt: number; room: string; token: string },
+  data: ErrorResponse | SessionResponse,
   status = 200,
 ): Response {
   return Response.json(data, {
@@ -24,10 +26,10 @@ function json(
   });
 }
 
-export function createReportHandler(environment: () => Promise<{ env: ReportEnv }>) {
+export function createReportHandler(environment: () => Promise<EnvironmentContext<ReportEnv>>) {
   return async function GET(
     request: Request,
-    { params }: { params: Promise<{ reportId: string }> },
+    { params }: ReportRouteContext,
   ): Promise<Response> {
     const { reportId } = await params;
     const kind = new URL(request.url).searchParams.get("kind");

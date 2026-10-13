@@ -13,6 +13,7 @@ import {
   type InterviewEvaluation,
   type InterviewExchange,
   type StoredInterviewReport,
+  type ReportStore,
 } from "./interview-report";
 import type { InterviewDifficulty } from "./interview-config";
 import { workerLog } from "./log";
@@ -68,7 +69,7 @@ export function cloneInterviewExchanges(
  */
 export async function finalizeInterviewReport(
   snapshot: InterviewFinalizationSnapshot,
-  reports: import("./interview-report").ReportStore,
+  reports: ReportStore,
   retry: InterviewRetry,
 ): Promise<FinalizedInterview> {
   const evaluation = await retry(

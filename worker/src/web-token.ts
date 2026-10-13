@@ -54,7 +54,7 @@ function decodeBase64Url(value: string): Uint8Array | null {
 }
 
 async function importSigningKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey("raw", TOKEN_ENCODER.encode(secret), HMAC_ALGORITHM, false, [
+  return await crypto.subtle.importKey("raw", TOKEN_ENCODER.encode(secret), HMAC_ALGORITHM, false, [
     "sign",
     "verify",
   ]);

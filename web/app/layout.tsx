@@ -29,7 +29,9 @@ export const viewport: Viewport = {
   themeColor: "#09172e",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+type RootLayoutProps = { children: React.ReactNode };
+
+export default function RootLayout({ children }: Readonly<RootLayoutProps>) {
   return (
     <html lang="en">
       <body className={`${display.variable} ${body.variable}`}>{children}</body>

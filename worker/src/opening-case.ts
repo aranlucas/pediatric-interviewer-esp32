@@ -93,7 +93,7 @@ export function parseOpeningCaseResponse(outputText: string | undefined): string
   const rawVignette = result.data.vignette;
 
   const vignette = rawVignette
-    .replace(/\s+/gu, " ")
+    .replaceAll(/\s+/gu, " ")
     .trim()
     .replace(/^here is your case(?:[.:,])?\s*/iu, "")
     .trim();
@@ -130,6 +130,7 @@ export async function generateOpeningCase(
 
   for (let attempt = 1; attempt <= MAX_OPENING_CASE_ATTEMPTS; attempt += 1) {
     try {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- retry only after the previous request or validation has failed
       const interaction = await ai.interactions.create(
         openingCaseInteraction(topic, difficulty),
         OPENING_CASE_REQUEST_OPTIONS,

@@ -6,16 +6,13 @@ import fs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import WebSocket from "ws";
+import { WebSocket } from "ws";
 
 import { interviewerSettings } from "./interviewer-settings.mjs";
 
 const execFileAsync = promisify(execFile);
-
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 const sampleRate = 24_000;
 
@@ -192,6 +189,7 @@ async function synthesizeAnswers(options, temporaryDirectory) {
       const base = path.join(temporaryDirectory, `answer-${answerIndex + 1}-${partIndex + 1}`);
       const aiff = `${base}.aiff`;
       const wav = `${base}.wav`;
+      // oxlint-disable-next-line eslint/no-await-in-loop -- synthesize one fixture at a time to bound subprocess and audio resource use
       await execFileAsync("say", [
         "-v",
         options.voice,
@@ -201,6 +199,7 @@ async function synthesizeAnswers(options, temporaryDirectory) {
         aiff,
         defaultAnswers[answerIndex][partIndex],
       ]);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- convert the preceding synthesis result before advancing the fixture
       await execFileAsync("afconvert", [
         "-f",
         "WAVE",
@@ -235,7 +234,9 @@ async function synthesizeFollowUps(options, temporaryDirectory) {
     const base = path.join(temporaryDirectory, `follow-up-${index + 1}`);
     const aiff = `${base}.aiff`;
     const wav = `${base}.wav`;
+    // oxlint-disable-next-line eslint/no-await-in-loop -- synthesize one fixture at a time to bound subprocess and audio resource use
     await execFileAsync("say", ["-v", options.voice, "-r", String(options.rate), "-o", aiff, line]);
+    // oxlint-disable-next-line eslint/no-await-in-loop -- convert the preceding synthesis result before advancing the fixture
     await execFileAsync("afconvert", [
       "-f",
       "WAVE",
@@ -301,9 +302,12 @@ function silence(durationMs) {
 }
 
 function wait(durationMs) {
-  return new Promise((resolve) => setTimeout(resolve, durationMs));
+  return new Promise((resolve) => {
+    setTimeout(resolve, durationMs);
+  });
 }
 
+// oxlint-disable-next-line eslint/require-await -- preserve asynchronous rejection for synchronous simulator setup failures
 async function simulate(options, answers, followUps, settings, cafeNoise) {
   const startedAt = Date.now();
 
@@ -445,6 +449,7 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
       const mixed = mixBackground(frame, cafeNoise, options.cafeNoisePercent, backgroundOffset);
       backgroundOffset = mixed.backgroundOffset;
       socket.send(mixed.pcm);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- pace sequential PCM frames to simulate real-time microphone input
       await wait(frameDurationMs);
     }
   };
@@ -779,8 +784,7 @@ async function main() {
         requestedAnswers: options.turns,
         answersSimulated: result.answersSimulated,
         phase: result.phase ?? null,
-        questionNumber:
-          result.turnCompletions[result.turnCompletions.length - 1]?.questionNumber ?? null,
+        questionNumber: result.turnCompletions.at(-1)?.questionNumber ?? null,
         reportId: result.report?.reportId ?? null,
       },
     );

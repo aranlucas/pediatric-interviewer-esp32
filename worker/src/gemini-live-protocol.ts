@@ -94,7 +94,7 @@ export function geminiFirstQuestionTurn() {
 }
 
 export function isValidOpeningCasePresentation(text: string): boolean {
-  const caseText = text.replace(/\s+/g, " ").trim();
+  const caseText = text.replaceAll(/\s+/g, " ").trim();
 
   return (
     /^here is your case(?:[.:,])?\s+\S/iu.test(caseText) &&
@@ -112,19 +112,23 @@ function competencyPlan(topic: InterviewTopic, questionCount: number): string {
   }).join("\n");
 }
 
+export type LiveRecoveryContext = {
+  casePresentation: string;
+  currentQuestion: string;
+  persistedAnswerCount: number;
+  plannedQuestionCount: number;
+};
+
+type GeminiLiveSettings = {
+  questionCount?: number;
+  difficulty?: InterviewDifficulty;
+  sessionResumptionHandle?: string;
+  recoveryContext?: LiveRecoveryContext;
+};
+
 export function geminiLiveConfig(
   topic: InterviewTopic,
-  settings: {
-    questionCount?: number;
-    difficulty?: InterviewDifficulty;
-    sessionResumptionHandle?: string;
-    recoveryContext?: {
-      casePresentation: string;
-      currentQuestion: string;
-      persistedAnswerCount: number;
-      plannedQuestionCount: number;
-    };
-  } = {},
+  settings: GeminiLiveSettings = {},
 ): LiveConnectConfig {
   const questionCount = normalizeQuestionCount(settings.questionCount);
   const difficulty = settings.difficulty ?? DEFAULT_INTERVIEW_DIFFICULTY;

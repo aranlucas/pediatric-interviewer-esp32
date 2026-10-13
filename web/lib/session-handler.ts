@@ -8,6 +8,8 @@ import {
   verifyAccessToken,
 } from "@/lib/server-auth";
 
+import type { EnvironmentContext, ErrorResponse, SessionResponse } from "@/lib/route-types";
+
 // The SDK reuses this room-scoped handshake credential across transient
 // socket retries so its exponential backoff remains intact. Terminal auth
 // failures are recovered explicitly by the UI with a newly minted token.
@@ -16,6 +18,8 @@ const CONNECT_TOKEN_TTL_SECONDS = 2 * 60 * 60;
 const REPORT_TOKEN_TTL_SECONDS = 2 * 60 * 60;
 
 const SESSION_OWNER_TTL_SECONDS = 2 * 60 * 60;
+
+type RateLimitResult = { success: boolean };
 
 type SessionRateLimiter = {
   limit: (options: { key: string }) => Promise<{ success: boolean }>;
@@ -27,7 +31,7 @@ export type SessionEnv = {
 };
 
 function json(
-  data: { error: string } | { expiresAt: number; room: string; token: string },
+  data: ErrorResponse | SessionResponse,
   status = 200,
 ): Response {
   return Response.json(data, {
@@ -39,7 +43,7 @@ function json(
   });
 }
 
-export function createSessionHandler(environment: () => Promise<{ env: SessionEnv }>) {
+export function createSessionHandler(environment: () => Promise<EnvironmentContext<SessionEnv>>) {
   return async function POST(request: Request): Promise<Response> {
     const requestUrl = new URL(request.url);
 
@@ -92,7 +96,7 @@ export function createSessionHandler(environment: () => Promise<{ env: SessionEn
     // CF-Connecting-IP is supplied by Cloudflare. Do not trust a caller-owned
     // X-Forwarded-For value as a rate-limit identity.
     const clientKey = request.headers.get("CF-Connecting-IP") ?? "local";
-    let allowed: { success: boolean };
+    let allowed: RateLimitResult;
 
     try {
       allowed = await env.SESSION_RATE_LIMITER.limit({ key: clientKey });

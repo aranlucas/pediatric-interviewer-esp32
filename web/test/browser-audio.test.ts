@@ -1,3 +1,4 @@
+/* eslint-disable max-classes-per-file -- The Web Audio fakes form one cohesive test harness. */
 import { describe, expect, it, vi } from "vitest";
 
 import { BrowserInterviewAudio } from "../lib/browser-audio";
@@ -67,9 +68,9 @@ function audioHarness() {
   const context: InterviewAudioContext = {
     currentTime: 0,
     destination: new FakeNode(),
-    audioWorklet: { addModule: vi.fn(async () => undefined) },
-    resume: vi.fn(async () => undefined),
-    close: vi.fn(async () => undefined),
+    audioWorklet: { addModule: vi.fn().mockResolvedValue(undefined) },
+    resume: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
     createGain: () => gain,
     createBuffer: (_channels, length, rate) => ({
       duration: length / rate,
