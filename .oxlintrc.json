@@ -2,7 +2,6 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "extends": ["./node_modules/@aranlucas/oxforge/configs/recommended.json"],
   "rules": {
-    "oxc/no-accumulating-spread": "error",
     "unicorn/no-useless-undefined": "off",
     "unicorn/prefer-add-event-listener": "off",
     "anti-slop/no-module-mocking": "off",
