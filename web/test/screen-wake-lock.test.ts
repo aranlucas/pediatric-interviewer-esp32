@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { holdScreenWakeLock, screenWakeLockWarning } from "../lib/screen-wake-lock";
+import { holdScreenWakeLock, screenWakeLockWarning } from "@/lib/screen-wake-lock";
 
 const IOS_SAFARI_USER_AGENT =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) " +

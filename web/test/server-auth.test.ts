@@ -8,7 +8,7 @@ import {
   serializeSessionOwnerCookie,
   sessionOwnerCookieName,
   verifyAccessToken,
-} from "../lib/server-auth";
+} from "@/lib/server-auth";
 
 const SECRET = "test-secret-that-is-long-enough";
 

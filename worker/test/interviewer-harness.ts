@@ -5,8 +5,8 @@ import {
   type InterviewHost,
   type InterviewServices,
   type LiveSession,
-} from "../src/interviewer-core";
-import { finalizeInterviewReport } from "../src/interview-finalization";
+} from "@/interviewer-core";
+import { finalizeInterviewReport } from "@/interview-finalization";
 
 export function fakeLiveSession(overrides: Partial<LiveSession> = {}) {
   return {

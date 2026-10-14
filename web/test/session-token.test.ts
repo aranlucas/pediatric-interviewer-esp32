@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { requestBrowserSessionToken } from "../lib/session-token";
+import { requestBrowserSessionToken } from "@/lib/session-token";
 
 const ROOM = "web-0123456789abcdef0123456789abcdef";
 

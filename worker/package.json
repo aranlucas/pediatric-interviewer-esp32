@@ -14,9 +14,9 @@
     "generate-types": "cf workers types",
     "simulate:interview": "node tools/simulate-interview.mjs",
     "simulate:suite": "node tools/simulate-suite.mjs",
-    "smoke:web": "node tools/smoke-web.mjs",
+    "smoke:web": "vitest run --config vitest.smoke.config.ts",
     "test": "vitest run",
-    "typecheck": "pnpm generate-types && tsc --noEmit && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tools/tsconfig.json",
+    "typecheck": "pnpm generate-types && tsc --noEmit && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p tools/tsconfig.json",
     "build": "cf build"
   },
   "dependencies": {

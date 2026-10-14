@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { z } from "zod";
-import { testInterviewer, fakeLiveSession } from "./interviewer-harness";
+import { testInterviewer, fakeLiveSession } from "@test/interviewer-harness";
 import {
   CANDIDATE_TURN_TIMEOUT_MS,
   GEMINI_CONNECT_TIMEOUT_MS,
@@ -10,8 +10,8 @@ import {
   type InterviewServices,
   type InterviewConnection,
   type LiveSession,
-} from "../src/interviewer-core";
-import { buildInterviewTopic } from "../src/interview-config";
+} from "@/interviewer-core";
+import { buildInterviewTopic } from "@/interview-config";
 
 const genaiMocks = { liveConnect: vi.fn<InterviewServices["connect"]>() };
 

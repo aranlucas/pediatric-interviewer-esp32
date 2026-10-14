@@ -14,7 +14,7 @@ import {
   statusCopy,
   TOPICS,
   topicSelectionLabel,
-} from "../lib/interview";
+} from "@/lib/interview";
 
 describe("interview helpers", () => {
   it("keeps all firmware study topics", () => {

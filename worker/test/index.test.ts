@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { assert, afterEach, describe, expect, it, vi } from "vitest";
 
-import { PEDIATRIC_TOPICS } from "../src/interview-content";
+import { PEDIATRIC_TOPICS } from "@/interview-content";
 import {
   buildInterviewTopic,
   DEFAULT_INTERVIEW_DIFFICULTY,
   DEFAULT_INTERVIEW_QUESTION_COUNT,
   resolveInterviewConfiguration,
-} from "../src/interview-config";
+} from "@/interview-config";
 import {
   shouldRetryGeminiError,
   GeminiProviderError,
@@ -21,8 +21,8 @@ import {
   storeInterviewReport,
   type StoredInterviewReport,
   type InterviewExchange,
-} from "../src/interview-report";
-import { isResponseComplete, shouldEndTurn } from "../src/turn-completion";
+} from "@/interview-report";
+import { isResponseComplete, shouldEndTurn } from "@/turn-completion";
 import {
   appendBoundedTranscript,
   isBoundedProviderAudio,
@@ -31,7 +31,7 @@ import {
   MAX_INPUT_PCM_BYTES,
   MAX_INPUT_PCM_BYTES_PER_SECOND,
   PcmInputRateGuard,
-} from "../src/live-session-lifecycle";
+} from "@/live-session-lifecycle";
 import {
   GEMINI_LIVE_MODEL,
   geminiFirstQuestionTurn,
@@ -41,29 +41,29 @@ import {
   isValidOpeningCasePresentation,
   turnDispositionToolOutput,
   TURN_DISPOSITION_TOOL,
-} from "../src/gemini-live-protocol";
-import { openingPresentationForDisplay, questionForDisplay } from "../src/interview-display";
-import { cloneInterviewExchanges, finalizeInterviewReport } from "../src/interview-finalization";
-import { parseInterviewerDeviceMessage } from "../src/interviewer-protocol";
+} from "@/gemini-live-protocol";
+import { openingPresentationForDisplay, questionForDisplay } from "@/interview-display";
+import { cloneInterviewExchanges, finalizeInterviewReport } from "@/interview-finalization";
+import { parseInterviewerDeviceMessage } from "@/interviewer-protocol";
 import {
   decodeOpeningSpeech,
   GEMINI_TTS_MODEL,
   openingSpeechInteraction,
   OPENING_TTS_REQUEST_OPTIONS,
-} from "../src/opening-speech";
+} from "@/opening-speech";
 import {
   GEMINI_OPENING_CASE_MODEL,
   openingCaseInteraction,
   openingCaseJsonSchema,
   OPENING_CASE_REQUEST_OPTIONS,
   parseOpeningCaseResponse,
-} from "../src/opening-case";
-import { resamplePcm16 } from "../src/pcm-audio";
+} from "@/opening-case";
+import { resamplePcm16 } from "@/pcm-audio";
 import {
   CLOUDFLARE_TTS_MODEL,
   CLOUDFLARE_TTS_SAMPLE_RATE,
   synthesizeCloudflareSpeech,
-} from "../src/cloudflare-speech";
+} from "@/cloudflare-speech";
 
 afterEach(() => vi.restoreAllMocks());
 

@@ -1,9 +1,10 @@
+import { test } from "vitest";
 import { z } from "zod";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { WebSocket } from "ws";
 
-import { webSocketBuffer } from "./simulation-protocol.mjs";
+import { webSocketBuffer } from "../../tools/simulation-protocol.mjs";
 
 const WEB_ORIGIN = process.env.WEB_ORIGIN ?? "https://angry-cat-oral-boards.aranlucas.workers.dev";
 
@@ -168,11 +169,4 @@ async function main() {
   console.log("Production web smoke passed: session, cookie, HTTP guards, and signed WebSocket.");
 }
 
-main().catch(
-  /** @param {unknown} error */ (error) => {
-    console.error(
-      `Production web smoke failed: ${error instanceof Error ? error.message : "unknown error"}`,
-    );
-    process.exitCode = 1;
-  },
-);
+test("production web session, cookie, HTTP guards, and signed WebSocket", main, 60_000);

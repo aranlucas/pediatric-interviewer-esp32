@@ -1,16 +1,16 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type * as SessionTokenModule from "../lib/session-token";
+import type * as SessionTokenModule from "@/lib/session-token";
 
-import { BrowserSessionGate } from "../components/browser-session-gate";
+import { BrowserSessionGate } from "@/components/browser-session-gate";
 import {
   requestBrowserSessionToken,
   SessionSetupError,
   type BrowserSessionToken,
-} from "../lib/session-token";
+} from "@/lib/session-token";
 
-vi.mock("../lib/session-token", async (importOriginal) => ({
+vi.mock("@/lib/session-token", async (importOriginal) => ({
   ...(await importOriginal<typeof SessionTokenModule>()),
   requestBrowserSessionToken: vi.fn(),
 }));

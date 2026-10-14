@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { reportMatchesQuery } from "../lib/report-search";
-import type { ReportListItem } from "../lib/report-search";
+import { reportMatchesQuery } from "@/lib/report-search";
+import type { ReportListItem } from "@/lib/report-search";
 
 const REPORT: ReportListItem = {
   reportId: "123e4567-e89b-42d3-a456-426614174000",

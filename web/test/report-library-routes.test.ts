@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createReportDownloadHandler,
-  type ReportDownloadEnv,
-} from "../lib/report-download-handler";
+import { createReportDownloadHandler, type ReportDownloadEnv } from "@/lib/report-download-handler";
 
 type RouteEnvironment = { env: ReportDownloadEnv };
 

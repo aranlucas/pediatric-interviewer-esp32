@@ -5,7 +5,7 @@ import {
   listCompletedReports,
   publicReportObjectKey,
   summarizeStoredReport,
-} from "../lib/reports";
+} from "@/lib/reports";
 
 const REPORT_ID = "01234567-89ab-4cde-8123-0123456789ab";
 
