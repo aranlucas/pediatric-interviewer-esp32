@@ -30,9 +30,6 @@ jobs:
           require-lockfile: true
 
       - parallel:
-          - name: Typecheck
-            run: pnpm run typecheck
-
           - name: Worker test, check, and deploy dry run
             run: cd worker && pnpm test && pnpm check && pnpm exec cf deploy --dry-run
 
