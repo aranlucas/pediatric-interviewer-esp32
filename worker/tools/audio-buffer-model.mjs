@@ -29,13 +29,18 @@ export function simulatePlaybackBuffer({
   for (const [index, arrival] of arrivals.entries()) {
     const elapsed = arrival - previousTime;
 
-    if (index > 0) maximumArrivalGapMs = Math.max(maximumArrivalGapMs, elapsed);
+    if (index > 0) {
+      maximumArrivalGapMs = Math.max(maximumArrivalGapMs, elapsed);
+    }
 
     if (playbackStarted) {
       const drained = elapsed * PCM_BYTES_PER_MILLISECOND;
 
       if (drained >= buffered) {
-        if (buffered > 0 && drained > buffered) underruns += 1;
+        if (buffered > 0 && drained > buffered) {
+          underruns += 1;
+        }
+
         buffered = 0;
         playbackStarted = false;
       } else {
@@ -52,7 +57,10 @@ export function simulatePlaybackBuffer({
 
     maximumBufferedBytes = Math.max(maximumBufferedBytes, buffered);
 
-    if (!playbackStarted && buffered >= prebufferBytes) playbackStarted = true;
+    if (!playbackStarted && buffered >= prebufferBytes) {
+      playbackStarted = true;
+    }
+
     previousTime = arrival;
   }
 

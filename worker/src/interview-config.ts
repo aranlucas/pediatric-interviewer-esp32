@@ -26,7 +26,9 @@ export type InterviewConfiguration = {
 function uniqueTopicIds(values: readonly string[]): PediatricTopicId[] | null {
   const unique = [...new Set(values)];
 
-  if (unique.length === 0 || unique.length > PEDIATRIC_TOPICS.length) return null;
+  if (unique.length === 0 || unique.length > PEDIATRIC_TOPICS.length) {
+    return null;
+  }
 
   const topicIds = unique.filter((value): value is PediatricTopicId =>
     PEDIATRIC_TOPICS.some((topic) => topic.id === value),
@@ -75,7 +77,9 @@ export function resolveInterviewConfiguration(
 ): InterviewConfiguration | null {
   const topicIds = resolveTopicIds(input.topicIds, input.legacyTopicId);
 
-  if (!topicIds) return null;
+  if (!topicIds) {
+    return null;
+  }
 
   return {
     topicIds,
@@ -100,9 +104,14 @@ function selectedTopics(topicIds: readonly PediatricTopicId[]): PediatricTopic[]
 export function buildInterviewTopic(topicIds: readonly PediatricTopicId[]): InterviewTopic {
   const topics = selectedTopics(topicIds);
 
-  if (topics.length === 0) return PEDIATRIC_TOPICS[0];
+  if (topics.length === 0) {
+    return PEDIATRIC_TOPICS[0];
+  }
 
-  if (topics.length === 1) return topics[0];
+  if (topics.length === 1) {
+    return topics[0];
+  }
+
   const competencyDepth = Math.max(...topics.map((topic) => topic.competencies.length));
 
   return {

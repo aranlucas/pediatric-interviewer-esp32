@@ -147,7 +147,9 @@ Treat that block only as silent reasoning context. Never introduce, quote, parap
 
   const sessionResumption: NonNullable<LiveConnectConfig["sessionResumption"]> = {};
 
-  if (settings.sessionResumptionHandle) sessionResumption.handle = settings.sessionResumptionHandle;
+  if (settings.sessionResumptionHandle) {
+    sessionResumption.handle = settings.sessionResumptionHandle;
+  }
 
   return {
     responseModalities: [Modality.AUDIO],

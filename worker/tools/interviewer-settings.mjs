@@ -22,7 +22,9 @@ function stringConstant(source, name) {
     ),
   );
 
-  if (!assignment) return null;
+  if (!assignment) {
+    return null;
+  }
 
   return [...assignment[1].matchAll(/"((?:\\\\.|[^"\\\\])*)"/g)]
     .map((match) => z.string().parse(JSON.parse(`"${match[1]}"`)))
@@ -53,7 +55,10 @@ function includes(source, configPath) {
  * @returns {Promise<ConfigFile[]>}
  */
 async function readConfigTree(configPath, visited = new Set()) {
-  if (visited.has(configPath)) return [];
+  if (visited.has(configPath)) {
+    return [];
+  }
+
   visited.add(configPath);
   const source = await readFile(configPath, "utf8");
   const files = [{ path: configPath, source }];
@@ -73,19 +78,26 @@ async function readConfigTree(configPath, visited = new Set()) {
  * @returns {string}
  */
 function resolveConstant(files, name, visited = new Set()) {
-  if (visited.has(name)) throw new Error(`Circular interviewer configuration alias: ${name}`);
+  if (visited.has(name)) {
+    throw new Error(`Circular interviewer configuration alias: ${name}`);
+  }
+
   visited.add(name);
 
   for (const file of files) {
     const value = stringConstant(file.source, name);
 
-    if (value !== null) return value;
+    if (value !== null) {
+      return value;
+    }
   }
 
   for (const file of files) {
     const target = alias(file.source, name);
 
-    if (target) return resolveConstant(files, target, visited);
+    if (target) {
+      return resolveConstant(files, target, visited);
+    }
   }
 
   throw new Error(`Could not read ${name} from the interviewer configuration`);

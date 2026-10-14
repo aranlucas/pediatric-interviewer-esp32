@@ -10,10 +10,12 @@ import { BrowserInterviewAudio } from "../lib/browser-audio";
 import { requestBrowserSessionToken } from "../lib/session-token";
 
 vi.mock("agents/react", () => ({ useAgent: vi.fn() }));
+
 vi.mock("../lib/session-token", async (importOriginal) => ({
   ...(await importOriginal<typeof SessionTokenModule>()),
   requestBrowserSessionToken: vi.fn(),
 }));
+
 vi.mock("../lib/browser-audio", () => ({
   DEFAULT_OUTPUT_VOLUME: 0.8,
   BrowserInterviewAudio: vi.fn(
@@ -40,7 +42,9 @@ const socket = {
 function agentOptions() {
   const options = vi.mocked(useAgent).mock.lastCall?.[0];
 
-  if (!options) throw new Error("The interview has not connected");
+  if (!options) {
+    throw new Error("The interview has not connected");
+  }
 
   return options;
 }
@@ -48,8 +52,11 @@ function agentOptions() {
 function activeAudio() {
   const audio: unknown = vi.mocked(BrowserInterviewAudio).mock.results.at(-1)?.value;
 
-  if (!audio) throw new Error("The audio lifecycle has not started");
+  if (!audio) {
+    throw new Error("The audio lifecycle has not started");
+  }
 
+  // SAFETY: This is the result of the locally mocked BrowserInterviewAudio constructor.
   return vi.mocked(audio as BrowserInterviewAudio);
 }
 
@@ -59,6 +66,7 @@ async function renderConnectedApp() {
       <AngryCatApp />
     </StrictMode>,
   );
+
   await screen.findByRole("radiogroup", { name: "Difficulty level" });
   act(() => agentOptions().onOpen?.(new Event("open")));
 
@@ -106,6 +114,8 @@ describe("interview experience lifecycle", () => {
 
   it("replaces Strict Mode audio instances and stops the active one on unmount", async () => {
     const { unmount } = await renderConnectedApp();
+
+    // SAFETY: Each result comes from the locally mocked BrowserInterviewAudio constructor.
     const instances = vi
       .mocked(BrowserInterviewAudio)
       .mock.results.map(({ value }) => vi.mocked(value as BrowserInterviewAudio));

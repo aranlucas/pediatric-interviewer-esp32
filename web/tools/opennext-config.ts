@@ -19,6 +19,7 @@ export async function prepareOpenNextConfig(mode?: string): Promise<string> {
   const config = z
     .looseObject({ assets: z.looseObject({}).optional() })
     .parse(convertToWranglerConfig(result.data));
+
   config.assets = { ...config.assets, directory: assetsDirectory };
   // Keep the file beside .dev.vars so OpenNext's dev proxy loads local secrets.
   const configPath = resolve(".opennext-wrangler.json");

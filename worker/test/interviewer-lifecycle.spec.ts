@@ -179,14 +179,17 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         activeQuestion: "What else would you evaluate?",
       },
     };
+
     const finishInterview = vi.fn<typeof runtime.finishInterview>(() => {
       runtime.state = {
         ...runtime.state,
         phase: "complete",
         reportId: "pending-only-report",
       };
+
       return Promise.resolve();
     });
+
     runtime.finishInterview = finishInterview;
 
     const response = await interviewer.onRequest(
@@ -394,6 +397,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     expect(askGemini).toHaveBeenCalledWith(
       activeConnection,
       expect.objectContaining({
+        // SAFETY: Vitest accepts this asymmetric matcher in place of the typed expected value.
         turns: expect.stringContaining("BEGIN_INTERVIEW") as string,
         turnComplete: true,
       }),
@@ -513,6 +517,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     expect(askGemini).toHaveBeenCalledOnce();
     expect(askGemini).toHaveBeenCalledWith(
       activeConnection,
+      // SAFETY: Vitest accepts this asymmetric matcher in place of the typed expected value.
       expect.objectContaining({ turns: expect.stringContaining("BEGIN_INTERVIEW") as string }),
     );
     expect(decodeFrames(sent)).toContainEqual({
@@ -579,6 +584,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
     expect(session.sendRealtimeInput).toHaveBeenCalledOnce();
     expect(session.sendRealtimeInput).toHaveBeenCalledWith({
+      // SAFETY: Vitest accepts this asymmetric matcher in place of the typed expected value.
       text: expect.stringContaining("BEGIN_INTERVIEW") as string,
     });
     expect(openingSpeechMocks.synthesize).not.toHaveBeenCalled();
@@ -957,6 +963,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
           id: "probe-cap-call",
           name: "record_turn_disposition",
           response: {
+            // SAFETY: Vitest accepts this asymmetric matcher in place of the typed expected value.
             output: expect.stringContaining("latest answer will become exchange 1") as string,
           },
         }),
@@ -1152,7 +1159,9 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
     const turn = askGemini.mock.calls[0]?.[1];
 
-    if (!turn) throw new Error("Expected a recovery turn");
+    if (!turn) {
+      throw new Error("Expected a recovery turn");
+    }
 
     expect(turn.turnComplete).toBe(true);
     expect(turn.turns).toContain(pendingProbe);

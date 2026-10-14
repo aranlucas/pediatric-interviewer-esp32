@@ -27,5 +27,5 @@ export function interviewMessageText(
   value: z.infer<ReturnType<typeof z.json>> | undefined,
   fallback = "",
 ): string {
-  return typeof value === "string" ? value : fallback;
+  return z.string().safeParse(value).data ?? fallback;
 }

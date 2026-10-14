@@ -32,13 +32,17 @@ export type InterviewerLobbyKind = "device" | "web";
 function encodeBase64Url(bytes: Uint8Array): string {
   let binary = "";
 
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (const byte of bytes) {
+    binary += String.fromCodePoint(byte);
+  }
 
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
 
 function decodeBase64Url(value: string): Uint8Array | null {
-  if (!value || !/^[A-Za-z0-9_-]+$/u.test(value) || value.length % 4 === 1) return null;
+  if (!value || !/^[A-Za-z0-9_-]+$/u.test(value) || value.length % 4 === 1) {
+    return null;
+  }
 
   try {
     const padded = `${value.replaceAll("-", "+").replaceAll("_", "/")}${"=".repeat(
@@ -47,7 +51,7 @@ function decodeBase64Url(value: string): Uint8Array | null {
 
     const binary = atob(padded);
 
-    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return Uint8Array.from(binary, (character) => character.codePointAt(0) ?? 0);
   } catch {
     return null;
   }
@@ -78,7 +82,10 @@ function validClaims(claims: WebTokenClaims): boolean {
  * The caller is responsible for choosing an expiry appropriate to the flow.
  */
 export async function signWebToken(claims: WebTokenClaims, secret: string): Promise<string> {
-  if (!secret || !validClaims(claims)) throw new Error("Invalid web token claims.");
+  if (!secret || !validClaims(claims)) {
+    throw new Error("Invalid web token claims.");
+  }
+
   const payload: WebTokenPayload = { v: 1, ...claims };
   const encodedPayload = encodeBase64Url(TOKEN_ENCODER.encode(JSON.stringify(payload)));
   const key = await importSigningKey(secret);
@@ -98,19 +105,29 @@ export async function verifyWebToken(
   secret: string,
   options: WebTokenVerificationOptions = {},
 ): Promise<WebTokenPayload | null> {
-  if (!token || !secret || token.length > MAX_TOKEN_LENGTH) return null;
+  if (!token || !secret || token.length > MAX_TOKEN_LENGTH) {
+    return null;
+  }
+
   const pieces = token.split(".");
 
-  if (pieces.length !== 2) return null;
+  if (pieces.length !== 2) {
+    return null;
+  }
+
   const [encodedPayload, encodedSignature] = pieces;
   const signature = decodeBase64Url(encodedSignature);
 
-  if (signature?.byteLength !== 32) return null;
+  if (signature?.byteLength !== 32) {
+    return null;
+  }
 
   let payload: unknown;
   const payloadBytes = decodeBase64Url(encodedPayload);
 
-  if (!payloadBytes || payloadBytes.byteLength > 1_024) return null;
+  if (!payloadBytes || payloadBytes.byteLength > 1_024) {
+    return null;
+  }
 
   try {
     payload = JSON.parse(TOKEN_DECODER.decode(payloadBytes));
@@ -120,7 +137,10 @@ export async function verifyWebToken(
 
   const parsed = webTokenClaimsSchema.extend({ v: z.literal(1) }).safeParse(payload);
 
-  if (!parsed.success) return null;
+  if (!parsed.success) {
+    return null;
+  }
+
   const normalized: WebTokenPayload = parsed.data;
 
   let signatureValid = false;
@@ -137,15 +157,23 @@ export async function verifyWebToken(
     return null;
   }
 
-  if (!signatureValid) return null;
+  if (!signatureValid) {
+    return null;
+  }
 
   const now = options.now ?? Math.floor(Date.now() / 1_000);
 
-  if (normalized.exp <= now) return null;
+  if (normalized.exp <= now) {
+    return null;
+  }
 
-  if (options.scope && normalized.scope !== options.scope) return null;
+  if (options.scope && normalized.scope !== options.scope) {
+    return null;
+  }
 
-  if (options.subject !== undefined && normalized.sub !== options.subject) return null;
+  if (options.subject !== undefined && normalized.sub !== options.subject) {
+    return null;
+  }
 
   return normalized;
 }
@@ -153,7 +181,9 @@ export async function verifyWebToken(
 function canonicalOrigin(value: string): string | null {
   const trimmed = value.trim();
 
-  if (!trimmed || trimmed === "null") return null;
+  if (!trimmed || trimmed === "null") {
+    return null;
+  }
 
   try {
     const url = new URL(trimmed);
@@ -178,7 +208,9 @@ function canonicalOrigin(value: string): string | null {
 export function isAllowedWebOrigin(origin: string | null, configuredOrigins: string): boolean {
   const canonicalRequestOrigin = origin ? canonicalOrigin(origin) : null;
 
-  if (!canonicalRequestOrigin) return false;
+  if (!canonicalRequestOrigin) {
+    return false;
+  }
 
   return configuredOrigins
     .split(",")
@@ -187,9 +219,13 @@ export function isAllowedWebOrigin(origin: string | null, configuredOrigins: str
 }
 
 export function interviewerLobbyKind(name: string): InterviewerLobbyKind | null {
-  if (name === "esp32" || /^esp32-[0-9a-f]{8}$/u.test(name)) return "device";
+  if (name === "esp32" || /^esp32-[0-9a-f]{8}$/u.test(name)) {
+    return "device";
+  }
 
-  if (/^web-[0-9a-f]{32}$/u.test(name)) return "web";
+  if (/^web-[0-9a-f]{32}$/u.test(name)) {
+    return "web";
+  }
 
   return null;
 }

@@ -84,18 +84,25 @@ function finiteNumber(value: JsonValue | undefined): number | null {
 function validDate(value: JsonValue | undefined, fallback: string): string {
   const parsed = z.string().safeParse(value);
 
-  if (!parsed.success || !Number.isFinite(Date.parse(parsed.data))) return fallback;
+  if (!parsed.success || !Number.isFinite(Date.parse(parsed.data))) {
+    return fallback;
+  }
 
   return new Date(parsed.data).toISOString();
 }
 
-function reportArtifacts(objects: ListedReport[]): ReportArtifacts[] {
+type CompleteReportArtifacts = ReportArtifacts & { json: string };
+
+function reportArtifacts(objects: ListedReport[]): CompleteReportArtifacts[] {
   const grouped = new Map<string, ReportArtifacts>();
 
   for (const object of objects) {
     const match = PUBLIC_REPORT_KEY_PATTERN.exec(object.key);
 
-    if (!match) continue;
+    if (!match) {
+      continue;
+    }
+
     const [, rawReportId, cheatsheetSuffix, extension] = match;
     const reportId = rawReportId.toLowerCase();
 
@@ -104,23 +111,34 @@ function reportArtifacts(objects: ListedReport[]): ReportArtifacts[] {
       lastModified: object.uploaded.toISOString(),
     };
 
-    if (cheatsheetSuffix) current.cheatsheet = object.key;
-    else if (extension.toLowerCase() === "json") {
+    if (cheatsheetSuffix) {
+      current.cheatsheet = object.key;
+    } else if (extension.toLowerCase() === "json") {
       current.json = object.key;
       current.lastModified = object.uploaded.toISOString();
-    } else current.markdown = object.key;
+    } else {
+      current.markdown = object.key;
+    }
+
     grouped.set(reportId, current);
   }
 
-  return [...grouped.values()].filter((entry) => entry.json);
+  return [...grouped.values()].filter((entry): entry is CompleteReportArtifacts =>
+    Boolean(entry.json),
+  );
 }
 
 async function parseReportObject(object: ReportBody): Promise<JsonRecord> {
-  if (object.size > MAX_REPORT_BYTES) throw new Error("stored report is too large");
+  if (object.size > MAX_REPORT_BYTES) {
+    throw new Error("stored report is too large");
+  }
+
   const parsed = reportJsonSchema.safeParse(JSON.parse(await object.text()));
   const value = parsed.success ? parsed.data : null;
 
-  if (!value) throw new Error("stored report is not a JSON object");
+  if (!value) {
+    throw new Error("stored report is not a JSON object");
+  }
 
   return value;
 }
@@ -183,7 +201,10 @@ async function listReportObjects(bucket: ReportArchive): Promise<ListedReport[]>
     for (const object of page.objects) {
       const match = PUBLIC_REPORT_KEY_PATTERN.exec(object.key);
 
-      if (!match) continue;
+      if (!match) {
+        continue;
+      }
+
       const reportId = match[1].toLowerCase();
 
       if (!reportIds.has(reportId) && reportIds.size >= MAX_PUBLIC_REPORTS) {
@@ -209,9 +230,11 @@ export async function listCompletedReports(bucket: ReportArchive): Promise<Compl
 
   const reports = await Promise.all(
     artifacts.map(async (entry) => {
-      const object = await bucket.get(entry.json!);
+      const object = await bucket.get(entry.json);
 
-      if (!object) return null;
+      if (!object) {
+        return null;
+      }
 
       try {
         return summarizeStoredReport(await parseReportObject(object), entry);
@@ -230,7 +253,10 @@ export async function getCompletedReport(
   bucket: R2Bucket,
   reportId: string,
 ): Promise<CompletedReport | null> {
-  if (!isReportId(reportId)) return null;
+  if (!isReportId(reportId)) {
+    return null;
+  }
+
   const normalizedId = reportId.toLowerCase();
   const prefix = `${PUBLIC_REPORT_PREFIX}${normalizedId}`;
 
@@ -240,7 +266,9 @@ export async function getCompletedReport(
     bucket.head(`${prefix}-cheatsheet.md`),
   ]);
 
-  if (!jsonObject) return null;
+  if (!jsonObject) {
+    return null;
+  }
 
   try {
     const artifacts: ReportArtifacts = {
@@ -249,9 +277,13 @@ export async function getCompletedReport(
       lastModified: jsonObject.uploaded.toISOString(),
     };
 
-    if (markdownObject) artifacts.markdown = `${prefix}.md`;
+    if (markdownObject) {
+      artifacts.markdown = `${prefix}.md`;
+    }
 
-    if (cheatsheetObject) artifacts.cheatsheet = `${prefix}-cheatsheet.md`;
+    if (cheatsheetObject) {
+      artifacts.cheatsheet = `${prefix}-cheatsheet.md`;
+    }
 
     return summarizeStoredReport(await parseReportObject(jsonObject), artifacts);
   } catch {
@@ -263,10 +295,15 @@ export function publicReportObjectKey(
   reportId: string,
   kind: "json" | ReportDocumentKind,
 ): string | null {
-  if (!isReportId(reportId)) return null;
+  if (!isReportId(reportId)) {
+    return null;
+  }
+
   const prefix = `${PUBLIC_REPORT_PREFIX}${reportId.toLowerCase()}`;
 
-  if (kind === "json") return `${prefix}.json`;
+  if (kind === "json") {
+    return `${prefix}.json`;
+  }
 
   return kind === "cheatsheet" ? `${prefix}-cheatsheet.md` : `${prefix}.md`;
 }
@@ -278,12 +315,19 @@ export async function getReportMarkdown(
 ): Promise<string | null> {
   const key = publicReportObjectKey(reportId, kind);
 
-  if (!key) return null;
+  if (!key) {
+    return null;
+  }
+
   const object = await bucket.get(key);
 
-  if (!object) return null;
+  if (!object) {
+    return null;
+  }
 
-  if (object.size > MAX_MARKDOWN_BYTES) throw new Error("stored Markdown is too large");
+  if (object.size > MAX_MARKDOWN_BYTES) {
+    throw new Error("stored Markdown is too large");
+  }
 
   return object.text();
 }
@@ -294,10 +338,16 @@ export async function getPublicReportJson(
 ): Promise<string | null> {
   const key = publicReportObjectKey(reportId, "json");
 
-  if (!key) return null;
+  if (!key) {
+    return null;
+  }
+
   const object = await bucket.get(key);
 
-  if (!object) return null;
+  if (!object) {
+    return null;
+  }
+
   const report = await parseReportObject(object);
   const publicReport = { ...report };
   delete publicReport.sessionId;

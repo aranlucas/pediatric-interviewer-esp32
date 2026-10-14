@@ -21,7 +21,9 @@ const TIMEOUT_MS = 15_000;
  * @returns {asserts condition}
  */
 function assert(condition, message) {
-  if (!condition) throw new Error(message);
+  if (!condition) {
+    throw new Error(message);
+  }
 }
 
 function roomName() {
@@ -44,6 +46,7 @@ async function fetchSession(room) {
       expiresAt: z.number().int(),
     })
     .parse(await response.json());
+
   assert(payload.room === room, "session endpoint returned the wrong room");
   assert(Number.isSafeInteger(payload.expiresAt), "missing token expiry");
 
@@ -103,7 +106,10 @@ async function assertWebSocket(room, token) {
 
       /** @param {Error} [error] */
       const finish = (error) => {
-        if (settled) return;
+        if (settled) {
+          return;
+        }
+
         settled = true;
         clearTimeout(timeout);
 
@@ -120,19 +126,25 @@ async function assertWebSocket(room, token) {
 
       socket.on("error", () => finish(new Error("signed browser WebSocket handshake failed")));
       socket.on("message", (data, isBinary) => {
-        if (isBinary) return;
+        if (isBinary) {
+          return;
+        }
 
         try {
           const parsed = z
             .object({ type: z.string() })
             .safeParse(JSON.parse(webSocketBuffer(data).toString()));
 
-          if (parsed.success) observed.add(parsed.data.type);
+          if (parsed.success) {
+            observed.add(parsed.data.type);
+          }
         } catch {
           return;
         }
 
-        if (observed.has("welcome") && observed.has("interview_state")) finish();
+        if (observed.has("welcome") && observed.has("interview_state")) {
+          finish();
+        }
       });
     },
   );

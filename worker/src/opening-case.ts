@@ -89,7 +89,10 @@ export function parseOpeningCaseResponse(outputText: string | undefined): string
 
   const result = z.object({ vignette: z.string() }).safeParse(parsed);
 
-  if (!result.success) throw new Error("Gemini opening case omitted the vignette.");
+  if (!result.success) {
+    throw new Error("Gemini opening case omitted the vignette.");
+  }
+
   const rawVignette = result.data.vignette;
 
   const vignette = rawVignette
@@ -124,7 +127,10 @@ export async function generateOpeningCase(
   topic: InterviewTopic,
   difficulty: InterviewDifficulty,
 ): Promise<string> {
-  if (!apiKey.trim()) throw new Error("GEMINI_API_KEY is not configured.");
+  if (!apiKey.trim()) {
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
+
   const ai = new GoogleGenAI({ apiKey });
   let lastError: unknown;
 

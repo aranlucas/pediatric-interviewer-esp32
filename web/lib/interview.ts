@@ -108,7 +108,9 @@ export type InterviewState = {
 };
 
 export function averageScore(evaluation?: Evaluation): number | null {
-  if (!evaluation?.scoreSummary.length) return null;
+  if (!evaluation?.scoreSummary.length) {
+    return null;
+  }
 
   return (
     evaluation.scoreSummary.reduce((total, item) => total + item.score, 0) /
@@ -117,11 +119,17 @@ export function averageScore(evaluation?: Evaluation): number | null {
 }
 
 export function outcomeLabel(outcome?: Evaluation["outcome"]): string {
-  if (outcome === "pass") return "Pass";
+  if (outcome === "pass") {
+    return "Pass";
+  }
 
-  if (outcome === "borderline") return "Borderline";
+  if (outcome === "borderline") {
+    return "Borderline";
+  }
 
-  if (outcome === "not_yet") return "Not yet";
+  if (outcome === "not_yet") {
+    return "Not yet";
+  }
 
   return "Pending";
 }
@@ -133,7 +141,9 @@ export function questionCountForSelection(requested: number, topicCount: number)
 export function topicSelectionLabel(topicIds: readonly TopicId[]): string {
   const topics = TOPICS.filter((topic) => topicIds.includes(topic.id));
 
-  if (topics.length === 1) return topics[0].short;
+  if (topics.length === 1) {
+    return topics[0].short;
+  }
 
   return `${topics.length}-topic combo`;
 }

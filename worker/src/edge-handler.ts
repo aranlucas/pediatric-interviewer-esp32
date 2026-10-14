@@ -60,7 +60,10 @@ type WorkerBindings<E extends WorkerEnv> = { Bindings: E };
 
 function json(data: WorkerResponse, status = 200, extraHeaders: HeadersInit = {}): Response {
   const headers = new Headers(SECURITY_HEADERS);
-  for (const [key, value] of new Headers(extraHeaders)) headers.set(key, value);
+
+  for (const [key, value] of new Headers(extraHeaders)) {
+    headers.set(key, value);
+  }
 
   return Response.json(data, { status, headers });
 }
@@ -84,7 +87,10 @@ function requestDeviceHeaderToken(request: Request): string | null {
 function requestBearerToken(request: Request): string | null {
   const authorization = request.headers.get("Authorization")?.trim();
 
-  if (!authorization) return null;
+  if (!authorization) {
+    return null;
+  }
+
   const match = /^Bearer\s+([^\s]+)$/iu.exec(authorization);
 
   return match?.[1] ?? null;
@@ -97,7 +103,10 @@ function clientIp(request: Request): string {
 }
 
 async function verifyDeviceToken(provided: string | null, expected: string): Promise<boolean> {
-  if (!provided || !expected || provided.length > 256) return false;
+  if (!provided || !expected || provided.length > 256) {
+    return false;
+  }
+
   const encoder = new TextEncoder();
 
   const [providedHash, expectedHash] = await Promise.all([
@@ -150,13 +159,18 @@ async function authorizedReport(
   if (bearer) {
     const claims = await verifyWebToken(bearer, env.WEB_TOKEN_SECRET, { scope: "report" });
 
-    if (!claims) return null;
+    if (!claims) {
+      return null;
+    }
+
     const object = await env.INTERVIEW_REPORTS.get(key);
 
     // A signed report token is scoped to the persisted session. Return the
     // same 401 for a missing object and a mismatched session to avoid probing
     // report existence with a valid token for another session.
-    if (!object || object.customMetadata?.sessionId !== claims.sub) return null;
+    if (!object || object.customMetadata?.sessionId !== claims.sub) {
+      return null;
+    }
 
     return { object };
   }
@@ -170,21 +184,21 @@ async function authorizedReport(
   return { object: await env.INTERVIEW_REPORTS.get(key) };
 }
 
+function healthResponse(): Response {
+  return json({
+    ok: true,
+    protocolVersion: 2,
+    capabilities: {
+      deviceWebSocket: true,
+      signedWebWebSocket: true,
+      privateReports: true,
+      reportRecovery: true,
+    },
+  });
+}
+
 export function createWorker<E extends WorkerEnv>(routeAgentRequest: AgentRouter<E>) {
   const app = new Hono<WorkerBindings<E>>();
-
-  function healthResponse(): Response {
-    return json({
-      ok: true,
-      protocolVersion: 2,
-      capabilities: {
-        deviceWebSocket: true,
-        signedWebWebSocket: true,
-        privateReports: true,
-        reportRecovery: true,
-      },
-    });
-  }
 
   app.get("/health", healthResponse);
 
@@ -193,7 +207,9 @@ export function createWorker<E extends WorkerEnv>(routeAgentRequest: AgentRouter
   app.get("/interviewer/reports/:artifact", async (context) => {
     const reportMatch = REPORT_ARTIFACT_PATTERN.exec(context.req.param("artifact"));
 
-    if (!reportMatch) return errorResponse("report_not_found", 404);
+    if (!reportMatch) {
+      return errorResponse("report_not_found", 404);
+    }
 
     const [, rawReportId, cheatsheetSuffix, rawFormat] = reportMatch;
     const reportId = rawReportId.toLowerCase();
@@ -208,9 +224,13 @@ export function createWorker<E extends WorkerEnv>(routeAgentRequest: AgentRouter
     const key = `pediatric-oral-boards/reports/${reportId}${suffix}.${format}`;
     const access = await authorizedReport(context.req.raw, context.env, key);
 
-    if (!access) return unauthorizedResponse();
+    if (!access) {
+      return unauthorizedResponse();
+    }
 
-    if (!access.object) return errorResponse("report_not_found", 404);
+    if (!access.object) {
+      return errorResponse("report_not_found", 404);
+    }
 
     const headers = new Headers({
       "Content-Disposition": `attachment; filename="pediatric-oral-boards-${reportId}${suffix}.${format}"`,
@@ -299,7 +319,9 @@ export function createWorker<E extends WorkerEnv>(routeAgentRequest: AgentRouter
             },
           );
 
-          if (!claims) return unauthorizedResponse();
+          if (!claims) {
+            return unauthorizedResponse();
+          }
 
           if (!(await allowConnectionAttempt(env, `subject:${claims.sub}`))) {
             return errorResponse("rate_limited", 429, { "Retry-After": "60" });

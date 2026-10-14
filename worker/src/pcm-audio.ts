@@ -66,7 +66,9 @@ export function resamplePcm16(
     throw new Error("PCM sample rates must be positive.");
   }
 
-  if (inputRate === outputRate) return input.slice();
+  if (inputRate === outputRate) {
+    return input.slice();
+  }
 
   const inputSamples = input.byteLength / 2;
   const outputSamples = Math.max(1, Math.floor((inputSamples * outputRate) / inputRate));

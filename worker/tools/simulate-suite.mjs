@@ -21,7 +21,9 @@ const projectDirectory = path.dirname(toolDirectory);
  * @returns {asserts condition}
  */
 function requireCondition(condition, message) {
-  if (!condition) throw new Error(message);
+  if (!condition) {
+    throw new Error(message);
+  }
 }
 
 /** @param {string} value */
@@ -61,7 +63,9 @@ function runLiveSimulation(name, arguments_) {
           try {
             const parsed = simulationCompleteSchema.safeParse(JSON.parse(line));
 
-            if (parsed.success) summary = parsed.data;
+            if (parsed.success) {
+              summary = parsed.data;
+            }
           } catch {
             // Useful simulator output is JSON; ignore incomplete diagnostic text.
           }
@@ -148,6 +152,7 @@ async function runGate(name, operation) {
 
 async function main() {
   const connection = await interviewerSettings();
+
   const gates = [
     await runGate("two_second_thinking_pause", async () => {
       const result = await runLiveSimulation("two_second_thinking_pause", [
@@ -281,7 +286,9 @@ async function main() {
   fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify({ event: "suite_complete", reportPath, ...report }));
 
-  if (failed.length > 0) process.exitCode = 1;
+  if (failed.length > 0) {
+    process.exitCode = 1;
+  }
 }
 
 main().catch(

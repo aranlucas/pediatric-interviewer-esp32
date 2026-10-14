@@ -62,6 +62,7 @@ describe("simulator payload validation", () => {
       evaluation: { exchanges: [{ question: "Example" }] },
       cheatsheet: { markdown: "Study notes" },
     };
+
     expect(storedReportSchema.parse(stored)).toEqual(stored);
     expect(storedReportSchema.safeParse({ evaluation: { exchanges: [] } }).success).toBe(false);
     expect(
@@ -87,6 +88,7 @@ describe("simulator payload validation", () => {
       report: null,
       outputAudio: { frames: 1, bytes: 4800, maximumFrameBytes: 4800, oddFrames: 0 },
     };
+
     expect(simulationCompleteSchema.parse(summary)).toEqual(summary);
     expect(simulationCompleteSchema.safeParse({ event: "simulation_complete" }).success).toBe(
       false,

@@ -58,11 +58,13 @@ export function openingSpeechInteraction(text: string) {
 }
 
 function fourCc(bytes: Uint8Array, offset: number): string {
-  return String.fromCharCode(...bytes.subarray(offset, offset + 4));
+  return String.fromCodePoint(...bytes.subarray(offset, offset + 4));
 }
 
 function openingAudioFormat(mimeType: string | undefined): OpeningAudioFormat | undefined {
-  if (!mimeType) return undefined;
+  if (!mimeType) {
+    return undefined;
+  }
 
   const [mediaType, ...parameters] = mimeType
     .toLowerCase()
@@ -76,19 +78,30 @@ function openingAudioFormat(mimeType: string | undefined): OpeningAudioFormat | 
         ? "pcm"
         : undefined;
 
-  if (!kind) throw new Error("Gemini TTS returned an unexpected audio format.");
+  if (!kind) {
+    throw new Error("Gemini TTS returned an unexpected audio format.");
+  }
 
   let sampleRate: number | undefined;
 
   for (const parameter of parameters) {
-    if (!parameter) continue;
+    if (!parameter) {
+      continue;
+    }
+
     const [name, value] = parameter.split("=", 2).map((part) => part.trim());
 
-    if (name === "codec" && value === "pcm") continue;
+    if (name === "codec" && value === "pcm") {
+      continue;
+    }
 
-    if (name === "channels" && value === "1") continue;
+    if (name === "channels" && value === "1") {
+      continue;
+    }
 
-    if ((name === "bits" || name === "bit_depth") && value === "16") continue;
+    if ((name === "bits" || name === "bit_depth") && value === "16") {
+      continue;
+    }
 
     if (name !== "rate" || !/^\d{4,6}$/u.test(value ?? "")) {
       throw new Error(
@@ -178,7 +191,9 @@ function decodePcmWav(bytes: Uint8Array): OpeningSpeech {
 
 /** Validates bounded raw PCM or WAV Gemini TTS output. */
 export function decodeOpeningSpeech(audio: OpeningSpeechAudio | undefined): OpeningSpeech {
-  if (!audio?.data) throw new Error("Gemini TTS returned no audio data.");
+  if (!audio?.data) {
+    throw new Error("Gemini TTS returned no audio data.");
+  }
 
   if (audio.data.length > MAX_OPENING_AUDIO_BASE64_CHARACTERS) {
     throw new Error("Gemini TTS returned oversized encoded audio.");

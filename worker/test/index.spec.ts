@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { assert, afterEach, describe, expect, it, vi } from "vitest";
 
 import { PEDIATRIC_TOPICS } from "../src/interview-content";
 import {
@@ -86,6 +86,12 @@ function pcm16Wav(pcm: Uint8Array, sampleRate = 24_000): Uint8Array {
 
   return wav;
 }
+
+const pulpTherapyTopic = PEDIATRIC_TOPICS.find(({ id }) => id === "pulp_therapy");
+
+assert(pulpTherapyTopic);
+
+const retry = <T>(operation: (attempt: number) => Promise<T>): Promise<T> => operation(1);
 
 describe("Interviewer device display", () => {
   it("fits the generated presentation on screen while preserving its question", () => {
@@ -277,9 +283,11 @@ describe("Pediatric oral-board interviewer", () => {
   it("resamples PCM when provider and device rates differ", () => {
     const source = new Uint8Array(12);
     const view = new DataView(source.buffer);
+
     for (const [index, sample] of [0, 1_000, 2_000, 3_000, 4_000, 5_000].entries()) {
       view.setInt16(index * 2, sample, true);
     }
+
     const output = resamplePcm16(source, 24_000, 16_000);
     expect(output.byteLength).toBe(8);
 
@@ -349,6 +357,7 @@ describe("Pediatric oral-board interviewer", () => {
         functionDeclarations: [
           expect.objectContaining({
             name: TURN_DISPOSITION_TOOL,
+            // SAFETY: Vitest consumes this JSON-schema matcher only as an expected value.
             parametersJsonSchema: expect.objectContaining({
               properties: {
                 disposition: {
@@ -357,7 +366,7 @@ describe("Pediatric oral-board interviewer", () => {
                 },
               },
               required: ["disposition"],
-            }) as Record<string, unknown>,
+            }) as z.infer<ReturnType<typeof z.json>>,
           }),
         ],
       },
@@ -455,7 +464,9 @@ describe("Pediatric oral-board interviewer", () => {
       questionCount: 4,
       difficulty: "hard",
     });
-    const combo = buildInterviewTopic(configuration!.topicIds);
+    assert(configuration);
+
+    const combo = buildInterviewTopic(configuration.topicIds);
     expect(combo.id).toBe("combo");
     expect(combo.label).toContain("Behavior Guidance + Pulp Therapy");
     expect(combo.caseScope).toContain("one coherent pediatric patient scenario");
@@ -568,7 +579,7 @@ describe("Pediatric oral-board interviewer", () => {
 
     const evaluation = await evaluateInterview(
       "test-gemini-key",
-      PEDIATRIC_TOPICS.find(({ id }) => id === "pulp_therapy")!,
+      pulpTherapyTopic,
       transcript,
       8,
       "hard",
@@ -618,11 +629,7 @@ describe("Pediatric oral-board interviewer", () => {
       }),
     );
 
-    const evaluation = await evaluateInterview(
-      "test-gemini-key",
-      PEDIATRIC_TOPICS.find(({ id }) => id === "pulp_therapy")!,
-      transcript,
-    );
+    const evaluation = await evaluateInterview("test-gemini-key", pulpTherapyTopic, transcript);
 
     expect(evaluation.exchanges[0]).toMatchObject(transcript[0]);
     const [requestUrl, requestInit] = fetchMock.mock.calls[0];
@@ -642,9 +649,11 @@ describe("Pediatric oral-board interviewer", () => {
       minItems: 6,
       maxItems: 6,
     });
+
     const evaluationInput = z
       .object({ topic: z.object({ competencies: z.array(z.json()), blueprintWeight: z.number() }) })
       .parse(JSON.parse(requestBody.contents[0].parts[0].text));
+
     expect(evaluationInput.topic.competencies).toHaveLength(6);
     expect(evaluationInput.topic.blueprintWeight).toBe(8);
   });
@@ -666,11 +675,7 @@ describe("Pediatric oral-board interviewer", () => {
     );
 
     await expect(
-      evaluateInterview(
-        "test-gemini-key",
-        PEDIATRIC_TOPICS.find(({ id }) => id === "pulp_therapy")!,
-        transcript,
-      ),
+      evaluateInterview("test-gemini-key", pulpTherapyTopic, transcript),
     ).rejects.toThrow("returned 5 exchanges; expected 6");
   });
 
@@ -680,10 +685,11 @@ describe("Pediatric oral-board interviewer", () => {
     const transcript = report.evaluation.exchanges.map(({ question, answer }, index) => {
       const exchange: InterviewExchange = { question, answer };
 
-      if (index === 0)
+      if (index === 0) {
         exchange.followUps = [
           { question: "What would change that plan?", answer: "A change in cooperation." },
         ];
+      }
 
       return exchange;
     });
@@ -696,11 +702,7 @@ describe("Pediatric oral-board interviewer", () => {
       }),
     );
 
-    const evaluation = await evaluateInterview(
-      "test-gemini-key",
-      PEDIATRIC_TOPICS.find(({ id }) => id === "pulp_therapy")!,
-      transcript,
-    );
+    const evaluation = await evaluateInterview("test-gemini-key", pulpTherapyTopic, transcript);
 
     expect(evaluation.exchanges[0].followUps).toEqual(transcript[0].followUps);
     expect(evaluation.exchanges[1].followUps).toBeUndefined();
@@ -710,6 +712,7 @@ describe("Pediatric oral-board interviewer", () => {
     const evaluationInput = z
       .object({ exchanges: z.array(z.object({ followUps: z.array(z.json()).optional() })) })
       .parse(JSON.parse(requestBody.contents[0].parts[0].text));
+
     expect(evaluationInput.exchanges[0].followUps).toHaveLength(1);
     // Prompted content must be credited but must not score the same as
     // content the candidate volunteered.
@@ -736,12 +739,13 @@ describe("Pediatric oral-board interviewer", () => {
 
     const built = await buildInterviewCheatsheet(
       "test-gemini-key",
-      PEDIATRIC_TOPICS.find(({ id }) => id === "pulp_therapy")!,
+      pulpTherapyTopic,
       report.evaluation,
     );
 
     expect(built).toEqual(cheatsheet);
     const requestBody = parseGeminiRequest(fetchMock.mock.calls[0][1]?.body);
+
     const input = z
       .object({
         probedExchangeCount: z.number(),
@@ -750,6 +754,7 @@ describe("Pediatric oral-board interviewer", () => {
         ),
       })
       .parse(JSON.parse(requestBody.contents[0].parts[0].text));
+
     expect(input.probedExchangeCount).toBe(1);
     expect(input.exchanges[0].probesNeeded).toBe(1);
     expect(input.exchanges[0].probeQuestions).toEqual(["What would change that plan?"]);
@@ -780,6 +785,7 @@ describe("Pediatric oral-board interviewer", () => {
     const bucket = {
       put: (key: string) => {
         puts.push(key);
+
         return Promise.resolve();
       },
       delete: () => Promise.resolve(),
@@ -870,12 +876,15 @@ describe("Pediatric oral-board interviewer", () => {
 
     const bucket = {
       put(key: string) {
-        if (key.endsWith(".md")) return Promise.reject(new Error("R2 unavailable"));
+        if (key.endsWith(".md")) {
+          return Promise.reject(new Error("R2 unavailable"));
+        }
 
         return Promise.resolve(null);
       },
       delete(keys: string[]) {
         deleted.push(keys);
+
         return Promise.resolve();
       },
     };
@@ -891,7 +900,9 @@ describe("Pediatric oral-board interviewer", () => {
     const transcript = report.evaluation.exchanges.map(({ question, answer, followUps }) => {
       const exchange: InterviewExchange = { question, answer };
 
-      if (followUps) exchange.followUps = followUps;
+      if (followUps) {
+        exchange.followUps = followUps;
+      }
 
       return exchange;
     });
@@ -905,7 +916,9 @@ describe("Pediatric oral-board interviewer", () => {
     ];
 
     const cloned = cloneInterviewExchanges(source);
-    cloned[0].followUps![0].answer = "Changed after snapshot.";
+    const clonedFollowUps = cloned[0].followUps;
+    assert(clonedFollowUps);
+    clonedFollowUps[0].answer = "Changed after snapshot.";
     expect(source[0].followUps[0].answer).toBe("To prioritize safety.");
 
     vi.spyOn(globalThis, "fetch")
@@ -924,11 +937,10 @@ describe("Pediatric oral-board interviewer", () => {
     const bucket = {
       put: vi.fn((key: string, value: string) => {
         stored.push({ key, value });
+
         return Promise.resolve();
       }),
     };
-
-    const retry = <T>(operation: (attempt: number) => Promise<T>): Promise<T> => operation(1);
 
     const casePresentation =
       "Here is your case. A four-year-old presents with swelling around a restored molar.";

@@ -47,15 +47,20 @@ export function createReportHandler(environment: () => Promise<EnvironmentContex
 
     const secret = env.WEB_TOKEN_SECRET;
 
-    if (!secret?.trim()) return json({ error: "report_auth_not_configured" }, 503);
+    if (!secret?.trim()) {
+      return json({ error: "report_auth_not_configured" }, 503);
+    }
+
     const reportToken = getCookie(request.headers.get("cookie"), REPORT_TOKEN_COOKIE);
     const reportPayload = await verifyAccessToken(reportToken, secret, "report");
 
-    if (!reportPayload || !isWebRoom(reportPayload.sub)) {
+    if (!reportToken || !reportPayload || !isWebRoom(reportPayload.sub)) {
       return json({ error: "unauthorized" }, 401);
     }
 
-    if (!env.INTERVIEWER_SERVICE) return json({ error: "report_service_not_configured" }, 503);
+    if (!env.INTERVIEWER_SERVICE) {
+      return json({ error: "report_service_not_configured" }, 503);
+    }
 
     const suffix = kind === "cheatsheet" ? "-cheatsheet" : "";
     const upstreamUrl = new URL(request.url);
@@ -66,7 +71,7 @@ export function createReportHandler(environment: () => Promise<EnvironmentContex
       const upstreamResponse = await env.INTERVIEWER_SERVICE.fetch(
         new Request(upstreamUrl, {
           method: "GET",
-          headers: { Authorization: `Bearer ${reportToken!}` },
+          headers: { Authorization: `Bearer ${reportToken}` },
         }),
       );
 
@@ -78,7 +83,9 @@ export function createReportHandler(environment: () => Promise<EnvironmentContex
 
       const contentType = upstreamResponse.headers.get("Content-Type");
 
-      if (contentType) headers.set("Content-Type", contentType);
+      if (contentType) {
+        headers.set("Content-Type", contentType);
+      }
 
       if (upstreamResponse.ok) {
         headers.set(

@@ -28,7 +28,9 @@ export function createReportDownloadHandler(environment: () => Promise<ReportDow
 
     const key = publicReportObjectKey(reportId, kind);
 
-    if (!key) return json({ error: "invalid_report" }, 400);
+    if (!key) {
+      return json({ error: "invalid_report" }, 400);
+    }
 
     const env = await environment();
 
@@ -36,7 +38,9 @@ export function createReportDownloadHandler(environment: () => Promise<ReportDow
       return json({ error: "report_service_not_configured" }, 503);
     }
 
-    if (!publicReportsEnabled(env)) return json({ error: "report_not_found" }, 404);
+    if (!publicReportsEnabled(env)) {
+      return json({ error: "report_not_found" }, 404);
+    }
 
     const headers = new Headers({
       "Cache-Control": "public, max-age=300, s-maxage=3600",
@@ -51,7 +55,9 @@ export function createReportDownloadHandler(environment: () => Promise<ReportDow
       try {
         const body = await getPublicReportJson(env.INTERVIEW_REPORTS, reportId);
 
-        if (!body) return json({ error: "report_not_found" }, 404);
+        if (!body) {
+          return json({ error: "report_not_found" }, 404);
+        }
 
         return new Response(body, { headers });
       } catch {
@@ -61,7 +67,9 @@ export function createReportDownloadHandler(environment: () => Promise<ReportDow
 
     const object = await env.INTERVIEW_REPORTS.get(key);
 
-    if (!object) return json({ error: "report_not_found" }, 404);
+    if (!object) {
+      return json({ error: "report_not_found" }, 404);
+    }
 
     return new Response(object.body, { headers });
   };

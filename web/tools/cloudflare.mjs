@@ -6,9 +6,13 @@ import { prepareOpenNextConfig } from "./opennext-config.ts";
 function run(args) {
   const result = spawnSync("pnpm", ["exec", ...args], { stdio: "inherit" });
 
-  if (result.error) throw result.error;
+  if (result.error) {
+    throw result.error;
+  }
 
-  if (result.status !== 0) process.exit(result.status ?? 1);
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
 }
 
 const [command, ...args] = process.argv.slice(2);

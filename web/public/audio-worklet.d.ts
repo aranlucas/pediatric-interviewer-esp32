@@ -5,4 +5,5 @@ declare abstract class AudioWorkletProcessor {
 }
 
 declare const sampleRate: number;
+
 declare function registerProcessor(name: string, processor: new () => AudioWorkletProcessor): void;

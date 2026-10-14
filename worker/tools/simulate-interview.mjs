@@ -55,7 +55,10 @@ const MINIMUM_OPENING_AUDIO_BYTES = 240_000; // ~5 s at 24 kHz mono 16-bit
  * @returns {asserts condition}
  */
 function assert(condition, message, context) {
-  if (condition) return;
+  if (condition) {
+    return;
+  }
+
   throw new Error(`${message} :: ${JSON.stringify(context)}`);
 }
 
@@ -138,18 +141,32 @@ function parseArguments(argv) {
 
     const value = argv[index + 1];
 
-    if (!value) throw new Error(`Missing value for ${argument}`);
+    if (!value) {
+      throw new Error(`Missing value for ${argument}`);
+    }
 
-    if (argument === "--topic") options.topic = value;
-    else if (argument === "--turns") options.turns = Number(value);
-    else if (argument === "--pause-ms") options.pauseMs = Number(value);
-    else if (argument === "--commit-delay-ms") options.commitDelayMs = Number(value);
-    else if (argument === "--max-follow-ups") options.maxFollowUps = Number(value);
-    else if (argument === "--cafe-noise-percent") options.cafeNoisePercent = Number(value);
-    else if (argument === "--voice") options.voice = value;
-    else if (argument === "--rate") options.rate = Number(value);
-    else if (argument === "--timeout-ms") options.timeoutMs = Number(value);
-    else throw new Error(`Unknown option: ${argument}`);
+    if (argument === "--topic") {
+      options.topic = value;
+    } else if (argument === "--turns") {
+      options.turns = Number(value);
+    } else if (argument === "--pause-ms") {
+      options.pauseMs = Number(value);
+    } else if (argument === "--commit-delay-ms") {
+      options.commitDelayMs = Number(value);
+    } else if (argument === "--max-follow-ups") {
+      options.maxFollowUps = Number(value);
+    } else if (argument === "--cafe-noise-percent") {
+      options.cafeNoisePercent = Number(value);
+    } else if (argument === "--voice") {
+      options.voice = value;
+    } else if (argument === "--rate") {
+      options.rate = Number(value);
+    } else if (argument === "--timeout-ms") {
+      options.timeoutMs = Number(value);
+    } else {
+      throw new Error(`Unknown option: ${argument}`);
+    }
+
     index += 1;
   }
 
@@ -208,7 +225,10 @@ function wavPcm(buffer) {
     const chunk = buffer.toString("ascii", offset, offset + 4);
     const length = buffer.readUInt32LE(offset + 4);
 
-    if (chunk === "data") return buffer.subarray(offset + 8, offset + 8 + length);
+    if (chunk === "data") {
+      return buffer.subarray(offset + 8, offset + 8 + length);
+    }
+
     offset += 8 + length + (length & 1);
   }
 
@@ -302,7 +322,10 @@ async function synthesizeFollowUps(options, temporaryDirectory) {
  * @param {string} temporaryDirectory
  */
 async function synthesizeCafeNoise(options, temporaryDirectory) {
-  if (options.cafeNoisePercent === 0) return null;
+  if (options.cafeNoisePercent === 0) {
+    return null;
+  }
+
   const aiff = path.join(temporaryDirectory, "cafe-chatter.aiff");
   const wav = path.join(temporaryDirectory, "cafe-chatter.wav");
   await execFileAsync("say", [
@@ -335,7 +358,10 @@ async function synthesizeCafeNoise(options, temporaryDirectory) {
  * @param {number} backgroundOffset
  */
 function mixBackground(pcm, background, percent, backgroundOffset) {
-  if (!background || percent <= 0) return { pcm, backgroundOffset };
+  if (!background || percent <= 0) {
+    return { pcm, backgroundOffset };
+  }
+
   const mixed = Buffer.allocUnsafe(pcm.length);
 
   for (let offset = 0; offset + 1 < pcm.length; offset += 2) {
@@ -441,7 +467,10 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
 
   /** @param {unknown} reason */
   const fail = (reason) => {
-    if (finished) return;
+    if (finished) {
+      return;
+    }
+
     finished = true;
     stopCandidateAudio = true;
     clearTimeout(deadline);
@@ -459,7 +488,10 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
    * @param {{ sendEndCall?: boolean }} options
    */
   const finish = (result, { sendEndCall = true } = {}) => {
-    if (finished) return;
+    if (finished) {
+      return;
+    }
+
     finished = true;
     clearTimeout(deadline);
 
@@ -500,7 +532,9 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
       // 30 seconds before giving up. Allow the end_call frame to flush, then
       // release the test process deterministically.
       forcedCloseTimer = setTimeout(() => {
-        if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+        if (socket.readyState !== WebSocket.CLOSED) {
+          socket.terminate();
+        }
       }, 2_000);
     }
 
@@ -509,7 +543,10 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
 
   /** @param {Completion} result */
   const requestPartialCompletion = (result) => {
-    if (finished || partialCompletion) return;
+    if (finished || partialCompletion) {
+      return;
+    }
+
     partialCompletion = result;
     stopCandidateAudio = true;
 
@@ -527,7 +564,10 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
   /** @param {Buffer} pcm */
   const sendPcm = async (pcm) => {
     for (let offset = 0; offset < pcm.length; offset += pcmFrameBytes) {
-      if (stopCandidateAudio || socket.readyState !== WebSocket.OPEN) return;
+      if (stopCandidateAudio || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
       const frame = pcm.subarray(offset, Math.min(offset + pcmFrameBytes, pcm.length));
       const mixed = mixBackground(frame, cafeNoise, options.cafeNoisePercent, backgroundOffset);
       backgroundOffset = mixed.backgroundOffset;
@@ -550,7 +590,9 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     log("candidate_thinking_pause_started", { answer: answerIndex + 1 });
     await sendPcm(silence(options.pauseMs));
 
-    if (!stopCandidateAudio) await sendPcm(answers[answerIndex][1]);
+    if (!stopCandidateAudio) {
+      await sendPcm(answers[answerIndex][1]);
+    }
 
     if (!stopCandidateAudio) {
       log("candidate_answer_finished", { answer: answerIndex + 1 });
@@ -578,7 +620,9 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     });
     await sendPcm(followUps[index]);
 
-    if (!stopCandidateAudio) await sendPcm(silence(options.commitDelayMs));
+    if (!stopCandidateAudio) {
+      await sendPcm(silence(options.commitDelayMs));
+    }
 
     if (!stopCandidateAudio && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "commit_turn" }));
@@ -593,7 +637,9 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
   };
 
   const maybeStartAnswer = () => {
-    if (finished || candidateStreaming || phase !== "interviewing") return;
+    if (finished || candidateStreaming || phase !== "interviewing") {
+      return;
+    }
 
     // The examiner probed instead of advancing: the question number has not
     // moved even though this answer is already in. Answer the probe, otherwise
@@ -613,13 +659,18 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
       return;
     }
 
-    if (questionNumber !== answersStarted + 1) return;
+    if (questionNumber !== answersStarted + 1) {
+      return;
+    }
 
     if (answersStarted >= options.turns) {
       const result = { answersSimulated: answersStarted, stoppedBeforeQuestion: questionNumber };
 
-      if (options.waitReport && answersStarted > 0) requestPartialCompletion(result);
-      else finish(result);
+      if (options.waitReport && answersStarted > 0) {
+        requestPartialCompletion(result);
+      } else {
+        finish(result);
+      }
 
       return;
     }
@@ -634,7 +685,9 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
   };
 
   const handleListening = () => {
-    if (!firstQuestionReceived) return;
+    if (!firstQuestionReceived) {
+      return;
+    }
 
     if (options.turns === 0) {
       openingOnlyComplete = true;
@@ -664,18 +717,24 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
   });
   socket.on("message", (data, binary) => {
     const buffer = webSocketBuffer(data);
+
     if (binary) {
       outputAudioFrames += 1;
       outputAudioBytes += buffer.length;
       turnOutputAudioBytes += buffer.length;
       maximumOutputFrameBytes = Math.max(maximumOutputFrameBytes, buffer.length);
 
-      if (buffer.length % 2 !== 0) oddOutputFrames += 1;
+      if (buffer.length % 2 !== 0) {
+        oddOutputFrames += 1;
+      }
 
       for (let offset = 0; offset + 1 < buffer.length; offset += 2) {
         const sample = buffer.readInt16LE(offset);
 
-        if (sample !== 0) turnOutputNonzeroSamples += 1;
+        if (sample !== 0) {
+          turnOutputNonzeroSamples += 1;
+        }
+
         turnOutputAudioPeak = Math.max(turnOutputAudioPeak, Math.abs(sample));
       }
 
@@ -690,7 +749,10 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
       return;
     }
 
-    if (!parsed.success) return;
+    if (!parsed.success) {
+      return;
+    }
+
     const message = parsed.data;
 
     if (message.type === "status") {
@@ -705,7 +767,9 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
         });
       }
 
-      if (message.status === "listening") handleListening();
+      if (message.status === "listening") {
+        handleListening();
+      }
 
       if (message.status === "complete") {
         finish(
@@ -800,7 +864,9 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     clearTimeout(forcedCloseTimer);
     log("websocket_closed", { code, reason: reason.toString() });
 
-    if (!finished) fail(new Error(`WebSocket closed before completion (${code})`));
+    if (!finished) {
+      fail(new Error(`WebSocket closed before completion (${code})`));
+    }
   });
 
   return run;
