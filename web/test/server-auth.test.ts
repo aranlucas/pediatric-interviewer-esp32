@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 
 import {
   createAccessToken,
@@ -91,9 +91,10 @@ describe("web auth input validation", () => {
   it("derives an isolated owner cookie name from a validated room", () => {
     const room = "web-0123456789abcdef0123456789abcdef";
     const name = sessionOwnerCookieName(room);
+    assert(name);
     expect(name).toBe("__Host-angry-cat-owner-0123456789abcdef0123456789abcdef");
     expect(serializeSessionOwnerCookie("signed.value", room, 7200)).toBe(
-      `${name!}=signed.value; Max-Age=7200; Path=/; Secure; HttpOnly; SameSite=Strict`,
+      `${name}=signed.value; Max-Age=7200; Path=/; Secure; HttpOnly; SameSite=Strict`,
     );
     expect(sessionOwnerCookieName("not-a-room")).toBeNull();
   });

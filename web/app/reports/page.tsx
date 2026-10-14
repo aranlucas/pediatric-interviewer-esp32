@@ -22,9 +22,13 @@ export const metadata: Metadata = {
 export default async function ReportsPage() {
   const env = await reportsEnvironment();
 
-  if (!env?.INTERVIEW_REPORTS) return <ReportsConfigurationError />;
+  if (!env?.INTERVIEW_REPORTS) {
+    return <ReportsConfigurationError />;
+  }
 
-  if (!publicReportsEnabled(env)) return <ReportsDisabled />;
+  if (!publicReportsEnabled(env)) {
+    return <ReportsDisabled />;
+  }
 
   const reports = await listCompletedReports(env.INTERVIEW_REPORTS);
 

@@ -29,6 +29,7 @@ export function BrowserSessionGate({ children }: BrowserSessionGateProps) {
   useEffect(() => {
     let active = true;
     const existingRoom = sessionRef.current?.room ?? null;
+
     const acquireSession = async (): Promise<BrowserSessionToken> => {
       try {
         return await requestBrowserSessionToken(existingRoom, attempt);
@@ -55,12 +56,18 @@ export function BrowserSessionGate({ children }: BrowserSessionGateProps) {
       try {
         const next = await acquireSession();
 
-        if (!active) return;
+        if (!active) {
+          return;
+        }
+
         sessionRef.current = next;
         setSession(next);
         setRefreshing(false);
       } catch (failure) {
-        if (!active) return;
+        if (!active) {
+          return;
+        }
+
         setSetupError(
           failure instanceof Error
             ? failure.message
@@ -70,7 +77,9 @@ export function BrowserSessionGate({ children }: BrowserSessionGateProps) {
     };
 
     void setupSession().catch(() => {
-      if (active) setSetupError("Could not complete secure interviewer setup. Please retry.");
+      if (active) {
+        setSetupError("Could not complete secure interviewer setup. Please retry.");
+      }
     });
 
     return () => {

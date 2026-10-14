@@ -27,7 +27,9 @@ function formatCompletedAt(value: string, timezone: string): string {
 }
 
 function scoreLabel(score: number | null): string {
-  if (score === null) return "—";
+  if (score === null) {
+    return "—";
+  }
 
   return `${Number.isInteger(score) ? score.toFixed(0) : score.toFixed(1)}/3`;
 }

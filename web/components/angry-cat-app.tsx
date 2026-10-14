@@ -187,19 +187,25 @@ function InterviewExperience({
       statusRef.current = next;
       setStatus(next);
 
-      if (next === "evaluating" || next === "complete") updateTextComposerOpen(false);
+      if (next === "evaluating" || next === "complete") {
+        updateTextComposerOpen(false);
+      }
     },
     [updateTextComposerOpen],
   );
 
   useEffect(() => {
-    if (textComposerOpen) typedAnswerRef.current?.focus();
+    if (textComposerOpen) {
+      typedAnswerRef.current?.focus();
+    }
   }, [textComposerOpen]);
 
   const sendJson = useCallback((message: InterviewCommand): boolean => {
     const socket = agentRef.current;
 
-    if (!socket || socket.readyState !== (socket.OPEN ?? 1)) return false;
+    if (!socket || socket.readyState !== (socket.OPEN ?? 1)) {
+      return false;
+    }
 
     try {
       socket.send(JSON.stringify(message));
@@ -247,6 +253,7 @@ function InterviewExperience({
       },
       onSpeakingChange: setBrowserSpeaking,
     });
+
     audioRef.current = audio;
 
     return () => {
@@ -261,7 +268,10 @@ function InterviewExperience({
   const appendTranscript = useCallback((role: TranscriptItem["role"], text: string) => {
     const clean = text.replaceAll(/\s+/g, " ").trim();
 
-    if (!clean) return;
+    if (!clean) {
+      return;
+    }
+
     setTranscript((items) => [
       ...items.slice(-7),
       { id: ++transcriptId.current, role, text: clean },
@@ -312,13 +322,18 @@ function InterviewExperience({
           const next = parsedStatus;
           serverStatusRef.current = next;
 
-          if (next !== "error") setError("");
+          if (next !== "error") {
+            setError("");
+          }
+
           updateStatus(next);
           audioRef.current?.setListening(
             shouldCaptureInterviewAudio(next, textComposerOpenRef.current),
           );
 
-          if (next === "complete") setView("review");
+          if (next === "complete") {
+            setView("review");
+          }
         } else if (message.type === "playback_interrupt") {
           audioRef.current?.interruptPlayback();
         } else if (message.type === "transcript" && message.role === "user") {
@@ -429,8 +444,9 @@ function InterviewExperience({
         recoveryPendingRef.current = false;
         updateStatus("complete");
         setView("review");
-      } else if (next.phase === "evaluating") updateStatus("evaluating");
-      else if (next.phase === "evaluation_failed") {
+      } else if (next.phase === "evaluating") {
+        updateStatus("evaluating");
+      } else if (next.phase === "evaluation_failed") {
         updateStatus("error");
         setError("Your answers are safe, but the review was not saved. Retry the review.");
       }
@@ -470,7 +486,9 @@ function InterviewExperience({
   }, [agent]);
 
   useEffect(() => {
-    if (!connected || !pendingEndRef.current) return;
+    if (!connected || !pendingEndRef.current) {
+      return;
+    }
 
     if (!sendJson({ type: "end_call" })) {
       // Reconcile the queued request with external WebSocket readiness after reconnect.
@@ -488,12 +506,16 @@ function InterviewExperience({
     const hasAnswers = stateRef.current.exchanges.length > 0;
     updateStatus(hasAnswers ? "evaluating" : "idle");
 
-    if (!hasAnswers) setView("topics");
+    if (!hasAnswers) {
+      setView("topics");
+    }
   }, [connected, sendJson, updateStatus]);
 
   const keepScreenAwake = interviewKeepsScreenAwake(status);
   useEffect(() => {
-    if (!keepScreenAwake) return undefined;
+    if (!keepScreenAwake) {
+      return undefined;
+    }
 
     return holdScreenWakeLock({
       onStateChange: (wakeLockState) => {
@@ -561,7 +583,10 @@ function InterviewExperience({
   }, []);
 
   const startInterview = useCallback(async () => {
-    if (selectedTopics.length === 0 || !connected || setupLocked) return;
+    if (selectedTopics.length === 0 || !connected || setupLocked) {
+      return;
+    }
+
     const generation = startGenerationRef.current + 1;
     startGenerationRef.current = generation;
     startingRef.current = true;
@@ -591,7 +616,9 @@ function InterviewExperience({
       setError("Browser audio is unavailable. Continue with typed answers and live captions.");
     }
 
-    if (generation !== startGenerationRef.current || !startingRef.current) return;
+    if (generation !== startGenerationRef.current || !startingRef.current) {
+      return;
+    }
 
     if (
       !sendJson({
@@ -615,7 +642,9 @@ function InterviewExperience({
     startingRef.current = false;
     setStarting(false);
 
-    if (!microphoneReady) audioRef.current?.setListening(false);
+    if (!microphoneReady) {
+      audioRef.current?.setListening(false);
+    }
   }, [
     connected,
     difficulty,
@@ -672,7 +701,9 @@ function InterviewExperience({
     const hasAnswers = currentState.exchanges.length > 0;
     updateStatus(hasAnswers ? "evaluating" : "idle");
 
-    if (!hasAnswers) setView("topics");
+    if (!hasAnswers) {
+      setView("topics");
+    }
   }, [sendJson, updateStatus]);
 
   const toggleMute = useCallback(() => {
@@ -693,7 +724,10 @@ function InterviewExperience({
       event.preventDefault();
       const text = typedAnswer.trim();
 
-      if (!text || statusRef.current !== "listening") return;
+      if (!text || statusRef.current !== "listening") {
+        return;
+      }
+
       audioRef.current?.setListening(false);
 
       if (!sendJson({ type: "candidate_text", text })) {
@@ -856,7 +890,9 @@ function InterviewExperience({
           aria-disabled={setupLocked}
           tabIndex={setupLocked ? -1 : undefined}
           onClick={(event) => {
-            if (setupLocked) event.preventDefault();
+            if (setupLocked) {
+              event.preventDefault();
+            }
           }}
         >
           <ClipboardCheck size={18} aria-hidden="true" />

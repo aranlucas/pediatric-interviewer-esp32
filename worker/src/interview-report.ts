@@ -258,7 +258,10 @@ async function readBoundedResponse(response: Response, maximumBytes: number): Pr
     throw new Error(`Gemini response exceeded ${maximumBytes} bytes.`);
   }
 
-  if (!response.body) return "";
+  if (!response.body) {
+    return "";
+  }
+
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let received = 0;
@@ -269,10 +272,16 @@ async function readBoundedResponse(response: Response, maximumBytes: number): Pr
       // oxlint-disable-next-line eslint/no-await-in-loop -- stream reads must retain ordering and enforce the byte limit before reading again
       const result = await reader.read();
 
-      if (result.done) break;
+      if (result.done) {
+        break;
+      }
+
       const value: unknown = result.value;
-      if (!(value instanceof Uint8Array))
+
+      if (!(value instanceof Uint8Array)) {
         throw new Error("Response stream returned a non-binary chunk.");
+      }
+
       received += value.byteLength;
 
       if (received > maximumBytes) {
@@ -333,7 +342,9 @@ async function geminiGenerateContent(apiKey: string, body: GenerateContentBody, 
 
   const payloadText = await readBoundedResponse(response, GEMINI_RESPONSE_MAX_BYTES);
 
-  if (!payloadText) throw new Error(`Gemini ${operation} returned an empty response.`);
+  if (!payloadText) {
+    throw new Error(`Gemini ${operation} returned an empty response.`);
+  }
 
   return z
     .object({
@@ -365,7 +376,9 @@ function transcriptForEvaluation(exchanges: InterviewExchange[]): InterviewExcha
       answer: clean(answer, 4_000),
     };
 
-    if (probes.length > 0) exchange.followUps = probes;
+    if (probes.length > 0) {
+      exchange.followUps = probes;
+    }
 
     return exchange;
   });
@@ -387,7 +400,9 @@ export async function evaluateInterview(
     );
   }
 
-  if (!apiKey.trim()) throw new Error("GEMINI_API_KEY is not configured.");
+  if (!apiKey.trim()) {
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
 
   const payload = await geminiGenerateContent(
     apiKey,
@@ -445,7 +460,9 @@ export async function evaluateInterview(
     .join("")
     .trim();
 
-  if (!text) throw new Error("Gemini evaluation returned no structured result.");
+  if (!text) {
+    throw new Error("Gemini evaluation returned no structured result.");
+  }
 
   const evaluation = interviewEvaluationSchema.parse(JSON.parse(text));
 
@@ -532,7 +549,9 @@ export async function buildInterviewCheatsheet(
   topic: InterviewTopic,
   evaluation: InterviewEvaluation,
 ): Promise<InterviewCheatsheet> {
-  if (!apiKey.trim()) throw new Error("GEMINI_API_KEY is not configured.");
+  if (!apiKey.trim()) {
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
 
   const probedExchanges = evaluation.exchanges.filter(
     (exchange) => (exchange.followUps?.length ?? 0) > 0,
@@ -588,23 +607,33 @@ export async function buildInterviewCheatsheet(
     .join("")
     .trim();
 
-  if (!text) throw new Error("Gemini cheat sheet returned no structured result.");
+  if (!text) {
+    throw new Error("Gemini cheat sheet returned no structured result.");
+  }
 
   return interviewCheatsheetSchema.parse(JSON.parse(text));
 }
 
 function outcomeLabel(outcome: InterviewEvaluation["outcome"]): string {
-  if (outcome === "pass") return "On track to pass";
+  if (outcome === "pass") {
+    return "On track to pass";
+  }
 
-  if (outcome === "borderline") return "Borderline";
+  if (outcome === "borderline") {
+    return "Borderline";
+  }
 
   return "Not yet passing";
 }
 
 function skillLabel(skill: InterviewEvaluation["scoreSummary"][number]["skill"]): string {
-  if (skill === "understand_apply") return "Understand / Apply";
+  if (skill === "understand_apply") {
+    return "Understand / Apply";
+  }
 
-  if (skill === "analyze_evaluate") return "Analyze / Evaluate";
+  if (skill === "analyze_evaluate") {
+    return "Analyze / Evaluate";
+  }
 
   return "Remember";
 }
@@ -730,7 +759,9 @@ export function buildInterviewMarkdown(report: StoredInterviewReport): string {
 export function buildCheatsheetMarkdown(report: StoredInterviewReport): string {
   const cheatsheet = report.cheatsheet;
 
-  if (!cheatsheet) return "";
+  if (!cheatsheet) {
+    return "";
+  }
 
   const probedExchanges = report.evaluation.exchanges.filter(
     (exchange) => (exchange.followUps?.length ?? 0) > 0,

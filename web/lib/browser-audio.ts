@@ -61,13 +61,18 @@ export class BrowserInterviewAudio {
   start(send: (data: ArrayBuffer) => void): Promise<boolean> {
     this.send = send;
 
-    if (this.startPromise) return this.startPromise;
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+
     const generation = this.lifecycleGeneration;
     const startPromise = this.initialize(generation);
     this.startPromise = startPromise;
 
     return startPromise.finally(() => {
-      if (this.startPromise === startPromise) this.startPromise = undefined;
+      if (this.startPromise === startPromise) {
+        this.startPromise = undefined;
+      }
     });
   }
 
@@ -85,7 +90,9 @@ export class BrowserInterviewAudio {
     }
 
     if (!this.context || !this.playbackGain) {
-      if (this.context || this.media || this.captureNode) this.cleanup();
+      if (this.context || this.media || this.captureNode) {
+        this.cleanup();
+      }
 
       try {
         const context = this.platform.createContext({
@@ -117,12 +124,16 @@ export class BrowserInterviewAudio {
   private async initializeCapture(generation: number): Promise<boolean> {
     const context = this.context;
 
-    if (!context) return false;
+    if (!context) {
+      return false;
+    }
 
     try {
       await context.audioWorklet.addModule("/audio-capture.worklet.js");
 
-      if (generation !== this.lifecycleGeneration || context !== this.context) return false;
+      if (generation !== this.lifecycleGeneration || context !== this.context) {
+        return false;
+      }
 
       const media = await context.acquireMedia({
         audio: {
@@ -134,14 +145,19 @@ export class BrowserInterviewAudio {
       });
 
       if (generation !== this.lifecycleGeneration || context !== this.context) {
-        for (const track of media.getTracks()) track.stop();
+        for (const track of media.getTracks()) {
+          track.stop();
+        }
 
         return false;
       }
 
       this.media = media;
 
-      for (const track of media.getAudioTracks()) track.onended = this.handleCaptureEnded;
+      for (const track of media.getAudioTracks()) {
+        track.onended = this.handleCaptureEnded;
+      }
+
       this.syncMicrophoneTrack();
       this.captureSource = this.media.createSource();
       this.captureNode = context.createCaptureNode();
@@ -174,12 +190,17 @@ export class BrowserInterviewAudio {
       this.callbacks.onLevel(Math.min(1, level * 8));
     }
 
-    if (!this.captureEnabled || this.muted) return;
+    if (!this.captureEnabled || this.muted) {
+      return;
+    }
 
     // Do not open a provider audio turn for ambient silence. Besides wasting
     // bandwidth, an empty audio turn prevents the candidate from switching to
     // the typed-answer fallback while the interviewer is listening.
-    if (!this.heardSpeech && level < SPEECH_LEVEL) return;
+    if (!this.heardSpeech && level < SPEECH_LEVEL) {
+      return;
+    }
+
     this.send?.(pcm);
 
     if (level >= SPEECH_LEVEL) {
@@ -217,7 +238,10 @@ export class BrowserInterviewAudio {
   }
 
   setMuted(muted: boolean): void {
-    if (this.muted === muted) return;
+    if (this.muted === muted) {
+      return;
+    }
+
     this.muted = muted;
     // Speech heard before a mute boundary must never complete a later turn.
     // Reset VAD on both mute and unmute so a long mute cannot produce a stale
@@ -231,25 +255,38 @@ export class BrowserInterviewAudio {
   private syncMicrophoneTrack(): void {
     const enabled = this.captureEnabled && !this.muted;
 
-    for (const track of this.media?.getAudioTracks() ?? []) track.enabled = enabled;
+    for (const track of this.media?.getAudioTracks() ?? []) {
+      track.enabled = enabled;
+    }
   }
 
   setVolume(volume: number): void {
-    if (this.playbackGain) this.playbackGain.gain.value = Math.max(0, Math.min(1, volume));
+    if (this.playbackGain) {
+      this.playbackGain.gain.value = Math.max(0, Math.min(1, volume));
+    }
   }
 
   private readonly handleCaptureEnded = (): void => {
-    if (!this.media) return;
+    if (!this.media) {
+      return;
+    }
+
     this.cleanupCapture();
     this.callbacks.onCaptureUnavailable?.();
   };
 
   async playPcm16(data: ArrayBuffer, sampleRate = INPUT_SAMPLE_RATE): Promise<void> {
-    if (data.byteLength < 2) return;
+    if (data.byteLength < 2) {
+      return;
+    }
 
-    if (data.byteLength % 2 !== 0) throw new Error("Received an invalid PCM16 frame.");
+    if (data.byteLength % 2 !== 0) {
+      throw new Error("Received an invalid PCM16 frame.");
+    }
 
-    if (!this.context || !this.playbackGain) return;
+    if (!this.context || !this.playbackGain) {
+      return;
+    }
 
     if (this.playbackQueue.length >= MAX_PLAYBACK_QUEUE) {
       // Examiner audio is ephemeral. Drop the oldest queued frame rather than allowing
@@ -275,7 +312,10 @@ export class BrowserInterviewAudio {
       while (this.playbackQueue.length > 0) {
         const chunk = this.playbackQueue.shift();
 
-        if (!chunk) continue;
+        if (!chunk) {
+          continue;
+        }
+
         // Schedule chunks in arrival order so context resumes cannot reorder PCM playback.
         // eslint-disable-next-line no-await-in-loop
         await this.schedulePcm16(chunk.data, chunk.sampleRate, this.playbackGeneration);
@@ -293,15 +333,23 @@ export class BrowserInterviewAudio {
     const context = this.context;
     const playbackGain = this.playbackGain;
 
-    if (!context || !playbackGain) return;
+    if (!context || !playbackGain) {
+      return;
+    }
+
     await context.resume();
 
-    if (generation !== this.playbackGeneration) return;
+    if (generation !== this.playbackGeneration) {
+      return;
+    }
+
     const pcm = new Int16Array(data);
     const buffer = context.createBuffer(1, pcm.length, sampleRate);
     const channel = buffer.getChannelData(0);
 
-    for (let index = 0; index < pcm.length; index += 1) channel[index] = pcm[index] / 32768;
+    for (let index = 0; index < pcm.length; index += 1) {
+      channel[index] = pcm[index] / 32768;
+    }
 
     const source = context.createBufferSource();
     source.buffer = buffer;
@@ -327,7 +375,10 @@ export class BrowserInterviewAudio {
   private finishPlayback(source: PlaybackSource): void {
     this.playbackSources.delete(source);
 
-    if (this.playbackSources.size !== 0 || this.playbackQueue.length !== 0) return;
+    if (this.playbackSources.size !== 0 || this.playbackQueue.length !== 0) {
+      return;
+    }
+
     this.callbacks.onSpeakingChange(false);
     this.syncCaptureState();
   }
@@ -369,7 +420,9 @@ export class BrowserInterviewAudio {
     this.playbackQueue = [];
     this.playbackDrain = undefined;
 
-    if (context) void context.close().catch(() => undefined);
+    if (context) {
+      void context.close().catch(() => undefined);
+    }
   }
 
   private cleanupCapture(): void {
@@ -377,7 +430,10 @@ export class BrowserInterviewAudio {
     this.media = undefined;
 
     for (const track of media?.getTracks() ?? []) {
-      if (track.onended === this.handleCaptureEnded) track.onended = null;
+      if (track.onended === this.handleCaptureEnded) {
+        track.onended = null;
+      }
+
       track.stop();
     }
 

@@ -110,6 +110,7 @@ describe("interviewer public lifecycle protocol", () => {
     await starting;
 
     expect(live.sendRealtimeInput).toHaveBeenCalledExactlyOnceWith({
+      // SAFETY: Vitest accepts this asymmetric matcher in place of the typed expected value.
       text: expect.stringContaining("WARM_UP") as string,
     });
     expect(replacement.frames).toContainEqual({
@@ -140,6 +141,7 @@ describe("interviewer public lifecycle protocol", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(adapters.generateCase).toHaveBeenCalledOnce();
     expect(resumed.sendRealtimeInput).toHaveBeenCalledExactlyOnceWith({
+      // SAFETY: Vitest accepts this asymmetric matcher in place of the typed expected value.
       text: expect.stringContaining("WARM_UP") as string,
     });
     expect(replacement.frames).toContainEqual(
@@ -181,6 +183,7 @@ describe("interviewer public lifecycle protocol", () => {
       sampleRate: 24_000,
     });
     expect(resumedProvider.sendRealtimeInput).toHaveBeenCalledExactlyOnceWith({
+      // SAFETY: Vitest accepts this asymmetric matcher in place of the typed expected value.
       text: expect.stringContaining("WARM_UP") as string,
     });
     // A callback from the retired provider must not disconnect its successor.
@@ -254,6 +257,7 @@ describe("interviewer public lifecycle protocol", () => {
     emit({ turnComplete: true });
     await vi.advanceTimersByTimeAsync(1);
     expect(live.sendRealtimeInput).toHaveBeenCalledWith({
+      // SAFETY: Vitest accepts this asymmetric matcher in place of the typed expected value.
       text: expect.stringContaining("BEGIN_INTERVIEW") as string,
     });
     active.frames.length = 0;

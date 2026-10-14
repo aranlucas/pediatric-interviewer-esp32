@@ -74,7 +74,9 @@ export function createSessionHandler(environment: () => Promise<EnvironmentConte
     // room for isolation, while the signed subject prevents name-only forgery.
     const room = requestedRoom ?? `web-${crypto.randomUUID().replaceAll("-", "")}`;
 
-    if (!isWebRoom(room)) return json({ error: "invalid_room" }, 400);
+    if (!isWebRoom(room)) {
+      return json({ error: "invalid_room" }, 400);
+    }
 
     if (requestedRoom) {
       const ownerCookieName = sessionOwnerCookieName(room);
@@ -101,7 +103,9 @@ export function createSessionHandler(environment: () => Promise<EnvironmentConte
       return json({ error: "rate_limiter_unavailable" }, 503);
     }
 
-    if (!allowed.success) return json({ error: "rate_limited" }, 429);
+    if (!allowed.success) {
+      return json({ error: "rate_limited" }, 429);
+    }
 
     const now = Math.floor(Date.now() / 1_000);
 
@@ -139,7 +143,10 @@ export function createSessionHandler(environment: () => Promise<EnvironmentConte
         SESSION_OWNER_TTL_SECONDS,
       );
 
-      if (!serializedOwnerCookie) return json({ error: "invalid_room" }, 400);
+      if (!serializedOwnerCookie) {
+        return json({ error: "invalid_room" }, 400);
+      }
+
       response.headers.append("Set-Cookie", serializedOwnerCookie);
     }
 

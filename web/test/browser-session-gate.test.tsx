@@ -16,7 +16,9 @@ vi.mock("../lib/session-token", async (importOriginal) => ({
 }));
 
 const ROOM = "web-0123456789abcdef0123456789abcdef";
+
 const OTHER_ROOM = "web-fedcba9876543210fedcba9876543210";
+
 const requestSession = vi.mocked(requestBrowserSessionToken);
 
 function token(room = ROOM): BrowserSessionToken {

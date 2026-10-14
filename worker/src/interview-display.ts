@@ -7,7 +7,10 @@ function normalizeDisplayText(value: string): string {
 function finalQuestion(value: string): string {
   const questionEnd = value.lastIndexOf("?");
 
-  if (questionEnd < 0) return "";
+  if (questionEnd < 0) {
+    return "";
+  }
+
   const beforeQuestion = value.slice(0, questionEnd + 1);
 
   const sentenceStart = Math.max(
@@ -32,7 +35,9 @@ export function questionForDisplay(value: string, limit = 1_200): string {
 export function openingPresentationForDisplay(value: string, limit = DISPLAY_TEXT_LIMIT): string {
   const cleaned = normalizeDisplayText(value);
 
-  if (cleaned.length <= limit) return cleaned;
+  if (cleaned.length <= limit) {
+    return cleaned;
+  }
 
   const question = finalQuestion(cleaned);
 

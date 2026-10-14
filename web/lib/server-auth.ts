@@ -18,7 +18,9 @@ const encoder = new TextEncoder();
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
 
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (const byte of bytes) {
+    binary += String.fromCodePoint(byte);
+  }
 
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
@@ -30,7 +32,7 @@ function base64UrlDecode(value: string): ArrayBuffer {
   const bytes = new Uint8Array(binary.length);
 
   for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
+    bytes[index] = binary.codePointAt(index) ?? 0;
   }
 
   return bytes.buffer;
@@ -67,10 +69,15 @@ export async function verifyAccessToken(
   scope: AccessTokenScope,
   now = Math.floor(Date.now() / 1_000),
 ): Promise<AccessTokenPayload | null> {
-  if (!token || !secret || token.length > 2_048) return null;
+  if (!token || !secret || token.length > 2_048) {
+    return null;
+  }
+
   const parts = token.split(".");
 
-  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return null;
+  }
 
   try {
     const parsed = z
@@ -83,7 +90,10 @@ export async function verifyAccessToken(
       .passthrough()
       .safeParse(JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[0]))));
 
-    if (!parsed.success || parsed.data.exp <= now || parsed.data.scope !== scope) return null;
+    if (!parsed.success || parsed.data.exp <= now || parsed.data.scope !== scope) {
+      return null;
+    }
+
     const payload = parsed.data;
 
     const valid = await crypto.subtle.verify(
@@ -100,15 +110,22 @@ export async function verifyAccessToken(
 }
 
 export function getCookie(header: string | null, name: string): string | null {
-  if (!header) return null;
+  if (!header) {
+    return null;
+  }
 
   for (const part of header.split(";")) {
     const separator = part.indexOf("=");
 
-    if (separator < 0) continue;
+    if (separator < 0) {
+      continue;
+    }
+
     const key = part.slice(0, separator).trim();
 
-    if (key === name) return part.slice(separator + 1).trim();
+    if (key === name) {
+      return part.slice(separator + 1).trim();
+    }
   }
 
   return null;
@@ -119,7 +136,9 @@ export function isWebRoom(value: string | null): value is `web-${string}` {
 }
 
 export function sessionOwnerCookieName(room: string): string | null {
-  if (!isWebRoom(room)) return null;
+  if (!isWebRoom(room)) {
+    return null;
+  }
 
   return `${SESSION_OWNER_COOKIE_PREFIX}${room.slice("web-".length)}`;
 }
@@ -139,7 +158,9 @@ export function serializeSessionOwnerCookie(
 ): string | null {
   const name = sessionOwnerCookieName(room);
 
-  if (!name) return null;
+  if (!name) {
+    return null;
+  }
 
   return `${name}=${token}; Max-Age=${maxAgeSeconds}; Path=/; Secure; HttpOnly; SameSite=Strict`;
 }

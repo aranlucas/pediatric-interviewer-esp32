@@ -23,7 +23,9 @@ export function formatReportCompletedAt(value: string, timezone: string): string
 }
 
 export function reportScoreLabel(score: number | null): string {
-  if (score === null) return "—";
+  if (score === null) {
+    return "—";
+  }
 
   return `${Number.isInteger(score) ? score.toFixed(0) : score.toFixed(1)}/3`;
 }
@@ -39,7 +41,9 @@ export function reportMatchesQuery(
 ): boolean {
   const normalizedQuery = query.trim().toLocaleLowerCase();
 
-  if (!normalizedQuery) return true;
+  if (!normalizedQuery) {
+    return true;
+  }
 
   return [
     report.reportId,

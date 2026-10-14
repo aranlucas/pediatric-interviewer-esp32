@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { z } from "zod";
 import { createReportHandler, type ReportEnv } from "../lib/report-handler";
@@ -63,8 +63,8 @@ describe("session token route", () => {
       sub: payload.room,
     });
     const ownerCookieName = sessionOwnerCookieName(payload.room);
-    expect(ownerCookieName).not.toBeNull();
-    const ownerCookie = setCookie.match(new RegExp(`${ownerCookieName!}=([^;]+)`, "u"))?.[1];
+    assert(ownerCookieName);
+    const ownerCookie = setCookie.match(new RegExp(`${ownerCookieName}=([^;]+)`, "u"))?.[1];
     expect(ownerCookie).toBeTruthy();
     await expect(verifyAccessToken(ownerCookie, SECRET, "owner")).resolves.toMatchObject({
       sub: payload.room,
@@ -93,6 +93,7 @@ describe("session token route", () => {
   it("refreshes an existing room only with a matching signed owner capability", async () => {
     const limit = vi.fn().mockResolvedValue({ success: true });
     const ownerCookieName = sessionOwnerCookieName(ROOM);
+    assert(ownerCookieName);
 
     const ownerToken = await createAccessToken(SECRET, {
       v: 1,
@@ -110,7 +111,7 @@ describe("session token route", () => {
         method: "POST",
         headers: {
           Origin: "https://oral.example",
-          Cookie: `${ownerCookieName!}=${ownerToken}`,
+          Cookie: `${ownerCookieName}=${ownerToken}`,
         },
       }),
     );
@@ -118,7 +119,7 @@ describe("session token route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ room: ROOM });
     expect(response.headers.get("Set-Cookie")).toContain(`${REPORT_TOKEN_COOKIE}=`);
-    expect(response.headers.get("Set-Cookie")).not.toContain(`${ownerCookieName!}=`);
+    expect(response.headers.get("Set-Cookie")).not.toContain(`${ownerCookieName}=`);
     expect(limit).toHaveBeenCalledWith({ key: "local" });
   });
 
@@ -142,7 +143,7 @@ describe("session token route", () => {
         method: "POST",
         headers: {
           Origin: "https://oral.example",
-          Cookie: `${sessionOwnerCookieName(ROOM)!}=${ownerToken}`,
+          Cookie: `${z.string().parse(sessionOwnerCookieName(ROOM))}=${ownerToken}`,
         },
       }),
     );
@@ -281,7 +282,9 @@ describe("private report proxy", () => {
       ),
     );
 
-    for (const response of responses) expect(response.status).toBe(401);
+    for (const response of responses) {
+      expect(response.status).toBe(401);
+    }
 
     expect(serviceFetch).not.toHaveBeenCalled();
   });

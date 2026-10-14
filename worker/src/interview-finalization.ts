@@ -55,8 +55,9 @@ export function cloneInterviewExchanges(
   return exchanges.map((exchange) => {
     const copy = { ...exchange };
 
-    if (exchange.followUps)
+    if (exchange.followUps) {
       copy.followUps = exchange.followUps.map((followUp) => ({ ...followUp }));
+    }
 
     return copy;
   });
@@ -133,9 +134,13 @@ export async function finalizeInterviewReport(
     evaluation,
   };
 
-  if (snapshot.casePresentation) report.casePresentation = snapshot.casePresentation;
+  if (snapshot.casePresentation) {
+    report.casePresentation = snapshot.casePresentation;
+  }
 
-  if (cheatsheet) report.cheatsheet = cheatsheet;
+  if (cheatsheet) {
+    report.cheatsheet = cheatsheet;
+  }
 
   await retry(() => storeInterviewReport(reports, report), {
     maxAttempts: 3,
@@ -145,7 +150,9 @@ export async function finalizeInterviewReport(
 
   const result: FinalizedInterview = { evaluation };
 
-  if (cheatsheet) result.cheatsheet = cheatsheet;
+  if (cheatsheet) {
+    result.cheatsheet = cheatsheet;
+  }
 
   return result;
 }

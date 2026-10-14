@@ -91,8 +91,13 @@ export const storedReportSchema = z.object({
  * @returns {Buffer}
  */
 export function webSocketBuffer(data) {
-  if (Array.isArray(data)) return Buffer.concat(data);
-  if (data instanceof ArrayBuffer) return Buffer.from(data);
+  if (Array.isArray(data)) {
+    return Buffer.concat(data);
+  }
+
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data);
+  }
 
   return data;
 }

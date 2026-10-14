@@ -17,9 +17,13 @@ export function appendBoundedTranscript(
 ): string {
   const limit = Math.max(0, Math.trunc(maxCharacters));
 
-  if (limit === 0 || current.length >= limit) return current.slice(0, limit);
+  if (limit === 0 || current.length >= limit) {
+    return current.slice(0, limit);
+  }
 
-  if (!current || !fragment) return `${current}${fragment}`.slice(0, limit);
+  if (!current || !fragment) {
+    return `${current}${fragment}`.slice(0, limit);
+  }
 
   const needsWordBoundary =
     !/\s$/u.test(current) &&
@@ -73,7 +77,10 @@ export class PcmInputRateGuard {
       this.bytesInWindow = 0;
     }
 
-    if (bytes <= 0 || this.bytesInWindow + bytes > this.maxBytes) return false;
+    if (bytes <= 0 || this.bytesInWindow + bytes > this.maxBytes) {
+      return false;
+    }
+
     this.bytesInWindow += bytes;
 
     return true;

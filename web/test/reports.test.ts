@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 
 import {
   getPublicReportJson,
@@ -125,7 +125,9 @@ describe("completed report library", () => {
 
     const publicBody = await getPublicReportJson({ get }, REPORT_ID);
 
-    expect(JSON.parse(publicBody!)).toEqual({
+    assert(publicBody);
+
+    expect(JSON.parse(publicBody)).toEqual({
       reportId: REPORT_ID,
       evaluation: { outcome: "pass" },
     });

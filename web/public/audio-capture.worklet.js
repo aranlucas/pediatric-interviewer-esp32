@@ -17,9 +17,13 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
   process(inputs) {
     const input = inputs[0]?.[0];
 
-    if (!input?.length) return true;
+    if (!input?.length) {
+      return true;
+    }
 
-    for (const sample of input) this.pending.push(sample);
+    for (const sample of input) {
+      this.pending.push(sample);
+    }
 
     while (this.readPosition + 1 < this.pending.length) {
       const frame = new Float32Array(TARGET_FRAME_SAMPLES);
@@ -34,7 +38,9 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
         position += this.step;
       }
 
-      if (produced < frame.length) break;
+      if (produced < frame.length) {
+        break;
+      }
 
       this.readPosition = position;
       const consumed = Math.max(0, Math.floor(this.readPosition));

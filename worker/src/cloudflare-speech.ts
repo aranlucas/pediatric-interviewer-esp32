@@ -19,7 +19,10 @@ async function readBoundedAudio(response: Response): Promise<Uint8Array> {
     throw new Error("Cloudflare TTS returned oversized audio.");
   }
 
-  if (!response.body) throw new Error("Cloudflare TTS returned no audio body.");
+  if (!response.body) {
+    throw new Error("Cloudflare TTS returned no audio body.");
+  }
+
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let received = 0;
@@ -29,10 +32,16 @@ async function readBoundedAudio(response: Response): Promise<Uint8Array> {
       // oxlint-disable-next-line eslint/no-await-in-loop -- stream reads must retain backpressure and enforce the byte limit before reading again
       const result = await reader.read();
 
-      if (result.done) break;
+      if (result.done) {
+        break;
+      }
+
       const value: unknown = result.value;
-      if (!(value instanceof Uint8Array))
+
+      if (!(value instanceof Uint8Array)) {
         throw new Error("Response stream returned a non-binary chunk.");
+      }
+
       received += value.byteLength;
 
       if (received > MAX_TTS_PCM_BYTES) {
@@ -63,8 +72,8 @@ async function readBoundedAudio(response: Response): Promise<Uint8Array> {
   // another container instead of sending file headers to the audio device.
   if (
     pcm.byteLength >= 12 &&
-    String.fromCharCode(...pcm.subarray(0, 4)) === "RIFF" &&
-    String.fromCharCode(...pcm.subarray(8, 12)) === "WAVE"
+    String.fromCodePoint(...pcm.subarray(0, 4)) === "RIFF" &&
+    String.fromCodePoint(...pcm.subarray(8, 12)) === "WAVE"
   ) {
     throw new Error("Cloudflare TTS unexpectedly returned a WAV container.");
   }

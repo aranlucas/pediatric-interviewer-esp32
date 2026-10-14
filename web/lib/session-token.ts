@@ -22,6 +22,12 @@ export class SessionSetupError extends Error {
 
 const WEB_ROOM_PATTERN = /^web-[0-9a-f]{32}$/u;
 
+const sessionTokenSchema = z.object({
+  room: z.string().regex(WEB_ROOM_PATTERN),
+  token: z.string().min(1),
+  expiresAt: z.number().finite(),
+});
+
 /**
  * Dedupe React Strict Mode's development effect replay without caching an
  * already-settled handshake token. A later explicit retry always reaches the
@@ -35,7 +41,9 @@ export function requestBrowserSessionToken(
   const key = `${room ?? "new"}:${attempt}`;
   const pending = pendingRequests.get(key);
 
-  if (pending) return pending;
+  if (pending) {
+    return pending;
+  }
 
   const promise = Promise.resolve()
     .then(() =>
@@ -56,21 +64,13 @@ export function requestBrowserSessionToken(
         );
       }
 
-      let responseBody: unknown;
+      let parsed: ReturnType<typeof sessionTokenSchema.safeParse>;
 
       try {
-        responseBody = await response.json();
+        parsed = sessionTokenSchema.safeParse(await response.json());
       } catch {
-        responseBody = null;
+        parsed = sessionTokenSchema.safeParse(null);
       }
-
-      const parsed = z
-        .object({
-          room: z.string().regex(WEB_ROOM_PATTERN),
-          token: z.string().min(1),
-          expiresAt: z.number().finite(),
-        })
-        .safeParse(responseBody);
 
       if (
         !parsed.success ||
@@ -87,11 +87,16 @@ export function requestBrowserSessionToken(
       return { room: payload.room, token: payload.token, expiresAt: payload.expiresAt };
     })
     .catch((error) => {
-      if (error instanceof SessionSetupError) throw error;
+      if (error instanceof SessionSetupError) {
+        throw error;
+      }
+
       throw new Error("Could not reach secure interviewer setup. Check your connection and retry.");
     })
     .finally(() => {
-      if (pendingRequests.get(key) === promise) pendingRequests.delete(key);
+      if (pendingRequests.get(key) === promise) {
+        pendingRequests.delete(key);
+      }
     });
 
   pendingRequests.set(key, promise);

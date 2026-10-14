@@ -390,7 +390,9 @@ export class InterviewerCore {
     _nextState: PediatricInterviewerState,
     source: InterviewConnection | "server",
   ): void {
-    if (source !== "server") throw new Error("Client state updates are not allowed.");
+    if (source !== "server") {
+      throw new Error("Client state updates are not allowed.");
+    }
   }
 
   durableOpeningStage(): OpeningStage {
@@ -402,7 +404,9 @@ export class InterviewerCore {
       return recognized;
     }
 
-    if (this.hasSavedCandidateWork) return "complete";
+    if (this.hasSavedCandidateWork) {
+      return "complete";
+    }
 
     // Migrate sessions persisted by the removed readiness handshake. They have
     // a durable case but no scored work, so the only safe next action is to ask
@@ -419,7 +423,9 @@ export class InterviewerCore {
       return "warming_up";
     }
 
-    if (this.state.currentQuestion.trim()) return "presenting_case";
+    if (this.state.currentQuestion.trim()) {
+      return "presenting_case";
+    }
 
     return "complete";
   }
@@ -432,7 +438,10 @@ export class InterviewerCore {
    */
   // oxlint-disable-next-line eslint/require-await -- lifecycle hooks must reject asynchronously on startup failures
   async onStart(): Promise<void> {
-    if (this.state.phase !== "interviewing") return;
+    if (this.state.phase !== "interviewing") {
+      return;
+    }
+
     const openingStage = this.durableOpeningStage();
     const casePresentation = normalizeTranscript(this.state.casePresentation ?? "");
     this.clearPendingProviderTurn();
@@ -481,7 +490,9 @@ export class InterviewerCore {
     const pending = this.state.pendingExchange;
     const answer = normalizeTranscript(pending?.answer ?? "");
 
-    if (!pending || !answer) return undefined;
+    if (!pending || !answer) {
+      return undefined;
+    }
 
     const question =
       normalizeTranscript(pending.question ?? "") ||
@@ -498,7 +509,9 @@ export class InterviewerCore {
 
     const exchange: InterviewExchange = { question, answer };
 
-    if (followUps.length > 0) exchange.followUps = followUps;
+    if (followUps.length > 0) {
+      exchange.followUps = followUps;
+    }
 
     return exchange;
   }
@@ -572,7 +585,10 @@ export class InterviewerCore {
   ensureInterviewGeneration(): string | undefined {
     const current = this.currentInterviewGeneration();
 
-    if (current || this.state.phase !== "interviewing") return current;
+    if (current || this.state.phase !== "interviewing") {
+      return current;
+    }
+
     const generated = crypto.randomUUID();
     this.setState({ ...this.state, interviewGeneration: generated });
 
@@ -601,7 +617,9 @@ export class InterviewerCore {
 
   /** The resumption handle is private DO metadata, never part of public state. */
   readResumptionHandle(interviewGeneration: string | undefined): string | undefined {
-    if (!interviewGeneration || !this.resumptionHandleUsable) return undefined;
+    if (!interviewGeneration || !this.resumptionHandleUsable) {
+      return undefined;
+    }
 
     try {
       this.ensureLiveMetadataStore();
@@ -626,7 +644,9 @@ export class InterviewerCore {
   }
 
   writeResumptionHandle(interviewGeneration: string | undefined, handle: string): boolean {
-    if (!interviewGeneration || !this.resumptionHandleUsable) return false;
+    if (!interviewGeneration || !this.resumptionHandleUsable) {
+      return false;
+    }
 
     try {
       this.ensureLiveMetadataStore();
@@ -676,11 +696,17 @@ export class InterviewerCore {
   }
 
   statusForState(): DeviceStatus {
-    if (this.state.phase === "complete") return "complete";
+    if (this.state.phase === "complete") {
+      return "complete";
+    }
 
-    if (this.state.phase === "evaluating") return "evaluating";
+    if (this.state.phase === "evaluating") {
+      return "evaluating";
+    }
 
-    if (this.state.phase === "evaluation_failed") return "error";
+    if (this.state.phase === "evaluation_failed") {
+      return "error";
+    }
 
     if (this.state.phase === "interviewing") {
       return this.gemini && this.lastStatus !== "idle" ? this.lastStatus : "thinking";
@@ -690,7 +716,10 @@ export class InterviewerCore {
   }
 
   claimConnection(connection: InterviewConnection): void {
-    if (this.clientGraceTimer) clearTimeout(this.clientGraceTimer);
+    if (this.clientGraceTimer) {
+      clearTimeout(this.clientGraceTimer);
+    }
+
     this.clientGraceTimer = undefined;
     this.disconnectedDeviceId = undefined;
     this.device = connection;
@@ -703,12 +732,18 @@ export class InterviewerCore {
   }
 
   clearProviderResponseTimer(): void {
-    if (this.providerResponseTimer) clearTimeout(this.providerResponseTimer);
+    if (this.providerResponseTimer) {
+      clearTimeout(this.providerResponseTimer);
+    }
+
     this.providerResponseTimer = undefined;
   }
 
   clearCandidateTurnTimer(): void {
-    if (this.candidateTurnTimer) clearTimeout(this.candidateTurnTimer);
+    if (this.candidateTurnTimer) {
+      clearTimeout(this.candidateTurnTimer);
+    }
+
     this.candidateTurnTimer = undefined;
   }
 
@@ -778,8 +813,10 @@ export class InterviewerCore {
         !this.safeGeminiSend(this.gemini, "candidate_turn_timeout", (session) => {
           session.sendRealtimeInput({ activityEnd: {} });
         })
-      )
+      ) {
         return;
+      }
+
       this.candidateActivityStarted = false;
       pending.committed = true;
       this.sendJSON(connection, {
@@ -862,7 +899,10 @@ export class InterviewerCore {
     this.clearProviderResponseTimer();
     const pending = this.pendingProviderTurn;
 
-    if (!pending) return;
+    if (!pending) {
+      return;
+    }
+
     // Every in-flight turn invalidates the provider handle before reconnect.
     // In particular, an uncommitted/over-limit audio turn is discarded below;
     // resuming its handle would retain a partial input that the client is told
@@ -901,7 +941,9 @@ export class InterviewerCore {
 
     this.responseCompletionHandled = false;
 
-    if (connection) this.sendStatus(connection, "thinking");
+    if (connection) {
+      this.sendStatus(connection, "thinking");
+    }
 
     let sent = false;
 
@@ -920,7 +962,10 @@ export class InterviewerCore {
       });
 
       for (const chunk of pending.chunks) {
-        if (!sent) break;
+        if (!sent) {
+          break;
+        }
+
         sent = this.safeGeminiSend(session, "replay_audio", (live) => {
           live.sendRealtimeInput({
             audio: {
@@ -938,7 +983,10 @@ export class InterviewerCore {
       }
     }
 
-    if (!sent) return false;
+    if (!sent) {
+      return false;
+    }
+
     this.armProviderResponseDeadline(pending, generation);
     this.log("info", "gemini_turn_replayed", {
       turnKind: pending.kind,
@@ -977,15 +1025,24 @@ export class InterviewerCore {
   }
 
   markDeviceDisconnected(connection: InterviewConnection): void {
-    if (this.device?.id !== connection.id) return;
+    if (this.device?.id !== connection.id) {
+      return;
+    }
+
     this.device = undefined;
     this.disconnectedDeviceId = connection.id;
 
-    if (this.clientGraceTimer) clearTimeout(this.clientGraceTimer);
+    if (this.clientGraceTimer) {
+      clearTimeout(this.clientGraceTimer);
+    }
+
     this.clientGraceTimer = setTimeout(() => {
       this.clientGraceTimer = undefined;
 
-      if (this.device || this.disconnectedDeviceId !== connection.id) return;
+      if (this.device || this.disconnectedDeviceId !== connection.id) {
+        return;
+      }
+
       this.disconnectedDeviceId = undefined;
       this.closeGeminiSession("device reconnect grace expired");
 
@@ -1014,7 +1071,9 @@ export class InterviewerCore {
     connection: InterviewConnection | undefined,
     payload: string | ArrayBuffer | Uint8Array,
   ): boolean {
-    if (!connection) return false;
+    if (!connection) {
+      return false;
+    }
 
     try {
       connection.send(payload);
@@ -1036,7 +1095,9 @@ export class InterviewerCore {
     operation: string,
     send: (session: LiveSession) => void,
   ): boolean {
-    if (!session || session !== this.gemini || this.closingGemini) return false;
+    if (!session || session !== this.gemini || this.closingGemini) {
+      return false;
+    }
 
     try {
       send(session);
@@ -1058,7 +1119,9 @@ export class InterviewerCore {
     generation: number,
     reason: string,
   ): void {
-    if (generation !== this.liveGeneration || this.closingGemini) return;
+    if (generation !== this.liveGeneration || this.closingGemini) {
+      return;
+    }
 
     // Terminal content is persisted asynchronously after the provider callback
     // returns. Let that callback finish against the current generation before
@@ -1104,7 +1167,10 @@ export class InterviewerCore {
 
     const promise = this.keepAliveWhile(() => this.reconnectGemini(task))
       .catch((error) => {
-        if (!this.isReconnectTaskCurrent(task)) return;
+        if (!this.isReconnectTaskCurrent(task)) {
+          return;
+        }
+
         this.log("error", "gemini_reconnect_exhausted", {
           reason: task.reason.slice(0, 100),
           error: String(error).slice(0, 220),
@@ -1112,10 +1178,15 @@ export class InterviewerCore {
         this.finalizeAfterLiveFailure(task.connection, "Gemini Live reconnect failed");
       })
       .finally(() => {
-        if (this.reconnectTask !== task) return;
+        if (this.reconnectTask !== task) {
+          return;
+        }
+
         this.reconnectTask = undefined;
 
-        if (this.pendingReconnect) queueMicrotask(() => this.startPendingReconnect());
+        if (this.pendingReconnect) {
+          queueMicrotask(() => this.startPendingReconnect());
+        }
       });
 
     task.promise = promise;
@@ -1133,7 +1204,9 @@ export class InterviewerCore {
     this.sendInterviewState(connection);
     this.sendStatus(connection, this.statusForState());
 
-    if (this.state.phase === "complete") this.notifyCompletedReport(connection);
+    if (this.state.phase === "complete") {
+      this.notifyCompletedReport(connection);
+    }
   }
 
   async onRequest(request: Request): Promise<Response> {
@@ -1196,14 +1269,18 @@ export class InterviewerCore {
 
     const parsed = parseInterviewerDeviceMessage(message);
 
-    if (!parsed) return;
+    if (!parsed) {
+      return;
+    }
 
     if (parsed.type === "start_call") {
       await this.startLiveSession(connection, parsed);
     } else if (parsed.type === "recover_report") {
       await this.recoverReport(connection);
     } else if (parsed.type === "end_call") {
-      if (this.device?.id !== connection.id) return;
+      if (this.device?.id !== connection.id) {
+        return;
+      }
 
       // Stopping the device is also a valid end-of-session boundary. Preserve
       // any answers already persisted in the Durable Object and file an early
@@ -1244,7 +1321,10 @@ export class InterviewerCore {
   }
 
   onClose(connection: InterviewConnection): void {
-    if (this.device?.id !== connection.id) return;
+    if (this.device?.id !== connection.id) {
+      return;
+    }
+
     // Keep the provider alive for a short reconnect window. Browser reloads
     // and ESP32 Wi-Fi handoffs otherwise look identical to an intentional end.
     this.markDeviceDisconnected(connection);
@@ -1258,12 +1338,16 @@ export class InterviewerCore {
   }
 
   sendStatus(connection: InterviewConnection, status: DeviceStatus): void {
-    if (this.sendJSON(connection, { type: "status", status })) this.lastStatus = status;
+    if (this.sendJSON(connection, { type: "status", status })) {
+      this.lastStatus = status;
+    }
   }
 
   /** Persists a state change and mirrors it to the device's prompt view. */
   updateInterview(connection: InterviewConnection, patch: InterviewStatePatch): void {
-    if (patch.openingStage) this.openingStage = patch.openingStage;
+    if (patch.openingStage) {
+      this.openingStage = patch.openingStage;
+    }
 
     if (patch.casePresentation !== undefined) {
       this.openingCaseText = normalizeTranscript(patch.casePresentation);
@@ -1286,7 +1370,9 @@ export class InterviewerCore {
       session.sendRealtimeInput({ text: turn.turns });
     });
 
-    if (sent) this.armProviderResponseDeadline(pending);
+    if (sent) {
+      this.armProviderResponseDeadline(pending);
+    }
   }
 
   /** Plays the exact durable case without asking Live to rewrite its boundary. */
@@ -1307,7 +1393,9 @@ export class InterviewerCore {
 
     const playback = await this.playOpeningSpeechFallback("case", this.openingCaseText, generation);
 
-    if (playback === "stale") return;
+    if (playback === "stale") {
+      return;
+    }
 
     if (playback === "unavailable") {
       this.deferOpeningPlaybackUntilReconnect("case playback client disconnected");
@@ -1321,7 +1409,10 @@ export class InterviewerCore {
       return;
     }
 
-    if (!this.openingPlaybackIsCurrent(generation, "case")) return;
+    if (!this.openingPlaybackIsCurrent(generation, "case")) {
+      return;
+    }
+
     const target = this.device ?? connection;
     this.sendAssistantTranscript(target, this.openingCaseText);
     this.updateInterview(target, {
@@ -1408,7 +1499,10 @@ export class InterviewerCore {
               clean: event.wasClean,
             });
 
-            if (this.closingGemini) return;
+            if (this.closingGemini) {
+              return;
+            }
+
             this.handleGeminiTransportFailure(
               connection ?? this.device,
               generation,
@@ -1442,6 +1536,7 @@ export class InterviewerCore {
             } catch {
               // A late setup can close itself before the timeout cleanup runs.
             }
+
             return undefined;
           },
           () => undefined,
@@ -1450,7 +1545,9 @@ export class InterviewerCore {
 
       throw error;
     } finally {
-      if (connectTimer) clearTimeout(connectTimer);
+      if (connectTimer) {
+        clearTimeout(connectTimer);
+      }
     }
 
     if (generation !== this.liveGeneration || this.closingGemini) {
@@ -1490,7 +1587,10 @@ export class InterviewerCore {
   scheduleGeminiReconnect(connection: InterviewConnection | undefined, reason: string): void {
     const interviewGeneration = this.ensureInterviewGeneration();
 
-    if (this.state.phase !== "interviewing" || this.gemini || !interviewGeneration) return;
+    if (this.state.phase !== "interviewing" || this.gemini || !interviewGeneration) {
+      return;
+    }
+
     this.pendingReconnect = {
       connection,
       reason,
@@ -1502,14 +1602,19 @@ export class InterviewerCore {
 
   async reconnectGemini(task: ReconnectTask): Promise<void> {
     for (let attempt = 1; attempt <= MAX_LIVE_RECONNECT_ATTEMPTS; attempt += 1) {
-      if (!this.isReconnectTaskCurrent(task)) return;
+      if (!this.isReconnectTaskCurrent(task)) {
+        return;
+      }
+
       this.reconnectAttempts = attempt;
       // oxlint-disable-next-line eslint/no-await-in-loop -- reconnect attempts must wait for their individual backoff
       await new Promise<void>((resolve) => {
         setTimeout(resolve, liveReconnectDelayMs(attempt, LIVE_RECONNECT_DELAY_MS));
       });
 
-      if (!this.isReconnectTaskCurrent(task)) return;
+      if (!this.isReconnectTaskCurrent(task)) {
+        return;
+      }
 
       const configuration = resolveInterviewConfiguration({
         topicIds: this.state.topicIds,
@@ -1518,7 +1623,10 @@ export class InterviewerCore {
         difficulty: this.state.difficulty,
       });
 
-      if (!configuration) throw new Error("saved interview configuration is invalid");
+      if (!configuration) {
+        throw new Error("saved interview configuration is invalid");
+      }
+
       const target = this.device ?? task.connection;
       const generation = ++this.liveGeneration;
       const pendingTurn = this.pendingProviderTurn;
@@ -1556,8 +1664,10 @@ export class InterviewerCore {
           !this.isReconnectTaskCurrent(task) ||
           generation !== this.liveGeneration ||
           this.gemini !== session
-        )
+        ) {
           return;
+        }
+
         // `keepAliveWhile` protects only this reconnect operation. A Live
         // WebSocket also needs a long-lived hold after reconnect succeeds or
         // the Durable Object can hibernate and stop receiving SDK callbacks.
@@ -1591,7 +1701,10 @@ export class InterviewerCore {
 
         this.reconnectAttempts = 0;
 
-        if (activeConnection) this.resyncConnection(activeConnection);
+        if (activeConnection) {
+          this.resyncConnection(activeConnection);
+        }
+
         this.pendingReconnect = undefined;
         this.log("info", "gemini_reconnected", {
           reason: task.reason.slice(0, 100),
@@ -1600,15 +1713,22 @@ export class InterviewerCore {
 
         return;
       } catch (error) {
-        if (!this.isReconnectTaskCurrent(task)) return;
+        if (!this.isReconnectTaskCurrent(task)) {
+          return;
+        }
+
         this.invalidateGeminiForReconnect(`reconnect attempt ${attempt} failed`);
 
         // Resumption handles are opaque and can expire or be rejected. Do not
         // spend every retry presenting the same bad handle; the next attempt
         // starts a fresh Live transport and replays the persisted question.
-        if (handle) this.clearResumptionHandle(task.interviewGeneration);
+        if (handle) {
+          this.clearResumptionHandle(task.interviewGeneration);
+        }
 
-        if (attempt === MAX_LIVE_RECONNECT_ATTEMPTS) throw error;
+        if (attempt === MAX_LIVE_RECONNECT_ATTEMPTS) {
+          throw error;
+        }
       } finally {
         if (this.reconnectConnectingTask === task) {
           this.reconnectConnectingTask = undefined;
@@ -1618,7 +1738,9 @@ export class InterviewerCore {
           }
         }
 
-        if (this.pendingReconnect) this.startPendingReconnect();
+        if (this.pendingReconnect) {
+          this.startPendingReconnect();
+        }
       }
     }
   }
@@ -1663,8 +1785,9 @@ export class InterviewerCore {
       this.claimConnection(connection);
       this.resyncConnection(connection);
 
-      if (!this.gemini && !this.connecting)
+      if (!this.gemini && !this.connecting) {
         this.scheduleGeminiReconnect(connection, "start_call reattach");
+      }
 
       return;
     }
@@ -1674,7 +1797,9 @@ export class InterviewerCore {
     // interview or its Gemini session.
     this.cancelReconnectTask();
 
-    if (this.gemini || this.connecting) return;
+    if (this.gemini || this.connecting) {
+      return;
+    }
 
     const configuration = resolveInterviewConfiguration({
       topicIds: request.topic_ids,
@@ -1781,7 +1906,10 @@ export class InterviewerCore {
       });
       const target = this.device;
 
-      if (!target) return;
+      if (!target) {
+        return;
+      }
+
       await this.openGeminiSession(target, topic, configuration, generation, undefined, {
         casePresentation: openingCaseText,
         currentQuestion: "",
@@ -1789,7 +1917,10 @@ export class InterviewerCore {
         plannedQuestionCount: configuration.questionCount,
       });
 
-      if (generation !== this.liveGeneration) return;
+      if (generation !== this.liveGeneration) {
+        return;
+      }
+
       // Setup belongs to this interview generation, not the socket that
       // started it. A replacement must receive the first provider turn; with
       // no socket, release the idle transport so reconnect can replay it.
@@ -1808,7 +1939,10 @@ export class InterviewerCore {
       });
       this.askGemini(activeConnection, geminiWarmUpTurn());
     } catch (error) {
-      if (generation !== this.liveGeneration) return;
+      if (generation !== this.liveGeneration) {
+        return;
+      }
+
       this.log("error", "gemini_live_start_failed", {
         error: String(error).slice(0, 240),
       });
@@ -1890,7 +2024,9 @@ export class InterviewerCore {
     this.releaseKeepAlive?.();
     this.releaseKeepAlive = undefined;
 
-    if (!preserveResumptionHandle) this.clearResumptionHandle(interviewGeneration);
+    if (!preserveResumptionHandle) {
+      this.clearResumptionHandle(interviewGeneration);
+    }
 
     try {
       session?.close();
@@ -1916,7 +2052,10 @@ export class InterviewerCore {
     );
 
     if (!replacementAttached) {
-      if (this.clientGraceTimer) clearTimeout(this.clientGraceTimer);
+      if (this.clientGraceTimer) {
+        clearTimeout(this.clientGraceTimer);
+      }
+
       this.clientGraceTimer = undefined;
       this.disconnectedDeviceId = undefined;
       this.device = undefined;
@@ -2002,8 +2141,10 @@ export class InterviewerCore {
         !this.safeGeminiSend(this.gemini, "activity_start", (session) => {
           session.sendRealtimeInput({ activityStart: {} });
         })
-      )
+      ) {
         return;
+      }
+
       this.candidateActivityStarted = true;
       this.armCandidateTurnDeadline(pending, connection);
     }
@@ -2055,8 +2196,10 @@ export class InterviewerCore {
       !this.safeGeminiSend(this.gemini, "activity_end", (session) => {
         session.sendRealtimeInput({ activityEnd: {} });
       })
-    )
+    ) {
       return;
+    }
+
     this.clearCandidateTurnTimer();
     this.candidateActivityStarted = false;
     const pending = this.pendingProviderTurn;
@@ -2093,7 +2236,10 @@ export class InterviewerCore {
       return;
     }
 
-    if (!gemini) return;
+    if (!gemini) {
+      return;
+    }
+
     // Close the input window before anything can be sent back, so a second
     // typed answer cannot slip in ahead of the `thinking` status below.
     this.lastStatus = "thinking";
@@ -2112,7 +2258,9 @@ export class InterviewerCore {
         // Realtime text received while manual audio activity is open belongs to
         // that same candidate turn. Close it after the text so Gemini produces
         // one response instead of leaving the ambient microphone turn active.
-        if (replacesAudioTurn) session.sendRealtimeInput({ activityEnd: {} });
+        if (replacesAudioTurn) {
+          session.sendRealtimeInput({ activityEnd: {} });
+        }
       })
     ) {
       this.sendJSON(connection, {
@@ -2134,7 +2282,10 @@ export class InterviewerCore {
   }
 
   handleGeminiMessage(message: LiveMessage, generation: number): void {
-    if (generation !== this.liveGeneration) return;
+    if (generation !== this.liveGeneration) {
+      return;
+    }
+
     const resumption = message.sessionResumptionUpdate;
 
     if (resumption) {
@@ -2227,7 +2378,10 @@ export class InterviewerCore {
 
     const content = message.serverContent;
 
-    if (!content) return;
+    if (!content) {
+      return;
+    }
+
     const parts = content.modelTurn?.parts ?? [];
 
     if (
@@ -2274,7 +2428,9 @@ export class InterviewerCore {
     for (const part of content.modelTurn?.parts ?? []) {
       const inline = part.inlineData;
 
-      if (!inline?.data) continue;
+      if (!inline?.data) {
+        continue;
+      }
 
       if (!isBoundedProviderAudio(inline.data)) {
         this.log("error", "gemini_audio_chunk_rejected", {
@@ -2290,12 +2446,16 @@ export class InterviewerCore {
       const pcm = resamplePcm16(decodeBase64(inline.data), rate, DEVICE_SAMPLE_RATE);
       this.queueOutputAudio(pcm, connection);
 
-      if (this.lastStatus !== "speaking") this.sendStatus(connection, "speaking");
+      if (this.lastStatus !== "speaking") {
+        this.sendStatus(connection, "speaking");
+      }
     }
 
     const responseComplete = isResponseComplete(content);
 
-    if (responseComplete && this.awaitingToolContinuation) return;
+    if (responseComplete && this.awaitingToolContinuation) {
+      return;
+    }
 
     if (responseComplete && this.interruptedGeneration) {
       this.interruptedGeneration = false;
@@ -2305,9 +2465,14 @@ export class InterviewerCore {
       return;
     }
 
-    if (!shouldEndTurn(content, this.openingSequenceInProgress)) return;
+    if (!shouldEndTurn(content, this.openingSequenceInProgress)) {
+      return;
+    }
 
-    if (this.responseCompletionHandled) return;
+    if (this.responseCompletionHandled) {
+      return;
+    }
+
     this.responseCompletionHandled = true;
     const completedProviderTurn = this.pendingProviderTurn;
     const durableProgressBeforeFinalization = this.durableTurnProgressFingerprint();
@@ -2318,7 +2483,10 @@ export class InterviewerCore {
       try {
         await audioDrained;
 
-        if (generation !== this.liveGeneration) return;
+        if (generation !== this.liveGeneration) {
+          return;
+        }
+
         // A client socket is an output sink, not the authority for the Gemini
         // turn. During the reconnect grace period the provider can finish a
         // response while no socket is attached; persist that turn against the
@@ -2389,12 +2557,17 @@ export class InterviewerCore {
     connection: InterviewConnection | undefined,
     callback: () => void,
   ): void {
-    if (generation !== this.liveGeneration) return;
+    if (generation !== this.liveGeneration) {
+      return;
+    }
 
     try {
       callback();
     } catch (error) {
-      if (generation !== this.liveGeneration) return;
+      if (generation !== this.liveGeneration) {
+        return;
+      }
+
       this.log("error", `gemini_${operation}_callback_failed`, {
         error: String(error).slice(0, 240),
       });
@@ -2435,7 +2608,9 @@ export class InterviewerCore {
     text: string,
     generation: number,
   ): Promise<OpeningPlaybackResult> {
-    if (!this.openingPlaybackIsCurrent(generation, stage)) return "stale";
+    if (!this.openingPlaybackIsCurrent(generation, stage)) {
+      return "stale";
+    }
 
     try {
       const speech =
@@ -2443,11 +2618,16 @@ export class InterviewerCore {
           ? await this.openingCaseSpeechForPlayback(text)
           : await this.synthesizeReliableOpeningSpeech(text);
 
-      if (!this.openingPlaybackIsCurrent(generation, stage)) return "stale";
+      if (!this.openingPlaybackIsCurrent(generation, stage)) {
+        return "stale";
+      }
+
       const pcm = resamplePcm16(speech.pcm, speech.sampleRate, DEVICE_SAMPLE_RATE);
       const target = this.device;
 
-      if (!target) return "unavailable";
+      if (!target) {
+        return "unavailable";
+      }
 
       this.sendStatus(target, "speaking");
       const framer = new PcmFramer(OUTPUT_PCM_FRAME_BYTES);
@@ -2456,7 +2636,9 @@ export class InterviewerCore {
       const sendFrame = async (
         frame: Uint8Array,
       ): Promise<Exclude<OpeningPlaybackResult, "played"> | null> => {
-        if (!this.openingPlaybackIsCurrent(generation, stage)) return "stale";
+        if (!this.openingPlaybackIsCurrent(generation, stage)) {
+          return "stale";
+        }
 
         if (this.device?.id !== target.id || !this.safeDeviceSend(target, frame)) {
           return "unavailable";
@@ -2480,7 +2662,9 @@ export class InterviewerCore {
         // oxlint-disable-next-line eslint/no-await-in-loop -- audio frames must preserve ordering and real-time playback pacing
         const issue = await sendFrame(frame);
 
-        if (issue) return issue;
+        if (issue) {
+          return issue;
+        }
       }
 
       const tail = framer.flush();
@@ -2488,14 +2672,22 @@ export class InterviewerCore {
       if (tail) {
         const issue = await sendFrame(tail);
 
-        if (issue) return issue;
+        if (issue) {
+          return issue;
+        }
       }
 
-      if (!this.openingPlaybackIsCurrent(generation, stage)) return "stale";
+      if (!this.openingPlaybackIsCurrent(generation, stage)) {
+        return "stale";
+      }
 
-      if (this.device?.id !== target.id) return "unavailable";
+      if (this.device?.id !== target.id) {
+        return "unavailable";
+      }
 
-      if (sentBytes === 0) return "failed";
+      if (sentBytes === 0) {
+        return "failed";
+      }
 
       this.sendJSON(target, {
         type: "opening_audio_fallback",
@@ -2509,7 +2701,10 @@ export class InterviewerCore {
 
       return "played";
     } catch (error) {
-      if (!this.openingPlaybackIsCurrent(generation, stage)) return "stale";
+      if (!this.openingPlaybackIsCurrent(generation, stage)) {
+        return "stale";
+      }
+
       this.log("error", "opening_audio_fallback_failed", {
         stage,
         error: String(error).slice(0, 200),
@@ -2541,7 +2736,9 @@ export class InterviewerCore {
   async openingCaseSpeechForPlayback(text: string): Promise<OpeningSpeech> {
     const normalized = normalizeTranscript(text);
 
-    if (!normalized) throw new Error("Opening case speech input is empty.");
+    if (!normalized) {
+      throw new Error("Opening case speech input is empty.");
+    }
 
     if (this.openingCaseSpeechText !== normalized) {
       this.openingCaseSpeechText = normalized;
@@ -2549,7 +2746,9 @@ export class InterviewerCore {
       this.openingCaseSpeechPromise = undefined;
     }
 
-    if (this.openingCaseSpeech) return this.openingCaseSpeech;
+    if (this.openingCaseSpeech) {
+      return this.openingCaseSpeech;
+    }
 
     const pending =
       this.openingCaseSpeechPromise ?? this.synthesizeReliableOpeningSpeech(normalized);
@@ -2559,7 +2758,9 @@ export class InterviewerCore {
     try {
       const speech = await pending;
 
-      if (this.openingCaseSpeechText === normalized) this.openingCaseSpeech = speech;
+      if (this.openingCaseSpeechText === normalized) {
+        this.openingCaseSpeech = speech;
+      }
 
       return speech;
     } finally {
@@ -2572,9 +2773,14 @@ export class InterviewerCore {
   prewarmOpeningCaseSpeech(text: string): void {
     const normalized = normalizeTranscript(text);
 
-    if (!normalized) return;
+    if (!normalized) {
+      return;
+    }
 
-    if (this.openingCaseSpeechText === normalized && this.openingCaseSpeech) return;
+    if (this.openingCaseSpeechText === normalized && this.openingCaseSpeech) {
+      return;
+    }
+
     this.runProtected(
       () => this.openingCaseSpeechForPlayback(normalized).then(() => undefined),
       "opening_case_prewarm_failed",
@@ -2598,7 +2804,9 @@ export class InterviewerCore {
       text: normalized,
     });
 
-    if (this.openingSequenceInProgress) this.lastOpeningTranscript = normalized;
+    if (this.openingSequenceInProgress) {
+      this.lastOpeningTranscript = normalized;
+    }
   }
 
   deferOpeningPlaybackUntilReconnect(reason: string): void {
@@ -2606,7 +2814,9 @@ export class InterviewerCore {
     this.openingAudioRetryCount = 0;
     this.closeGeminiSession(reason);
 
-    if (replacement) this.scheduleGeminiReconnect(replacement, reason);
+    if (replacement) {
+      this.scheduleGeminiReconnect(replacement, reason);
+    }
   }
 
   failOpeningAudio(
@@ -2614,7 +2824,10 @@ export class InterviewerCore {
     generation: number,
     stage: "case" | "first_question",
   ): void {
-    if (!this.openingPlaybackIsCurrent(generation, stage)) return;
+    if (!this.openingPlaybackIsCurrent(generation, stage)) {
+      return;
+    }
+
     this.failOpening(
       connection,
       generation,
@@ -2629,7 +2842,10 @@ export class InterviewerCore {
     reason: string,
     message: string,
   ): void {
-    if (generation !== this.liveGeneration || this.state.phase !== "interviewing") return;
+    if (generation !== this.liveGeneration || this.state.phase !== "interviewing") {
+      return;
+    }
+
     const target = this.device ?? connection;
     this.closeGeminiSession(reason);
     this.openingStage = "complete";
@@ -2652,7 +2868,9 @@ export class InterviewerCore {
   /** Frames Gemini audio; the ESP32 applies flow control at its jitter queue. */
   queueOutputAudio(pcm: Uint8Array, connection: InterviewConnection): void {
     // The warm-up turn exists only to absorb the cold-session anomaly.
-    if (this.openingStage === "warming_up") return;
+    if (this.openingStage === "warming_up") {
+      return;
+    }
 
     if (this.device?.id !== connection.id) {
       // There is no playback sink while the browser/device is reconnecting;
@@ -2678,13 +2896,18 @@ export class InterviewerCore {
   flushOutputAudio(connection: InterviewConnection): Promise<void> {
     const tail = this.outputAudio.flush();
 
-    if (tail && !this.safeDeviceSend(connection, tail)) this.turnAudioDeliveryFailed = true;
+    if (tail && !this.safeDeviceSend(connection, tail)) {
+      this.turnAudioDeliveryFailed = true;
+    }
 
     return Promise.resolve();
   }
 
   async finishGeminiTurn(connection: InterviewConnection, generation: number): Promise<void> {
-    if (generation !== this.liveGeneration) return;
+    if (generation !== this.liveGeneration) {
+      return;
+    }
+
     const startedStage = this.openingStage;
     const answerCountBefore = this.answerCount;
     const answer = normalizeTranscript(this.inputTranscript);
@@ -2770,7 +2993,9 @@ export class InterviewerCore {
             generation,
           );
 
-          if (playback === "stale") return;
+          if (playback === "stale") {
+            return;
+          }
 
           if (playback === "unavailable") {
             this.deferOpeningPlaybackUntilReconnect("first question playback disconnected");
@@ -2784,7 +3009,9 @@ export class InterviewerCore {
             return;
           }
 
-          if (!this.openingPlaybackIsCurrent(generation, "first_question")) return;
+          if (!this.openingPlaybackIsCurrent(generation, "first_question")) {
+            return;
+          }
         }
 
         const target = this.device ?? connection;
@@ -2810,7 +3037,9 @@ export class InterviewerCore {
 
     this.sendJSON(connection, { type: "transcript", role: "user", text: answer });
 
-    if (this.state.phase !== "interviewing") return;
+    if (this.state.phase !== "interviewing") {
+      return;
+    }
 
     if (
       /^(?:take your time\s*[—-]?\s*please continue|please answer the clinical question)[.!]?$/i.test(
@@ -2869,7 +3098,10 @@ export class InterviewerCore {
 
     const exchange: InterviewExchange = { question: exchangeQuestion, answer: exchangeAnswer };
 
-    if (followUps.length > 0) exchange.followUps = followUps;
+    if (followUps.length > 0) {
+      exchange.followUps = followUps;
+    }
+
     const exchanges = [...this.state.exchanges, exchange];
 
     this.log("info", "exchange_recorded", {
@@ -2919,9 +3151,10 @@ export class InterviewerCore {
       return;
     }
 
-    if (this.pendingFollowUps.length >= MAX_FOLLOW_UPS_PER_EXCHANGE) {
+    const last = this.pendingFollowUps.at(-1);
+
+    if (this.pendingFollowUps.length >= MAX_FOLLOW_UPS_PER_EXCHANGE && last) {
       // Past the cap, keep the content but stop growing the array.
-      const last = this.pendingFollowUps.at(-1)!;
       last.answer = normalizeTranscript(`${last.answer} ${answer}`);
       this.persistPendingExchange();
 
@@ -2982,14 +3215,18 @@ export class InterviewerCore {
     if (this.finalizationPromise) {
       await this.finalizationPromise;
 
-      if (this.state.phase === "complete") this.notifyCompletedReport(connection);
+      if (this.state.phase === "complete") {
+        this.notifyCompletedReport(connection);
+      }
 
       return;
     }
 
     const reportId = this.state.reportId || crypto.randomUUID();
 
-    if (!this.state.reportId) this.setState({ ...this.state, reportId });
+    if (!this.state.reportId) {
+      this.setState({ ...this.state, reportId });
+    }
 
     const interviewGeneration = this.ensureInterviewGeneration() ?? crypto.randomUUID();
 
@@ -3008,7 +3245,9 @@ export class InterviewerCore {
     try {
       await finalization;
     } finally {
-      if (this.finalizationPromise === finalization) this.finalizationPromise = undefined;
+      if (this.finalizationPromise === finalization) {
+        this.finalizationPromise = undefined;
+      }
     }
   }
 
@@ -3050,7 +3289,9 @@ export class InterviewerCore {
     const evaluation = this.state.evaluation;
     const reportId = this.state.reportId;
 
-    if (!evaluation || !reportId) return;
+    if (!evaluation || !reportId) {
+      return;
+    }
 
     const message: ReportReadyMessage = {
       type: "interview_report",
@@ -3059,8 +3300,10 @@ export class InterviewerCore {
       reviewPath: `/interviewer/reports/${reportId}.md`,
     };
 
-    if (this.state.cheatsheetAvailable)
+    if (this.state.cheatsheetAvailable) {
       message.cheatsheetPath = `/interviewer/reports/${reportId}-cheatsheet.md`;
+    }
+
     this.sendJSON(connection, message);
     this.sendStatus(connection, "complete");
   }
@@ -3078,7 +3321,10 @@ export class InterviewerCore {
         retry,
       );
 
-      if (this.currentInterviewGeneration() !== snapshot.interviewGeneration) return;
+      if (this.currentInterviewGeneration() !== snapshot.interviewGeneration) {
+        return;
+      }
+
       const reportConnection = this.device ?? connection;
       this.updateInterview(reportConnection, {
         phase: "complete",
@@ -3097,7 +3343,10 @@ export class InterviewerCore {
       this.notifyCompletedReport(reportConnection);
       this.closeLiveSession("interview complete", connection);
     } catch (error) {
-      if (this.currentInterviewGeneration() !== snapshot.interviewGeneration) return;
+      if (this.currentInterviewGeneration() !== snapshot.interviewGeneration) {
+        return;
+      }
+
       // A failed provider/R2 call must leave the DO in a recoverable state and
       // release the Live heartbeat/socket before the client tries recovery.
       this.log("error", "interview_finalization_failed", {
@@ -3154,7 +3403,10 @@ export class InterviewerCore {
       question: this.state.currentQuestion,
     };
 
-    if (this.state.reportId) message.reportId = this.state.reportId;
+    if (this.state.reportId) {
+      message.reportId = this.state.reportId;
+    }
+
     this.sendJSON(connection, message);
   }
 }

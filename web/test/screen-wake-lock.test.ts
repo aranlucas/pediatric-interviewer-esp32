@@ -22,7 +22,9 @@ class FakeVisibilityDocument {
   setVisibility(visibilityState: DocumentVisibilityState) {
     this.visibilityState = visibilityState;
 
-    for (const listener of this.listeners) listener();
+    for (const listener of this.listeners) {
+      listener();
+    }
   }
 }
 

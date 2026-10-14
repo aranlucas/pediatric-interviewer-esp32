@@ -33,7 +33,9 @@ export function screenWakeLockWarning(
   state: ScreenWakeLockState,
   browser: ScreenWakeLockBrowser,
 ): string {
-  if (state === "active") return "";
+  if (state === "active") {
+    return "";
+  }
 
   const isAppleMobile =
     /iPad|iPhone|iPod/.test(browser.userAgent) ||
@@ -116,9 +118,13 @@ export function holdScreenWakeLock(environment: ScreenWakeLockEnvironment = {}):
       nextSentinel.addEventListener(
         "release",
         () => {
-          if (sentinel === nextSentinel) sentinel = undefined;
+          if (sentinel === nextSentinel) {
+            sentinel = undefined;
+          }
 
-          if (stopped || visibilityDocument.visibilityState !== "visible") return;
+          if (stopped || visibilityDocument.visibilityState !== "visible") {
+            return;
+          }
 
           if (releaseRetries >= 2) {
             environment.onStateChange?.("request-failed");
