@@ -152,11 +152,13 @@ export function statusCopy(status: InterviewStatus, questionCount = TOTAL_QUESTI
       return { label: "Complete", detail: "Your review is ready and published in Reports." };
     case "error":
       return { label: "Needs attention", detail: "The interview connection needs attention." };
-    default:
+    case "idle":
       return {
         label: "Ready",
         detail: `Choose topics and settings to begin a ${questionCount}-question interview.`,
       };
+    default:
+      throw new Error(`Unsupported interview status: ${String(status)}`);
   }
 }
 

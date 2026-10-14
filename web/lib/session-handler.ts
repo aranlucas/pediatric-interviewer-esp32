@@ -30,10 +30,7 @@ export type SessionEnv = {
   SESSION_RATE_LIMITER?: SessionRateLimiter;
 };
 
-function json(
-  data: ErrorResponse | SessionResponse,
-  status = 200,
-): Response {
+function json(data: ErrorResponse | SessionResponse, status = 200): Response {
   return Response.json(data, {
     status,
     headers: {

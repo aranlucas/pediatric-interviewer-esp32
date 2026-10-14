@@ -154,12 +154,11 @@ describe("Worker edge contract", () => {
   });
 
   it("rejects ordinary agent HTTP before a Durable Object is reached", async () => {
-    routeAgentRequest.mockImplementation(
-      async (request, _env, options) =>
-        await options.onBeforeRequest(request, {
-          className: "PEDIATRIC_INTERVIEWER",
-          name: WEB_ROOM,
-        }),
+    routeAgentRequest.mockImplementation((request, _env, options) =>
+      options.onBeforeRequest(request, {
+        className: "PEDIATRIC_INTERVIEWER",
+        name: WEB_ROOM,
+      }),
     );
 
     const response = await worker.fetch(
@@ -172,12 +171,11 @@ describe("Worker edge contract", () => {
   });
 
   it("requires both exact origin and room-scoped connect token for web upgrades", async () => {
-    routeAgentRequest.mockImplementation(
-      async (request, _env, options) =>
-        await options.onBeforeConnect(request, {
-          className: "PEDIATRIC_INTERVIEWER",
-          name: WEB_ROOM,
-        }),
+    routeAgentRequest.mockImplementation((request, _env, options) =>
+      options.onBeforeConnect(request, {
+        className: "PEDIATRIC_INTERVIEWER",
+        name: WEB_ROOM,
+      }),
     );
 
     const connectToken = await signWebToken(

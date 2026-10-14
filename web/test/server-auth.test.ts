@@ -93,7 +93,7 @@ describe("web auth input validation", () => {
     const name = sessionOwnerCookieName(room);
     expect(name).toBe("__Host-angry-cat-owner-0123456789abcdef0123456789abcdef");
     expect(serializeSessionOwnerCookie("signed.value", room, 7200)).toBe(
-      `${name}=signed.value; Max-Age=7200; Path=/; Secure; HttpOnly; SameSite=Strict`,
+      `${name!}=signed.value; Max-Age=7200; Path=/; Secure; HttpOnly; SameSite=Strict`,
     );
     expect(sessionOwnerCookieName("not-a-room")).toBeNull();
   });

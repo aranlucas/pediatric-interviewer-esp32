@@ -35,8 +35,8 @@ export function testInterviewer(
     },
     sql: vi.fn(() => []),
     keepAlive: vi.fn().mockResolvedValue(() => undefined),
-    keepAliveWhile: async (operation) => await operation(),
-    retry: async (operation) => await operation(1),
+    keepAliveWhile: (operation) => operation(),
+    retry: (operation) => operation(1),
     ...hostOverrides,
   };
 

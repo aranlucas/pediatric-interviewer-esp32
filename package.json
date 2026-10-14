@@ -6,15 +6,16 @@
     "lint": "pnpm --dir worker lint && pnpm --dir web lint",
     "dev": "pnpm --parallel --filter ./web --filter ./worker run dev",
     "lint:fix": "oxlint --fix",
-    "format": "oxfmt --write",
-    "format:check": "oxfmt --check"
+    "format": "oxfmt --config oxfmt.config.ts --write .",
+    "format:check": "oxfmt --config oxfmt.config.ts --check .",
+    "lint:oxforge": "oxlint"
   },
   "devDependencies": {
-    "@aranlucas/oxforge": "0.1.1",
+    "@aranlucas/oxforge": "^0.1.3",
     "@aranlucas/oxlint-plugin-anti-slop": "0.1.0",
-    "oxfmt": "0.73.0",
-    "oxlint": "1.88.0",
-    "oxlint-tsgolint": "7.0.2004",
+    "oxfmt": "^0.73.0",
+    "oxlint": "^1.88.0",
+    "oxlint-tsgolint": "^7.0.2004",
     "portless": "0.15.7"
   },
   "packageManager": "pnpm@12.10.1"

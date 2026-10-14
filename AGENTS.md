@@ -15,7 +15,7 @@ make monitor
 
 ## Resources
 
-* https://github.com/waveshareteam/ESP32-S3-Touch-LCD-3.5/
+- https://github.com/waveshareteam/ESP32-S3-Touch-LCD-3.5/
 
 ## Simulation
 

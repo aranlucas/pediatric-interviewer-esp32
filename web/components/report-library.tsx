@@ -99,10 +99,7 @@ type ReportLibraryIndexProps = {
   timezone: string;
 };
 
-export function ReportLibraryIndex({
-  reports,
-  timezone,
-}: ReportLibraryIndexProps) {
+export function ReportLibraryIndex({ reports, timezone }: ReportLibraryIndexProps) {
   return (
     <main className="report-library-shell">
       <nav className="report-library-nav" aria-label="Report library navigation">

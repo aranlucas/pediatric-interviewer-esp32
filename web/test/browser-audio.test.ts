@@ -65,7 +65,7 @@ function audioHarness() {
 
   const acquireMedia = vi.fn<InterviewAudioContext["acquireMedia"]>().mockResolvedValue(stream);
 
-  const context: InterviewAudioContext = {
+  const context = {
     currentTime: 0,
     destination: new FakeNode(),
     audioWorklet: { addModule: vi.fn().mockResolvedValue(undefined) },
@@ -79,7 +79,7 @@ function audioHarness() {
     createBufferSource: () => source,
     acquireMedia,
     createCaptureNode: () => capture,
-  };
+  } satisfies InterviewAudioContext;
 
   const platform: InterviewAudioPlatform = { createContext: () => context, now: () => now };
   const onAutoCommit = vi.fn();

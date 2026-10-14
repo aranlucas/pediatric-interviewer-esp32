@@ -17,7 +17,7 @@ export interface CompletionSignal {
 
 /** Whether a serverContent message reports any kind of response completion. */
 export function isResponseComplete(signal: CompletionSignal): boolean {
-  return Boolean(signal.generationComplete || signal.turnComplete);
+  return signal.generationComplete === true || signal.turnComplete === true;
 }
 
 /**

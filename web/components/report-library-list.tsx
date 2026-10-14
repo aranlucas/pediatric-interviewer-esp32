@@ -17,10 +17,7 @@ type ReportLibraryListProps = {
   timezone: string;
 };
 
-export function ReportLibraryList({
-  reports,
-  timezone,
-}: ReportLibraryListProps) {
+export function ReportLibraryList({ reports, timezone }: ReportLibraryListProps) {
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -78,7 +75,10 @@ export function ReportLibraryList({
               {visibleReports.map((report) => (
                 <tr key={report.reportId}>
                   <td data-label="Completed">
-                    <Link href={`/reports/${report.reportId}`} aria-label={`Open ${report.topicLabel} report completed ${formatReportCompletedAt(report.generatedAt, timezone)}`}>
+                    <Link
+                      href={`/reports/${report.reportId}`}
+                      aria-label={`Open ${report.topicLabel} report completed ${formatReportCompletedAt(report.generatedAt, timezone)}`}
+                    >
                       <strong>{formatReportCompletedAt(report.generatedAt, timezone)}</strong>
                       <span className="report-id">{report.reportId}</span>
                       <span className="report-open-label">Open report</span>

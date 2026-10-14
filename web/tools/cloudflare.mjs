@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { parseCfWranglerBuildArgs, runCfWranglerBuild } from "wrangler";
 import { prepareOpenNextConfig } from "./opennext-config.ts";
 
+/** @param {string[]} args */
 function run(args) {
   const result = spawnSync("pnpm", ["exec", ...args], { stdio: "inherit" });
 

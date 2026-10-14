@@ -27,9 +27,12 @@ async function readBoundedAudio(response: Response): Promise<Uint8Array> {
   try {
     while (true) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- stream reads must retain backpressure and enforce the byte limit before reading again
-      const { done, value } = await reader.read();
+      const result = await reader.read();
 
-      if (done) break;
+      if (result.done) break;
+      const value: unknown = result.value;
+      if (!(value instanceof Uint8Array))
+        throw new Error("Response stream returned a non-binary chunk.");
       received += value.byteLength;
 
       if (received > MAX_TTS_PCM_BYTES) {

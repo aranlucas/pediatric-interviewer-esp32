@@ -6,17 +6,19 @@ import {
   verifyAccessToken,
 } from "@/lib/server-auth";
 
-import type { EnvironmentContext, ErrorResponse, ReportRouteContext, SessionResponse } from "@/lib/route-types";
+import type {
+  EnvironmentContext,
+  ErrorResponse,
+  ReportRouteContext,
+  SessionResponse,
+} from "@/lib/route-types";
 
 export type ReportEnv = {
   INTERVIEWER_SERVICE?: { fetch(request: Request): Promise<Response> };
   WEB_TOKEN_SECRET?: string;
 };
 
-function json(
-  data: ErrorResponse | SessionResponse,
-  status = 200,
-): Response {
+function json(data: ErrorResponse | SessionResponse, status = 200): Response {
   return Response.json(data, {
     status,
     headers: {
@@ -27,10 +29,7 @@ function json(
 }
 
 export function createReportHandler(environment: () => Promise<EnvironmentContext<ReportEnv>>) {
-  return async function GET(
-    request: Request,
-    { params }: ReportRouteContext,
-  ): Promise<Response> {
+  return async function GET(request: Request, { params }: ReportRouteContext): Promise<Response> {
     const { reportId } = await params;
     const kind = new URL(request.url).searchParams.get("kind");
 
@@ -67,7 +66,7 @@ export function createReportHandler(environment: () => Promise<EnvironmentContex
       const upstreamResponse = await env.INTERVIEWER_SERVICE.fetch(
         new Request(upstreamUrl, {
           method: "GET",
-          headers: { Authorization: `Bearer ${reportToken}` },
+          headers: { Authorization: `Bearer ${reportToken!}` },
         }),
       );
 

@@ -37,7 +37,7 @@ export function screenWakeLockWarning(
 
   const isAppleMobile =
     /iPad|iPhone|iPod/.test(browser.userAgent) ||
-    (/Macintosh/.test(browser.userAgent) && (browser.maxTouchPoints ?? 0) > 1);
+    (browser.userAgent.includes("Macintosh") && (browser.maxTouchPoints ?? 0) > 1);
 
   const isSafari =
     /Version\/[\d.]+.*Safari/.test(browser.userAgent) &&
@@ -129,7 +129,9 @@ export function holdScreenWakeLock(environment: ScreenWakeLockEnvironment = {}):
           releaseRetries += 1;
           // The OS may revoke an advisory lock while the tab stays visible.
           // Reacquire on a microtask so the released sentinel has fully settled.
-          queueMicrotask(() => void request());
+          queueMicrotask(
+            () => void request().catch(() => environment.onStateChange?.("request-failed")),
+          );
         },
         { once: true },
       );
@@ -144,12 +146,12 @@ export function holdScreenWakeLock(environment: ScreenWakeLockEnvironment = {}):
   const handleVisibilityChange = () => {
     if (visibilityDocument.visibilityState === "visible") {
       releaseRetries = 0;
-      void request();
+      void request().catch(() => environment.onStateChange?.("request-failed"));
     }
   };
 
   visibilityDocument.addEventListener("visibilitychange", handleVisibilityChange);
-  void request();
+  void request().catch(() => environment.onStateChange?.("request-failed"));
 
   return () => {
     stopped = true;
@@ -158,7 +160,8 @@ export function holdScreenWakeLock(environment: ScreenWakeLockEnvironment = {}):
     sentinel = undefined;
 
     if (activeSentinel && !activeSentinel.released) {
-      void activeSentinel.release();
+      // Release is advisory and may race the OS revoking the lock.
+      void activeSentinel.release().catch(() => undefined);
     }
   };
 }

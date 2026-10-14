@@ -19,9 +19,7 @@ type BrowserSessionGateProps = {
   children: (session: BrowserSession) => ReactNode;
 };
 
-export function BrowserSessionGate({
-  children,
-}: BrowserSessionGateProps) {
+export function BrowserSessionGate({ children }: BrowserSessionGateProps) {
   const [attempt, setAttempt] = useState(0);
   const [session, setSession] = useState<BrowserSessionToken>();
   const sessionRef = useRef<BrowserSessionToken | undefined>(undefined);
@@ -38,7 +36,12 @@ export function BrowserSessionGate({
         // An expired owner cookie cannot recover the old Durable Object. Start
         // a fresh server-owned room rather than leaving the UI permanently
         // stuck behind the failed refresh.
-        if (active && existingRoom && failure instanceof SessionSetupError && failure.status === 401) {
+        if (
+          active &&
+          existingRoom &&
+          failure instanceof SessionSetupError &&
+          failure.status === 401
+        ) {
           sessionRef.current = undefined;
 
           return requestBrowserSessionToken(null, attempt);
@@ -66,7 +69,9 @@ export function BrowserSessionGate({
       }
     };
 
-    void setupSession();
+    void setupSession().catch(() => {
+      if (active) setSetupError("Could not complete secure interviewer setup. Please retry.");
+    });
 
     return () => {
       active = false;

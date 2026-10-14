@@ -70,5 +70,5 @@ import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 import { prepareOpenNextConfig } from "./tools/opennext-config.ts";
 
 if (process.env.NODE_ENV === "development") {
-  initOpenNextCloudflareForDev({ configPath: await prepareOpenNextConfig() });
+  await initOpenNextCloudflareForDev({ configPath: await prepareOpenNextConfig() });
 }

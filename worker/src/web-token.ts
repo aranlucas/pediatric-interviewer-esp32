@@ -53,8 +53,8 @@ function decodeBase64Url(value: string): Uint8Array | null {
   }
 }
 
-async function importSigningKey(secret: string): Promise<CryptoKey> {
-  return await crypto.subtle.importKey("raw", TOKEN_ENCODER.encode(secret), HMAC_ALGORITHM, false, [
+function importSigningKey(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey("raw", TOKEN_ENCODER.encode(secret), HMAC_ALGORITHM, false, [
     "sign",
     "verify",
   ]);
@@ -105,7 +105,7 @@ export async function verifyWebToken(
   const [encodedPayload, encodedSignature] = pieces;
   const signature = decodeBase64Url(encodedSignature);
 
-  if (!signature || signature.byteLength !== 32) return null;
+  if (signature?.byteLength !== 32) return null;
 
   let payload: unknown;
   const payloadBytes = decodeBase64Url(encodedPayload);

@@ -110,7 +110,7 @@ describe("interviewer public lifecycle protocol", () => {
     await starting;
 
     expect(live.sendRealtimeInput).toHaveBeenCalledExactlyOnceWith({
-      text: expect.stringContaining("WARM_UP"),
+      text: expect.stringContaining("WARM_UP") as string,
     });
     expect(replacement.frames).toContainEqual({
       type: "audio_config",
@@ -140,7 +140,7 @@ describe("interviewer public lifecycle protocol", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(adapters.generateCase).toHaveBeenCalledOnce();
     expect(resumed.sendRealtimeInput).toHaveBeenCalledExactlyOnceWith({
-      text: expect.stringContaining("WARM_UP"),
+      text: expect.stringContaining("WARM_UP") as string,
     });
     expect(replacement.frames).toContainEqual(
       expect.objectContaining({ type: "interview_state", phase: "interviewing" }),
@@ -181,7 +181,7 @@ describe("interviewer public lifecycle protocol", () => {
       sampleRate: 24_000,
     });
     expect(resumedProvider.sendRealtimeInput).toHaveBeenCalledExactlyOnceWith({
-      text: expect.stringContaining("WARM_UP"),
+      text: expect.stringContaining("WARM_UP") as string,
     });
     // A callback from the retired provider must not disconnect its successor.
     options.callbacks.onclose?.(
@@ -254,7 +254,7 @@ describe("interviewer public lifecycle protocol", () => {
     emit({ turnComplete: true });
     await vi.advanceTimersByTimeAsync(1);
     expect(live.sendRealtimeInput).toHaveBeenCalledWith({
-      text: expect.stringContaining("BEGIN_INTERVIEW"),
+      text: expect.stringContaining("BEGIN_INTERVIEW") as string,
     });
     active.frames.length = 0;
 

@@ -152,7 +152,7 @@ function decodePcmWav(bytes: Uint8Array): OpeningSpeech {
     offset = chunkEnd + (chunkSize % 2);
   }
 
-  if (!format || format.channels !== 1 || format.bitsPerSample !== 16 || format.blockAlign !== 2) {
+  if (format?.channels !== 1 || format.bitsPerSample !== 16 || format.blockAlign !== 2) {
     throw new Error("Gemini TTS returned non-mono PCM16 WAV audio.");
   }
 

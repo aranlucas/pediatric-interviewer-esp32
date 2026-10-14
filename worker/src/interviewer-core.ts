@@ -614,7 +614,7 @@ export class InterviewerCore {
 
       const handle = z.string().nullable().optional().parse(rows[0]?.resumption_handle);
 
-      return handle || undefined;
+      return handle === "" ? undefined : (handle ?? undefined);
     } catch (error) {
       this.resumptionHandleUsable = false;
       this.log("error", "live_metadata_read_failed", {
@@ -2233,7 +2233,7 @@ export class InterviewerCore {
     if (
       content.inputTranscription?.text ||
       content.outputTranscription?.text ||
-      parts.some((part) => part.text || part.inlineData?.data) ||
+      parts.some((part) => Boolean(part.text) || Boolean(part.inlineData?.data)) ||
       content.generationComplete ||
       content.turnComplete ||
       content.interrupted
@@ -2364,11 +2364,7 @@ export class InterviewerCore {
           const deferred = this.deferredTransportFailure;
           this.deferredTransportFailure = undefined;
 
-          if (
-            deferred &&
-            deferred.generation === generation &&
-            generation === this.liveGeneration
-          ) {
+          if (deferred?.generation === generation && generation === this.liveGeneration) {
             this.handleGeminiTransportFailure(deferred.connection, generation, deferred.reason);
           }
         }
@@ -3045,7 +3041,8 @@ export class InterviewerCore {
       // The presented case is public interview content, so the saved review
       // can quote the exact vignette the answers were graded against.
       casePresentation:
-        normalizeTranscript(this.openingCaseText || this.state.casePresentation || "") || undefined,
+        normalizeTranscript(this.openingCaseText || (this.state.casePresentation ?? "")) ||
+        undefined,
     };
   }
 

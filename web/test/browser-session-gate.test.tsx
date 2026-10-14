@@ -30,7 +30,9 @@ function renderGate() {
         <>
           <output aria-label="Session room">{room}</output>
           <output aria-label="Connection enabled">{String(connectionEnabled)}</output>
-          <button type="button" onClick={refreshSession}>Refresh session</button>
+          <button type="button" onClick={refreshSession}>
+            Refresh session
+          </button>
         </>
       )}
     </BrowserSessionGate>,
@@ -69,8 +71,14 @@ describe("browser session setup lifecycle", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh session" }));
     expect(screen.getByLabelText("Connection enabled").textContent).toBe("false");
-    await waitFor(() => expect(screen.getByLabelText("Connection enabled").textContent).toBe("true"));
-    expect(requestSession.mock.calls).toEqual([[null, 0], [null, 1], [ROOM, 2]]);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Connection enabled").textContent).toBe("true"),
+    );
+    expect(requestSession.mock.calls).toEqual([
+      [null, 0],
+      [null, 1],
+      [ROOM, 2],
+    ]);
   });
 
   it("replaces an expired room with a new server-owned session", async () => {
@@ -84,7 +92,11 @@ describe("browser session setup lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh session" }));
     await waitFor(() => expect(screen.getByLabelText("Session room").textContent).toBe(OTHER_ROOM));
     expect(screen.getByLabelText("Connection enabled").textContent).toBe("true");
-    expect(requestSession.mock.calls).toEqual([[null, 0], [ROOM, 1], [null, 1]]);
+    expect(requestSession.mock.calls).toEqual([
+      [null, 0],
+      [ROOM, 1],
+      [null, 1],
+    ]);
   });
 
   it("does not start a replacement request after an in-flight refresh is unmounted", async () => {
@@ -99,6 +111,9 @@ describe("browser session setup lifecycle", () => {
       pending.reject(new SessionSetupError("Owner expired", 401));
       await pending.promise.catch(() => undefined);
     });
-    expect(requestSession.mock.calls).toEqual([[null, 0], [ROOM, 1]]);
+    expect(requestSession.mock.calls).toEqual([
+      [null, 0],
+      [ROOM, 1],
+    ]);
   });
 });
