@@ -1,17 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createWorker,
-  type AgentRouter,
-  type WorkerEnv,
-  type ReportObject,
-} from "../src/edge-handler";
+import { createWorker, type AgentRouter, type WorkerEnv, type ReportObject } from "@/edge-handler";
 
 const routeAgentRequest = vi.fn<AgentRouter<WorkerEnv>>();
 
 const worker = createWorker(routeAgentRequest);
 
-import { signWebToken } from "../src/web-token";
+import { signWebToken } from "@/web-token";
 
 const DEVICE_TOKEN = "device-test-secret";
 

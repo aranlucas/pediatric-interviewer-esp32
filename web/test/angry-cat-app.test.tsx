@@ -3,20 +3,20 @@ import { useAgent } from "agents/react";
 import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type * as SessionTokenModule from "../lib/session-token";
+import type * as SessionTokenModule from "@/lib/session-token";
 
-import { AngryCatApp } from "../components/angry-cat-app";
-import { BrowserInterviewAudio } from "../lib/browser-audio";
-import { requestBrowserSessionToken } from "../lib/session-token";
+import { AngryCatApp } from "@/components/angry-cat-app";
+import { BrowserInterviewAudio } from "@/lib/browser-audio";
+import { requestBrowserSessionToken } from "@/lib/session-token";
 
 vi.mock("agents/react", () => ({ useAgent: vi.fn() }));
 
-vi.mock("../lib/session-token", async (importOriginal) => ({
+vi.mock("@/lib/session-token", async (importOriginal) => ({
   ...(await importOriginal<typeof SessionTokenModule>()),
   requestBrowserSessionToken: vi.fn(),
 }));
 
-vi.mock("../lib/browser-audio", () => ({
+vi.mock("@/lib/browser-audio", () => ({
   DEFAULT_OUTPUT_VOLUME: 0.8,
   BrowserInterviewAudio: vi.fn(
     class {

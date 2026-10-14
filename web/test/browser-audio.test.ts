@@ -1,7 +1,7 @@
 /* eslint-disable max-classes-per-file -- The Web Audio fakes form one cohesive test harness. */
 import { describe, expect, it, vi } from "vitest";
 
-import { BrowserInterviewAudio } from "../lib/browser-audio";
+import { BrowserInterviewAudio } from "@/lib/browser-audio";
 import type {
   AudioGain,
   AudioGraphNode,
@@ -11,7 +11,7 @@ import type {
   InterviewAudioContext,
   InterviewAudioPlatform,
   PlaybackSource,
-} from "../lib/audio-platform";
+} from "@/lib/audio-platform";
 
 class FakeNode implements AudioGraphNode {
   connect = vi.fn((destination: AudioGraphNode) => destination);

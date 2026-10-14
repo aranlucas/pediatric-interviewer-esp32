@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
 
-import PrivacyPage from "../app/privacy/page";
+import PrivacyPage from "@/app/privacy/page";
 
 test("privacy page renders its title and safety guidance", () => {
   render(<PrivacyPage />);

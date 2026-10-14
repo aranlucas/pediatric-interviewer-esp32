@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LiveServerMessage } from "@google/genai/web";
 
-import { testInterviewer, fakeLiveSession } from "./interviewer-harness";
+import { testInterviewer, fakeLiveSession } from "@test/interviewer-harness";
 import type {
   InterviewerCore,
   InterviewServices,
   InterviewHost,
   InterviewConnection,
-} from "../src/interviewer-core";
+} from "@/interviewer-core";
 import { z } from "zod";
 
 const adapters = {

@@ -5,7 +5,7 @@ import {
   isAllowedWebOrigin,
   signWebToken,
   verifyWebToken,
-} from "../src/web-token";
+} from "@/web-token";
 
 const SECRET = "test-web-token-secret-that-is-long-enough";
 

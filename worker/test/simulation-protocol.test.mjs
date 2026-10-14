@@ -5,7 +5,7 @@ import {
   simulationCompleteSchema,
   storedReportSchema,
   webSocketBuffer,
-} from "./simulation-protocol.mjs";
+} from "../tools/simulation-protocol.mjs";
 
 describe("simulator payload validation", () => {
   it("accepts server events and ignores unrelated metadata", () => {

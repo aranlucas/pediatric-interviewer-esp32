@@ -30,6 +30,9 @@ jobs:
           require-lockfile: true
 
       - parallel:
+          - name: Formatting
+            run: pnpm format:check
+
           - name: Worker test, check, and deploy dry run
             run: cd worker && pnpm test && pnpm check && pnpm exec cf deploy --dry-run
 

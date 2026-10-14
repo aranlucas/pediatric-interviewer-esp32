@@ -3,7 +3,7 @@ import {
   interviewMessageText,
   parseInterviewMessage,
   parseInterviewStatus,
-} from "../lib/interview-messages";
+} from "@/lib/interview-messages";
 
 describe("interview wire envelope", () => {
   it("retains extension fields and JSON values without imposing another message's fields", () => {

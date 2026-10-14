@@ -1,8 +1,8 @@
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { z } from "zod";
-import { createReportHandler, type ReportEnv } from "../lib/report-handler";
-import { createSessionHandler, type SessionEnv } from "../lib/session-handler";
+import { createReportHandler, type ReportEnv } from "@/lib/report-handler";
+import { createSessionHandler, type SessionEnv } from "@/lib/session-handler";
 
 type RouteEnvironment = { env: ReportEnv & SessionEnv };
 
@@ -17,7 +17,7 @@ import {
   REPORT_TOKEN_COOKIE,
   sessionOwnerCookieName,
   verifyAccessToken,
-} from "../lib/server-auth";
+} from "@/lib/server-auth";
 
 const SECRET = "route-test-secret-that-is-long-enough";
 

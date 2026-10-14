@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { ConnectionIndicator, QuestionProgress } from "../components/interview-controls";
+import { ConnectionIndicator, QuestionProgress } from "@/components/interview-controls";
 
 describe("interview controls accessibility", () => {
   it("announces connection transitions through a native status element", () => {
