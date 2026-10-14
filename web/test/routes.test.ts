@@ -64,7 +64,7 @@ describe("session token route", () => {
     });
     const ownerCookieName = sessionOwnerCookieName(payload.room);
     expect(ownerCookieName).not.toBeNull();
-    const ownerCookie = setCookie.match(new RegExp(`${ownerCookieName}=([^;]+)`, "u"))?.[1];
+    const ownerCookie = setCookie.match(new RegExp(`${ownerCookieName!}=([^;]+)`, "u"))?.[1];
     expect(ownerCookie).toBeTruthy();
     await expect(verifyAccessToken(ownerCookie, SECRET, "owner")).resolves.toMatchObject({
       sub: payload.room,
@@ -110,7 +110,7 @@ describe("session token route", () => {
         method: "POST",
         headers: {
           Origin: "https://oral.example",
-          Cookie: `${ownerCookieName}=${ownerToken}`,
+          Cookie: `${ownerCookieName!}=${ownerToken}`,
         },
       }),
     );
@@ -118,7 +118,7 @@ describe("session token route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ room: ROOM });
     expect(response.headers.get("Set-Cookie")).toContain(`${REPORT_TOKEN_COOKIE}=`);
-    expect(response.headers.get("Set-Cookie")).not.toContain(`${ownerCookieName}=`);
+    expect(response.headers.get("Set-Cookie")).not.toContain(`${ownerCookieName!}=`);
     expect(limit).toHaveBeenCalledWith({ key: "local" });
   });
 
@@ -142,7 +142,7 @@ describe("session token route", () => {
         method: "POST",
         headers: {
           Origin: "https://oral.example",
-          Cookie: `${sessionOwnerCookieName(ROOM)}=${ownerToken}`,
+          Cookie: `${sessionOwnerCookieName(ROOM)!}=${ownerToken}`,
         },
       }),
     );
@@ -191,7 +191,7 @@ describe("private report proxy", () => {
       scope: "report",
     });
 
-    const serviceFetch = vi.fn().mockResolvedValue(
+    const serviceFetch = vi.fn<(request: Request) => Promise<Response>>().mockResolvedValue(
       new Response("private report", {
         headers: { "Content-Type": "text/markdown; charset=utf-8" },
       }),
@@ -220,7 +220,7 @@ describe("private report proxy", () => {
   });
 
   it("rejects a missing report cookie without calling the service binding", async () => {
-    const serviceFetch = vi.fn();
+    const serviceFetch = vi.fn<(request: Request) => Promise<Response>>();
     getCloudflareContext.mockResolvedValue({
       env: {
         WEB_TOKEN_SECRET: SECRET,
@@ -262,7 +262,7 @@ describe("private report proxy", () => {
       scope: "report",
     });
 
-    const serviceFetch = vi.fn();
+    const serviceFetch = vi.fn<(request: Request) => Promise<Response>>();
     getCloudflareContext.mockResolvedValue({
       env: {
         WEB_TOKEN_SECRET: SECRET,
@@ -270,12 +270,16 @@ describe("private report proxy", () => {
       },
     });
 
-    const responses = await Promise.all([expired, wrongSubject].map((token) => getReport(
-        new Request(`https://oral.example/api/reports/${REPORT_ID}?kind=report`, {
-          headers: { Cookie: `${REPORT_TOKEN_COOKIE}=${token}` },
-        }),
-        { params: Promise.resolve({ reportId: REPORT_ID }) },
-      )));
+    const responses = await Promise.all(
+      [expired, wrongSubject].map((token) =>
+        getReport(
+          new Request(`https://oral.example/api/reports/${REPORT_ID}?kind=report`, {
+            headers: { Cookie: `${REPORT_TOKEN_COOKIE}=${token}` },
+          }),
+          { params: Promise.resolve({ reportId: REPORT_ID }) },
+        ),
+      ),
+    );
 
     for (const response of responses) expect(response.status).toBe(401);
 
@@ -291,7 +295,7 @@ describe("private report proxy", () => {
     });
 
     const serviceFetch = vi
-      .fn()
+      .fn<(request: Request) => Promise<Response>>()
       .mockResolvedValue(Response.json({ error: "not_found" }, { status: 404 }));
 
     getCloudflareContext.mockResolvedValue({

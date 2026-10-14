@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseInterviewMessage, parseInterviewStatus } from "../lib/interview-messages";
+import {
+  interviewMessageText,
+  parseInterviewMessage,
+  parseInterviewStatus,
+} from "../lib/interview-messages";
 
 describe("interview wire envelope", () => {
   it("retains extension fields and JSON values without imposing another message's fields", () => {
@@ -8,7 +12,13 @@ describe("interview wire envelope", () => {
     expect(parseInterviewStatus(wire.status)).toBeNull();
   });
   it.each(["null", "[]", "23", "invalid JSON"])("rejects a non-object envelope %s", (wire) => {
-    expect(() => parseInterviewMessage(wire)).toThrow();
+    expect(() => parseInterviewMessage(wire)).toThrow(Error);
+  });
+  it("displays only textual message fields", () => {
+    expect(interviewMessageText("Ready")).toBe("Ready");
+    expect(interviewMessageText({ nested: true })).toBe("");
+    expect(interviewMessageText(23, "Try again")).toBe("Try again");
+    expect(interviewMessageText(undefined, "Try again")).toBe("Try again");
   });
   it("accepts known statuses and rejects invalid status values", () => {
     expect(parseInterviewStatus("listening")).toBe("listening");

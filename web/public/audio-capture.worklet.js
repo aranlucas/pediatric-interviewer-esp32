@@ -1,3 +1,5 @@
+/// <reference path="./audio-worklet.d.ts" />
+
 const TARGET_SAMPLE_RATE = 24000;
 
 const TARGET_FRAME_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.02);
@@ -5,11 +7,13 @@ const TARGET_FRAME_SAMPLES = Math.round(TARGET_SAMPLE_RATE * 0.02);
 class PcmCaptureProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    /** @type {number[]} */
     this.pending = [];
     this.readPosition = 0;
     this.step = sampleRate / TARGET_SAMPLE_RATE;
   }
 
+  /** @param {Float32Array[][]} inputs */
   process(inputs) {
     const input = inputs[0]?.[0];
 

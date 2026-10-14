@@ -46,11 +46,11 @@ function agentOptions() {
 }
 
 function activeAudio() {
-  const audio = vi.mocked(BrowserInterviewAudio).mock.results.at(-1)?.value;
+  const audio: unknown = vi.mocked(BrowserInterviewAudio).mock.results.at(-1)?.value;
 
   if (!audio) throw new Error("The audio lifecycle has not started");
 
-  return audio as BrowserInterviewAudio;
+  return vi.mocked(audio as BrowserInterviewAudio);
 }
 
 async function renderConnectedApp() {
@@ -87,8 +87,9 @@ describe("interview experience lifecycle", () => {
     expect(hard.checked).toBe(true);
     expect(standard.checked).toBe(false);
 
-    await act(() => {
+    await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Start 6-question interview" }));
+      await Promise.resolve();
     });
 
     expect(hard.disabled).toBe(true);
@@ -107,20 +108,20 @@ describe("interview experience lifecycle", () => {
     const { unmount } = await renderConnectedApp();
     const instances = vi
       .mocked(BrowserInterviewAudio)
-      .mock.results.map(({ value }) => value as BrowserInterviewAudio);
+      .mock.results.map(({ value }) => vi.mocked(value as BrowserInterviewAudio));
 
     expect(instances).toHaveLength(2);
-    expect(instances[0].stop).toHaveBeenCalledOnce();
-    expect(instances[1].stop).not.toHaveBeenCalled();
+    expect(vi.spyOn(instances[0], "stop")).toHaveBeenCalledOnce();
+    expect(vi.spyOn(instances[1], "stop")).not.toHaveBeenCalled();
     unmount();
-    expect(instances[1].stop).toHaveBeenCalledOnce();
+    expect(vi.spyOn(instances[1], "stop")).toHaveBeenCalledOnce();
   });
 
   it("does not start an interview after microphone setup is cancelled", async () => {
     await renderConnectedApp();
     const audio = activeAudio();
     const pending = Promise.withResolvers<boolean>();
-    vi.mocked(audio.start).mockReturnValueOnce(pending.promise);
+    vi.spyOn(audio, "start").mockReturnValueOnce(pending.promise);
 
     fireEvent.click(screen.getByRole("button", { name: "Start 6-question interview" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel start" }));
@@ -129,7 +130,7 @@ describe("interview experience lifecycle", () => {
       await pending.promise;
     });
 
-    expect(audio.stop).toHaveBeenCalledOnce();
+    expect(vi.spyOn(audio, "stop")).toHaveBeenCalledOnce();
     expect(socket.send).not.toHaveBeenCalled();
     expect(
       screen.getByRole<HTMLButtonElement>("button", { name: "Start 6-question interview" })
@@ -139,8 +140,9 @@ describe("interview experience lifecycle", () => {
 
   it("closes typed answers and disables capture when evaluation begins", async () => {
     await renderConnectedApp();
-    await act(() => {
+    await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Start 6-question interview" }));
+      await Promise.resolve();
     });
     act(() =>
       agentOptions().onMessage?.(
@@ -162,6 +164,6 @@ describe("interview experience lifecycle", () => {
     );
 
     expect(typeAnswer.getAttribute("aria-expanded")).toBe("false");
-    expect(activeAudio().setListening).toHaveBeenLastCalledWith(false);
+    expect(vi.spyOn(activeAudio(), "setListening")).toHaveBeenLastCalledWith(false);
   });
 });

@@ -91,7 +91,9 @@ function requestBearerToken(request: Request): string | null {
 }
 
 function clientIp(request: Request): string {
-  return request.headers.get("CF-Connecting-IP")?.trim() || "unknown";
+  const ip = request.headers.get("CF-Connecting-IP")?.trim();
+
+  return ip === "" ? "unknown" : (ip ?? "unknown");
 }
 
 async function verifyDeviceToken(provided: string | null, expected: string): Promise<boolean> {
@@ -267,6 +269,8 @@ export function createWorker<E extends WorkerEnv>(routeAgentRequest: AgentRouter
             Upgrade: "websocket",
           });
         }
+
+        return undefined;
       },
       onBeforeConnect: async (upgradeRequest, lobby) => {
         if (!supportedInterviewerLobby(lobby)) {
@@ -301,7 +305,7 @@ export function createWorker<E extends WorkerEnv>(routeAgentRequest: AgentRouter
             return errorResponse("rate_limited", 429, { "Retry-After": "60" });
           }
 
-          return;
+          return undefined;
         }
 
         // Preserve the device protocol while allowing browser-incompatible
@@ -312,6 +316,8 @@ export function createWorker<E extends WorkerEnv>(routeAgentRequest: AgentRouter
         if (!(await verifyDeviceToken(deviceToken, env.DEVICE_TOKEN))) {
           return unauthorizedResponse();
         }
+
+        return undefined;
       },
     });
 

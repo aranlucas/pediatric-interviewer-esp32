@@ -149,9 +149,7 @@ export class BrowserInterviewAudio {
       this.silentGain.gain.value = 0;
       this.captureSource.connect(this.captureNode);
       this.captureNode.connect(this.silentGain).connect(context.destination);
-      this.captureNode.port.onmessage = (
-        event: MessageEvent<CaptureFrame>,
-      ) => {
+      this.captureNode.port.onmessage = (event: MessageEvent<CaptureFrame>) => {
         this.handleCapture(event.data);
       };
 
@@ -261,7 +259,7 @@ export class BrowserInterviewAudio {
 
     this.playbackQueue.push({ data, sampleRate });
 
-    if (!this.playbackDrain) this.playbackDrain = this.drainPlayback();
+    this.playbackDrain ??= this.drainPlayback();
 
     try {
       await this.playbackDrain;

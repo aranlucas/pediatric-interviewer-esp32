@@ -118,12 +118,13 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     };
     runtime.openingStage = "warming_up";
     runtime.connecting = true;
-    runtime.scheduleGeminiReconnect = vi.fn();
+    const scheduleGeminiReconnect = vi.fn<typeof runtime.scheduleGeminiReconnect>();
+    runtime.scheduleGeminiReconnect = scheduleGeminiReconnect;
 
     runtime.onConnect(replacement);
 
     expect(runtime.device).toBe(replacement);
-    expect(runtime.scheduleGeminiReconnect).toHaveBeenCalledWith(replacement, "client reconnected");
+    expect(scheduleGeminiReconnect).toHaveBeenCalledWith(replacement, "client reconnected");
   });
 
   it("rejects a new start while report finalization is in flight", async () => {
@@ -178,7 +179,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         activeQuestion: "What else would you evaluate?",
       },
     };
-    runtime.finishInterview = vi.fn(() => {
+    const finishInterview = vi.fn<typeof runtime.finishInterview>(() => {
       runtime.state = {
         ...runtime.state,
         phase: "complete",
@@ -186,6 +187,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       };
       return Promise.resolve();
     });
+    runtime.finishInterview = finishInterview;
 
     const response = await interviewer.onRequest(
       new Request("https://example.test/recover-report", { method: "POST" }),
@@ -193,7 +195,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, reportId: "pending-only-report" });
-    expect(runtime.finishInterview).toHaveBeenCalledOnce();
+    expect(finishInterview).toHaveBeenCalledOnce();
   });
 
   it("ends into evaluation when only a durable probed answer has been saved", async () => {
@@ -211,12 +213,13 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         activeQuestion: "What else would you evaluate?",
       },
     };
-    runtime.finishInterview = vi.fn().mockResolvedValue(undefined);
+    const finishInterview = vi.fn<typeof runtime.finishInterview>().mockResolvedValue(undefined);
+    runtime.finishInterview = finishInterview;
 
     await interviewer.onMessage(activeConnection, JSON.stringify({ type: "end_call" }));
 
     expect(runtime.state.phase).toBe("evaluating");
-    expect(runtime.finishInterview).toHaveBeenCalledOnce();
+    expect(finishInterview).toHaveBeenCalledOnce();
   });
 
   it("materializes a durable partial exchange once in the immutable report snapshot", () => {
@@ -335,7 +338,8 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     runtime.inputTranscript = "";
     runtime.turnProducedAudio = true;
     runtime.turnAudioDeliveryFailed = false;
-    runtime.askGemini = vi.fn();
+    const askGemini = vi.fn<typeof runtime.askGemini>();
+    runtime.askGemini = askGemini;
 
     await runtime.finishGeminiTurn(activeConnection, 17);
 
@@ -347,7 +351,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       "How would you assess this child's immediate needs?",
     );
     expect(runtime.state.exchanges).toHaveLength(0);
-    expect(runtime.askGemini).not.toHaveBeenCalled();
+    expect(askGemini).not.toHaveBeenCalled();
     expect(decodeFrames(sent).filter((payload) => payload.type === "transcript_end")).toEqual([
       {
         type: "transcript_end",
@@ -381,15 +385,16 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     runtime.inputTranscript = "";
     runtime.turnProducedAudio = true;
     runtime.turnAudioDeliveryFailed = false;
-    runtime.askGemini = vi.fn();
+    const askGemini = vi.fn<typeof runtime.askGemini>();
+    runtime.askGemini = askGemini;
 
     await runtime.finishGeminiTurn(activeConnection, 16);
 
-    expect(runtime.askGemini).toHaveBeenCalledOnce();
-    expect(runtime.askGemini).toHaveBeenCalledWith(
+    expect(askGemini).toHaveBeenCalledOnce();
+    expect(askGemini).toHaveBeenCalledWith(
       activeConnection,
       expect.objectContaining({
-        turns: expect.stringContaining("BEGIN_INTERVIEW"),
+        turns: expect.stringContaining("BEGIN_INTERVIEW") as string,
         turnComplete: true,
       }),
     );
@@ -447,11 +452,12 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     runtime.inputTranscript = "";
     runtime.turnProducedAudio = false;
     runtime.turnAudioDeliveryFailed = false;
-    runtime.askGemini = vi.fn();
+    const askGemini = vi.fn<typeof runtime.askGemini>();
+    runtime.askGemini = askGemini;
 
     await runtime.finishGeminiTurn(activeConnection, 18);
 
-    expect(runtime.askGemini).not.toHaveBeenCalled();
+    expect(askGemini).not.toHaveBeenCalled();
     expect(openingSpeechMocks.synthesize).toHaveBeenCalledWith(
       "test-gemini-key",
       "What is your initial assessment?",
@@ -492,7 +498,8 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     runtime.inputTranscript = "";
     runtime.turnProducedAudio = true;
     runtime.turnAudioDeliveryFailed = false;
-    runtime.askGemini = vi.fn();
+    const askGemini = vi.fn<typeof runtime.askGemini>();
+    runtime.askGemini = askGemini;
 
     await runtime.finishGeminiTurn(activeConnection, 19);
 
@@ -503,10 +510,10 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       casePresentation: "Here is your case. A four-year-old presents with pain.",
       exchanges: [],
     });
-    expect(runtime.askGemini).toHaveBeenCalledOnce();
-    expect(runtime.askGemini).toHaveBeenCalledWith(
+    expect(askGemini).toHaveBeenCalledOnce();
+    expect(askGemini).toHaveBeenCalledWith(
       activeConnection,
-      expect.objectContaining({ turns: expect.stringContaining("BEGIN_INTERVIEW") }),
+      expect.objectContaining({ turns: expect.stringContaining("BEGIN_INTERVIEW") as string }),
     );
     expect(decodeFrames(sent)).toContainEqual({
       type: "playback_interrupt",
@@ -544,9 +551,10 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     expect(runtime.openingStage).toBe("asking_first_question");
 
     const replacement = connection("replacement", []);
-    runtime.scheduleGeminiReconnect = vi.fn();
+    const scheduleGeminiReconnect = vi.fn<typeof runtime.scheduleGeminiReconnect>();
+    runtime.scheduleGeminiReconnect = scheduleGeminiReconnect;
     runtime.onConnect(replacement);
-    expect(runtime.scheduleGeminiReconnect).toHaveBeenCalledWith(replacement, "client reconnected");
+    expect(scheduleGeminiReconnect).toHaveBeenCalledWith(replacement, "client reconnected");
   });
 
   it("asks the first clinical question directly after a fresh Live reconnect", () => {
@@ -571,7 +579,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
 
     expect(session.sendRealtimeInput).toHaveBeenCalledOnce();
     expect(session.sendRealtimeInput).toHaveBeenCalledWith({
-      text: expect.stringContaining("BEGIN_INTERVIEW"),
+      text: expect.stringContaining("BEGIN_INTERVIEW") as string,
     });
     expect(openingSpeechMocks.synthesize).not.toHaveBeenCalled();
     expect(runtime.openingStage).toBe("asking_first_question");
@@ -590,11 +598,12 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     runtime.handleGeminiMessage = vi.fn(() => {
       throw new Error("malformed provider PCM");
     });
-    runtime.handleGeminiTransportFailure = vi.fn();
+    const handleGeminiTransportFailure = vi.fn<typeof runtime.handleGeminiTransportFailure>();
+    runtime.handleGeminiTransportFailure = handleGeminiTransportFailure;
 
     runtime.handleGeminiMessageSafely({}, 18, activeConnection);
 
-    expect(runtime.handleGeminiTransportFailure).toHaveBeenCalledWith(
+    expect(handleGeminiTransportFailure).toHaveBeenCalledWith(
       activeConnection,
       18,
       "message_callback_failed",
@@ -609,7 +618,8 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       runtime.device = activeConnection;
       runtime.state = { ...runtime.state, phase: "interviewing" };
       runtime.liveGeneration = 20;
-      runtime.handleGeminiTransportFailure = vi.fn();
+      const handleGeminiTransportFailure = vi.fn<typeof runtime.handleGeminiTransportFailure>();
+      runtime.handleGeminiTransportFailure = handleGeminiTransportFailure;
 
       expect(() =>
         runtime.runGeminiCallbackSafely(operation, 20, activeConnection, () => {
@@ -617,7 +627,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         }),
       ).not.toThrow();
 
-      expect(runtime.handleGeminiTransportFailure).toHaveBeenCalledWith(
+      expect(handleGeminiTransportFailure).toHaveBeenCalledWith(
         activeConnection,
         20,
         `${operation}_callback_failed`,
@@ -647,21 +657,23 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     runtime.openingStage = "complete";
     runtime.liveGeneration = 21;
     runtime.pendingProviderTurn = pending;
-    runtime.clearResumptionHandle = vi.fn(() => true);
+    const clearResumptionHandle = vi.fn<typeof runtime.clearResumptionHandle>(() => true);
+    runtime.clearResumptionHandle = clearResumptionHandle;
     runtime.finishGeminiTurn = vi.fn().mockRejectedValue(new Error("finalization failed"));
-    runtime.handleGeminiTransportFailure = vi.fn();
+    const handleGeminiTransportFailure = vi.fn<typeof runtime.handleGeminiTransportFailure>();
+    runtime.handleGeminiTransportFailure = handleGeminiTransportFailure;
 
     runtime.handleGeminiMessage({ serverContent: { turnComplete: true } }, 21);
 
     await vi.waitFor(() => {
-      expect(runtime.handleGeminiTransportFailure).toHaveBeenCalledWith(
+      expect(handleGeminiTransportFailure).toHaveBeenCalledWith(
         activeConnection,
         21,
         "turn_finalization_failed",
       );
     });
     expect(runtime.pendingProviderTurn).toBe(pending);
-    expect(runtime.clearResumptionHandle).toHaveBeenCalledWith("turn-finalization-generation");
+    expect(clearResumptionHandle).toHaveBeenCalledWith("turn-finalization-generation");
     expect(decodeFrames(sent)).toContainEqual({
       type: "turn_recovery",
       action: "retrying",
@@ -691,12 +703,13 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       runtime.device = activeConnection;
       runtime.liveGeneration = 8;
       runtime.pendingProviderTurn = pending;
-      runtime.handleGeminiTransportFailure = vi.fn();
+      const handleGeminiTransportFailure = vi.fn<typeof runtime.handleGeminiTransportFailure>();
+      runtime.handleGeminiTransportFailure = handleGeminiTransportFailure;
 
       runtime.armProviderResponseDeadline(pending, 8);
       vi.advanceTimersByTime(PROVIDER_RESPONSE_TIMEOUT_MS);
 
-      expect(runtime.handleGeminiTransportFailure).toHaveBeenCalledWith(
+      expect(handleGeminiTransportFailure).toHaveBeenCalledWith(
         activeConnection,
         8,
         "response_timeout",
@@ -729,7 +742,8 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       runtime.device = activeConnection;
       runtime.liveGeneration = 13;
       runtime.pendingProviderTurn = pending;
-      runtime.handleGeminiTransportFailure = vi.fn();
+      const handleGeminiTransportFailure = vi.fn<typeof runtime.handleGeminiTransportFailure>();
+      runtime.handleGeminiTransportFailure = handleGeminiTransportFailure;
 
       runtime.armProviderResponseDeadline(pending, 13);
       vi.advanceTimersByTime(PROVIDER_RESPONSE_TIMEOUT_MS - 1);
@@ -739,9 +753,9 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       );
       vi.advanceTimersByTime(PROVIDER_RESPONSE_TIMEOUT_MS - 1);
 
-      expect(runtime.handleGeminiTransportFailure).not.toHaveBeenCalled();
+      expect(handleGeminiTransportFailure).not.toHaveBeenCalled();
       vi.advanceTimersByTime(1);
-      expect(runtime.handleGeminiTransportFailure).toHaveBeenCalledWith(
+      expect(handleGeminiTransportFailure).toHaveBeenCalledWith(
         activeConnection,
         13,
         "response_timeout",
@@ -943,7 +957,7 @@ describe("PediatricInterviewer lifecycle ownership", () => {
           id: "probe-cap-call",
           name: "record_turn_disposition",
           response: {
-            output: expect.stringContaining("latest answer will become exchange 1"),
+            output: expect.stringContaining("latest answer will become exchange 1") as string,
           },
         }),
       ],
@@ -968,11 +982,12 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       interviewGeneration: "interview-current",
     };
     runtime.pendingProviderTurn = pending;
-    runtime.clearResumptionHandle = vi.fn(() => true);
+    const clearResumptionHandle = vi.fn<typeof runtime.clearResumptionHandle>(() => true);
+    runtime.clearResumptionHandle = clearResumptionHandle;
 
     runtime.preparePendingTurnForReconnect(undefined);
 
-    expect(runtime.clearResumptionHandle).toHaveBeenCalledWith("interview-current");
+    expect(clearResumptionHandle).toHaveBeenCalledWith("interview-current");
     expect(runtime.pendingProviderTurn).toBeUndefined();
   });
 
@@ -1127,14 +1142,15 @@ describe("PediatricInterviewer lifecycle ownership", () => {
       },
     };
     await runtime.onStart();
-    runtime.askGemini = vi.fn();
+    const askGemini = vi.fn<typeof runtime.askGemini>();
+    runtime.askGemini = askGemini;
 
     expect(runtime.authoritativeRecoveryQuestion()).toBe(pendingProbe);
     runtime.resumeFreshGeminiSession(activeConnection);
 
-    expect(runtime.askGemini).toHaveBeenCalledOnce();
+    expect(askGemini).toHaveBeenCalledOnce();
 
-    const turn = vi.mocked(runtime.askGemini).mock.calls[0]?.[1];
+    const turn = askGemini.mock.calls[0]?.[1];
 
     if (!turn) throw new Error("Expected a recovery turn");
 
@@ -1170,12 +1186,12 @@ describe("PediatricInterviewer lifecycle ownership", () => {
         31,
       );
 
-      const rejection = expect(attempt).rejects.toThrow(
-        `Gemini Live setup exceeded ${GEMINI_CONNECT_TIMEOUT_MS} ms`,
-      );
-
-      await vi.advanceTimersByTimeAsync(GEMINI_CONNECT_TIMEOUT_MS);
-      await rejection;
+      await Promise.all([
+        expect(attempt).rejects.toThrow(
+          `Gemini Live setup exceeded ${GEMINI_CONNECT_TIMEOUT_MS} ms`,
+        ),
+        vi.advanceTimersByTimeAsync(GEMINI_CONNECT_TIMEOUT_MS),
+      ]);
       resolveConnect?.(lateSession);
       await Promise.resolve();
       await Promise.resolve();

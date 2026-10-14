@@ -18,10 +18,7 @@ function json(data: ErrorResponse, status: number): Response {
 }
 
 export function createReportDownloadHandler(environment: () => Promise<ReportDownloadEnv | null>) {
-  return async function GET(
-    request: Request,
-    { params }: ReportRouteContext,
-  ): Promise<Response> {
+  return async function GET(request: Request, { params }: ReportRouteContext): Promise<Response> {
     const { reportId } = await params;
     const kind = new URL(request.url).searchParams.get("kind");
 

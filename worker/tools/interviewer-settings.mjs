@@ -1,5 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
+
+/** @typedef {{ path: string, source: string }} ConfigFile */
 
 const toolDirectory = import.meta.dirname;
 
@@ -8,6 +11,10 @@ const defaultConfigPath = path.resolve(
   "../../firmware/angry_cat_pediatric_interviewer/interviewer_config.h",
 );
 
+/**
+ * @param {string} source
+ * @param {string} name
+ */
 function stringConstant(source, name) {
   const assignment = source.match(
     new RegExp(
@@ -18,20 +25,33 @@ function stringConstant(source, name) {
   if (!assignment) return null;
 
   return [...assignment[1].matchAll(/"((?:\\\\.|[^"\\\\])*)"/g)]
-    .map((match) => JSON.parse(`"${match[1]}"`))
+    .map((match) => z.string().parse(JSON.parse(`"${match[1]}"`)))
     .join("");
 }
 
+/**
+ * @param {string} source
+ * @param {string} name
+ */
 function alias(source, name) {
   return source.match(new RegExp(`^#define\\s+${name}\\s+(\\w+)`, "m"))?.[1] ?? null;
 }
 
+/**
+ * @param {string} source
+ * @param {string} configPath
+ */
 function includes(source, configPath) {
   return [...source.matchAll(/^#include\s+"([^"]+)"/gm)].map((match) =>
     path.resolve(path.dirname(configPath), match[1]),
   );
 }
 
+/**
+ * @param {string} configPath
+ * @param {Set<string>} visited
+ * @returns {Promise<ConfigFile[]>}
+ */
 async function readConfigTree(configPath, visited = new Set()) {
   if (visited.has(configPath)) return [];
   visited.add(configPath);
@@ -46,7 +66,16 @@ async function readConfigTree(configPath, visited = new Set()) {
   return files;
 }
 
-function resolveConstant(files, name) {
+/**
+ * @param {ConfigFile[]} files
+ * @param {string} name
+ * @param {Set<string>} visited
+ * @returns {string}
+ */
+function resolveConstant(files, name, visited = new Set()) {
+  if (visited.has(name)) throw new Error(`Circular interviewer configuration alias: ${name}`);
+  visited.add(name);
+
   for (const file of files) {
     const value = stringConstant(file.source, name);
 
@@ -56,7 +85,7 @@ function resolveConstant(files, name) {
   for (const file of files) {
     const target = alias(file.source, name);
 
-    if (target) return resolveConstant(files, target);
+    if (target) return resolveConstant(files, target, visited);
   }
 
   throw new Error(`Could not read ${name} from the interviewer configuration`);

@@ -6,8 +6,8 @@
     "lint": "pnpm --dir worker lint && pnpm --dir web lint",
     "dev": "pnpm --parallel --filter ./web --filter ./worker run dev",
     "lint:fix": "oxlint --fix",
-    "format": "oxfmt --write",
-    "format:check": "oxfmt --check",
+    "format": "oxfmt --config oxfmt.config.ts --write .",
+    "format:check": "oxfmt --config oxfmt.config.ts --check .",
     "lint:oxforge": "oxlint"
   },
   "devDependencies": {

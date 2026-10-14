@@ -1,6 +1,10 @@
 "use client";
 
-import { parseInterviewMessage, parseInterviewStatus } from "@/lib/interview-messages";
+import {
+  interviewMessageText,
+  parseInterviewMessage,
+  parseInterviewStatus,
+} from "@/lib/interview-messages";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -178,35 +182,33 @@ function InterviewExperience({
     audioRef.current?.setListening(shouldCaptureInterviewAudio(statusRef.current, open));
   }, []);
 
-  const updateStatus = useCallback((next: InterviewStatus) => {
-    statusRef.current = next;
-    setStatus(next);
+  const updateStatus = useCallback(
+    (next: InterviewStatus) => {
+      statusRef.current = next;
+      setStatus(next);
 
-    if (next === "evaluating" || next === "complete") updateTextComposerOpen(false);
-  }, [updateTextComposerOpen]);
+      if (next === "evaluating" || next === "complete") updateTextComposerOpen(false);
+    },
+    [updateTextComposerOpen],
+  );
 
   useEffect(() => {
     if (textComposerOpen) typedAnswerRef.current?.focus();
   }, [textComposerOpen]);
 
-  const sendJson = useCallback(
-    (
-      message: InterviewCommand,
-    ): boolean => {
-      const socket = agentRef.current;
+  const sendJson = useCallback((message: InterviewCommand): boolean => {
+    const socket = agentRef.current;
 
-      if (!socket || socket.readyState !== (socket.OPEN ?? 1)) return false;
+    if (!socket || socket.readyState !== (socket.OPEN ?? 1)) return false;
 
-      try {
-        socket.send(JSON.stringify(message));
+    try {
+      socket.send(JSON.stringify(message));
 
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    [],
-  );
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   const sendAudio = useCallback((data: ArrayBuffer) => {
     const socket = agentRef.current;
@@ -282,7 +284,10 @@ function InterviewExperience({
       const data = event.data;
 
       if (data instanceof ArrayBuffer) {
-        void handleAudioFrame(data);
+        void handleAudioFrame(data).catch(() => {
+          setAudioAvailable(false);
+          setError("Examiner audio could not be decoded. Continue with typed answers.");
+        });
 
         return;
       }
@@ -317,22 +322,22 @@ function InterviewExperience({
         } else if (message.type === "playback_interrupt") {
           audioRef.current?.interruptPlayback();
         } else if (message.type === "transcript" && message.role === "user") {
-          appendTranscript("candidate", String(message.text ?? ""));
+          appendTranscript("candidate", interviewMessageText(message.text));
         } else if (message.type === "transcript_end" && message.role === "assistant") {
-          appendTranscript("examiner", String(message.text ?? ""));
+          appendTranscript("examiner", interviewMessageText(message.text));
         } else if (message.type === "error") {
           audioRef.current?.interruptPlayback();
           audioRef.current?.setListening(false);
-          setError(String(message.message ?? "The interviewer encountered an error."));
+          setError(interviewMessageText(message.message, "The interviewer encountered an error."));
           updateStatus("error");
         } else if (message.type === "turn_recovery") {
           audioRef.current?.interruptPlayback();
           audioRef.current?.setListening(false);
           updateStatus("thinking");
           setError(
-            String(
-              message.message ??
-                "The examiner connection is recovering. Your saved progress is safe.",
+            interviewMessageText(
+              message.message,
+              "The examiner connection is recovering. Your saved progress is safe.",
             ),
           );
         } else if (message.type === "candidate_text_ack" && message.accepted === false) {
@@ -488,7 +493,7 @@ function InterviewExperience({
 
   const keepScreenAwake = interviewKeepsScreenAwake(status);
   useEffect(() => {
-    if (!keepScreenAwake) return;
+    if (!keepScreenAwake) return undefined;
 
     return holdScreenWakeLock({
       onStateChange: (wakeLockState) => {

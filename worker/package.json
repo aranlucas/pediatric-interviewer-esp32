@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "check": "pnpm lint && pnpm typecheck",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint . --fix",
-    "format": "oxfmt .",
-    "format:check": "oxfmt --check .",
+    "lint": "pnpm generate-types && oxlint .",
+    "lint:fix": "pnpm generate-types && oxlint . --fix",
+    "format": "oxfmt --config oxfmt.config.ts --write .",
+    "format:check": "oxfmt --config oxfmt.config.ts --check .",
     "deploy": "cf deploy",
     "dev": "portless run --name api.pediatric-interviewer-esp32 cf dev",
     "generate-types": "cf workers types",
@@ -16,7 +16,7 @@
     "simulate:suite": "node tools/simulate-suite.mjs",
     "smoke:web": "node tools/smoke-web.mjs",
     "test": "vitest run",
-    "typecheck": "pnpm generate-types && tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "pnpm generate-types && tsc --noEmit && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tools/tsconfig.json",
     "build": "cf build"
   },
   "dependencies": {
@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
+    "@types/ws": "8.18.1",
     "cf": "1.0.0-beta.13",
     "oxfmt": "^0.73.0",
     "oxlint": "^1.88.0",

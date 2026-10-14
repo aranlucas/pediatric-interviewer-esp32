@@ -29,7 +29,7 @@ describe("browser session token acquisition", () => {
     await expect(first).resolves.toEqual({
       room: ROOM,
       token: "signed-room-token",
-      expiresAt: expect.any(Number),
+      expiresAt: expect.any(Number) as number,
     });
     await expect(second).resolves.toMatchObject({ token: "signed-room-token" });
     expect(request).toHaveBeenCalledWith(

@@ -1,8 +1,11 @@
+import type { OxfmtConfig } from "oxfmt";
 import base from "@aranlucas/oxforge/format-config";
 
-const config = {
-  ...base,
-  ignorePatterns: [...(base.ignorePatterns ?? []), ...[".cloudflare/**", ".open-next/**"]],
+const baseConfig: OxfmtConfig = base;
+
+const config: OxfmtConfig = {
+  ...baseConfig,
+  ignorePatterns: [...(baseConfig.ignorePatterns ?? []), ".cloudflare/**", ".open-next/**"],
 };
 
 export default config;

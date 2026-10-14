@@ -21,3 +21,11 @@ export function parseInterviewStatus(value: z.infer<ReturnType<typeof z.json>> |
 
   return result.success ? result.data : null;
 }
+
+/** Only display textual protocol fields; nested JSON is not user-facing copy. */
+export function interviewMessageText(
+  value: z.infer<ReturnType<typeof z.json>> | undefined,
+  fallback = "",
+): string {
+  return typeof value === "string" ? value : fallback;
+}

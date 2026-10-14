@@ -19,7 +19,8 @@ export async function reportsEnvironment(): Promise<ReportsEnv | null> {
 }
 
 export function reportsTimezone(env: ReportsEnv): string {
-  const timezone = env.REPORTS_TIMEZONE?.trim() || DEFAULT_REPORTS_TIMEZONE;
+  const configuredTimezone = env.REPORTS_TIMEZONE?.trim();
+  const timezone = configuredTimezone ? configuredTimezone : DEFAULT_REPORTS_TIMEZONE;
 
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format();

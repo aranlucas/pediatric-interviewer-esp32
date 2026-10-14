@@ -11,6 +11,29 @@ import { promisify } from "node:util";
 import { WebSocket } from "ws";
 
 import { interviewerSettings } from "./interviewer-settings.mjs";
+import {
+  serverMessageSchema,
+  storedReportSchema,
+  webSocketBuffer,
+} from "./simulation-protocol.mjs";
+
+/** @typedef {import("./simulation-protocol.mjs").SimulationResult} SimulationResult */
+/** @typedef {import("./simulation-protocol.mjs").InterviewReport} InterviewReport */
+/** @typedef {import("./simulation-protocol.mjs").InterviewerSettings} InterviewerSettings */
+/** @typedef {Pick<SimulationResult, "answersSimulated" | "stoppedBeforeQuestion" | "phase">} Completion */
+/**
+ * @typedef {object} SimulationOptions
+ * @property {string} topic
+ * @property {number} turns
+ * @property {number} pauseMs
+ * @property {number} commitDelayMs
+ * @property {number} cafeNoisePercent
+ * @property {string} voice
+ * @property {number} rate
+ * @property {number} timeoutMs
+ * @property {boolean} waitReport
+ * @property {number} maxFollowUps
+ */
 
 const execFileAsync = promisify(execFile);
 
@@ -24,7 +47,13 @@ const frameDurationMs = 20;
 // seconds of speech. Anything materially below this means audio never played.
 const MINIMUM_OPENING_AUDIO_BYTES = 240_000; // ~5 s at 24 kHz mono 16-bit
 
-/** Throws with machine-readable context so a failure explains itself. */
+/**
+ * Throws with machine-readable context so a failure explains itself.
+ * @param {unknown} condition
+ * @param {string} message
+ * @param {unknown} context
+ * @returns {asserts condition}
+ */
 function assert(condition, message, context) {
   if (condition) return;
   throw new Error(`${message} :: ${JSON.stringify(context)}`);
@@ -77,6 +106,7 @@ The script reads INTERVIEWER_WS_URL and DEVICE_TOKEN when both are set.
 Otherwise it reads the firmware interviewer_config.h without printing secrets.`);
 }
 
+/** @param {string[]} argv */
 function parseArguments(argv) {
   const options = {
     topic: "behavior_guidance",
@@ -155,9 +185,14 @@ function parseArguments(argv) {
     throw new Error("--timeout-ms must be at least 30000");
   }
 
+  if (!Number.isInteger(options.maxFollowUps) || options.maxFollowUps < 0) {
+    throw new Error("--max-follow-ups must be a nonnegative integer");
+  }
+
   return options;
 }
 
+/** @param {string} baseUrl */
 function sessionUrl(baseUrl) {
   const url = new URL(baseUrl);
   url.pathname = `/agents/pediatric-interviewer/esp32-${crypto.randomBytes(4).toString("hex")}`;
@@ -165,6 +200,7 @@ function sessionUrl(baseUrl) {
   return url.toString();
 }
 
+/** @param {Buffer} buffer */
 function wavPcm(buffer) {
   let offset = 12;
 
@@ -179,6 +215,10 @@ function wavPcm(buffer) {
   throw new Error("Generated WAV file has no PCM data chunk");
 }
 
+/**
+ * @param {SimulationOptions} options
+ * @param {string} temporaryDirectory
+ */
 async function synthesizeAnswers(options, temporaryDirectory) {
   const answers = [];
 
@@ -227,6 +267,10 @@ const followUpAnswers = [
   "For safety I would review the medical history and contraindications first, monitor throughout, and I would review the patient afterward and escalate if the situation changed.",
 ];
 
+/**
+ * @param {SimulationOptions} options
+ * @param {string} temporaryDirectory
+ */
 async function synthesizeFollowUps(options, temporaryDirectory) {
   const parts = [];
 
@@ -253,6 +297,10 @@ async function synthesizeFollowUps(options, temporaryDirectory) {
   return parts;
 }
 
+/**
+ * @param {SimulationOptions} options
+ * @param {string} temporaryDirectory
+ */
 async function synthesizeCafeNoise(options, temporaryDirectory) {
   if (options.cafeNoisePercent === 0) return null;
   const aiff = path.join(temporaryDirectory, "cafe-chatter.aiff");
@@ -280,6 +328,12 @@ async function synthesizeCafeNoise(options, temporaryDirectory) {
   return wavPcm(fs.readFileSync(wav));
 }
 
+/**
+ * @param {Buffer} pcm
+ * @param {Buffer | null} background
+ * @param {number} percent
+ * @param {number} backgroundOffset
+ */
 function mixBackground(pcm, background, percent, backgroundOffset) {
   if (!background || percent <= 0) return { pcm, backgroundOffset };
   const mixed = Buffer.allocUnsafe(pcm.length);
@@ -297,20 +351,37 @@ function mixBackground(pcm, background, percent, backgroundOffset) {
   return { pcm: mixed, backgroundOffset };
 }
 
+/** @param {number} durationMs */
 function silence(durationMs) {
   return Buffer.alloc(Math.ceil(durationMs / frameDurationMs) * pcmFrameBytes);
 }
 
+/**
+ * @param {number} durationMs
+ * @returns {Promise<void>}
+ */
 function wait(durationMs) {
   return new Promise((resolve) => {
     setTimeout(resolve, durationMs);
   });
 }
 
+/**
+ * @param {SimulationOptions} options
+ * @param {Buffer[][]} answers
+ * @param {Buffer[]} followUps
+ * @param {InterviewerSettings} settings
+ * @param {Buffer | null} cafeNoise
+ * @returns {Promise<SimulationResult>}
+ */
 // oxlint-disable-next-line eslint/require-await -- preserve asynchronous rejection for synchronous simulator setup failures
 async function simulate(options, answers, followUps, settings, cafeNoise) {
   const startedAt = Date.now();
 
+  /**
+   * @param {string} event
+   * @param {Record<string, unknown>} details
+   */
   const log = (event, details = {}) => {
     console.log(JSON.stringify({ elapsedMs: Date.now() - startedAt, event, ...details }));
   };
@@ -326,6 +397,7 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
   // Probes the examiner asked on the question currently open, and across the
   // whole run. The examiner prompt and runtime cap probes at four per skillset.
   let followUpsOnCurrentQuestion = 0;
+  /** @type {number[]} */
   const followUpsPerQuestion = [];
   let candidateStreaming = false;
   let stopCandidateAudio = false;
@@ -333,17 +405,24 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
   let backgroundOffset = 0;
   let commitsSent = 0;
   let prematureStops = 0;
+  /** @type {InterviewReport | null} */
   let report = null;
+  /** @type {SimulationResult["candidateTranscripts"]} */
   const candidateTranscripts = [];
+  /** @type {SimulationResult["primaryQuestions"]} */
   const primaryQuestions = [];
+  /** @type {SimulationResult["turnCompletions"]} */
   const turnCompletions = [];
   let openingTurnCompletionCount = 0;
   let awaitingFirstQuestionCompletion = false;
   let firstQuestionReceived = false;
   let openingOnlyComplete = false;
   let openingCompletionTarget = 0;
+  /** @type {SimulationResult["openingTurns"]} */
   const openingTurns = [];
+  /** @type {SimulationResult["openingAudioFallbacks"]} */
   const openingAudioFallbacks = [];
+  /** @type {SimulationResult["firstQuestionTurn"]} */
   let firstQuestionTurn = null;
   let outputAudioFrames = 0;
   let outputAudioBytes = 0;
@@ -352,17 +431,15 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
   let turnOutputAudioBytes = 0;
   let turnOutputAudioPeak = 0;
   let turnOutputNonzeroSamples = 0;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
   let forcedCloseTimer;
   let endCallSent = false;
+  /** @type {Completion | null} */
   let partialCompletion = null;
-  let resolveRun;
-  let rejectRun;
+  /** @type {PromiseWithResolvers<SimulationResult>} */
+  const { promise: run, resolve: resolveRun, reject: rejectRun } = Promise.withResolvers();
 
-  const run = new Promise((resolve, reject) => {
-    resolveRun = resolve;
-    rejectRun = reject;
-  });
-
+  /** @param {unknown} reason */
   const fail = (reason) => {
     if (finished) return;
     finished = true;
@@ -377,6 +454,10 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     rejectRun(error);
   };
 
+  /**
+   * @param {Completion} result
+   * @param {{ sendEndCall?: boolean }} options
+   */
   const finish = (result, { sendEndCall = true } = {}) => {
     if (finished) return;
     finished = true;
@@ -426,6 +507,7 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     resolveRun(summary);
   };
 
+  /** @param {Completion} result */
   const requestPartialCompletion = (result) => {
     if (finished || partialCompletion) return;
     partialCompletion = result;
@@ -442,6 +524,7 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     log("partial_completion_requested", result);
   };
 
+  /** @param {Buffer} pcm */
   const sendPcm = async (pcm) => {
     for (let offset = 0; offset < pcm.length; offset += pcmFrameBytes) {
       if (stopCandidateAudio || socket.readyState !== WebSocket.OPEN) return;
@@ -454,6 +537,7 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     }
   };
 
+  /** @param {number} answerIndex */
   const sendAnswer = async (answerIndex) => {
     candidateStreaming = true;
     stopCandidateAudio = false;
@@ -579,16 +663,17 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
     );
   });
   socket.on("message", (data, binary) => {
+    const buffer = webSocketBuffer(data);
     if (binary) {
       outputAudioFrames += 1;
-      outputAudioBytes += data.length;
-      turnOutputAudioBytes += data.length;
-      maximumOutputFrameBytes = Math.max(maximumOutputFrameBytes, data.length);
+      outputAudioBytes += buffer.length;
+      turnOutputAudioBytes += buffer.length;
+      maximumOutputFrameBytes = Math.max(maximumOutputFrameBytes, buffer.length);
 
-      if (data.length % 2 !== 0) oddOutputFrames += 1;
+      if (buffer.length % 2 !== 0) oddOutputFrames += 1;
 
-      for (let offset = 0; offset + 1 < data.length; offset += 2) {
-        const sample = data.readInt16LE(offset);
+      for (let offset = 0; offset + 1 < buffer.length; offset += 2) {
+        const sample = buffer.readInt16LE(offset);
 
         if (sample !== 0) turnOutputNonzeroSamples += 1;
         turnOutputAudioPeak = Math.max(turnOutputAudioPeak, Math.abs(sample));
@@ -597,13 +682,16 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
       return;
     }
 
-    let message;
+    let parsed;
 
     try {
-      message = JSON.parse(data.toString());
+      parsed = serverMessageSchema.safeParse(JSON.parse(buffer.toString()));
     } catch {
       return;
     }
+
+    if (!parsed.success) return;
+    const message = parsed.data;
 
     if (message.type === "status") {
       log("status", { status: message.status, questionNumber });
@@ -718,6 +806,11 @@ async function simulate(options, answers, followUps, settings, cafeNoise) {
   return run;
 }
 
+/**
+ * @param {InterviewerSettings} settings
+ * @param {InterviewReport | null} report
+ * @param {number} expectedExchangeCount
+ */
 async function verifyStoredReport(settings, report, expectedExchangeCount) {
   assert(report?.reportId, "Interview completed without a saved report id", {
     expectedExchangeCount,
@@ -734,7 +827,7 @@ async function verifyStoredReport(settings, report, expectedExchangeCount) {
   assert(response.ok, `Stored report fetch returned ${response.status}`, {
     reportId: report.reportId,
   });
-  const stored = await response.json();
+  const stored = storedReportSchema.parse(await response.json());
   assert(stored.reportId === report.reportId, "Stored report id did not match", {
     expected: report.reportId,
     actual: stored.reportId,
@@ -947,7 +1040,14 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(JSON.stringify({ event: "simulation_failed", message: error.message }));
-  process.exitCode = 1;
-});
+main().catch(
+  /** @param {unknown} error */ (error) => {
+    console.error(
+      JSON.stringify({
+        event: "simulation_failed",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    process.exitCode = 1;
+  },
+);

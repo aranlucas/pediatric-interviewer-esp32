@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { convertToWranglerConfig, loadAndParseConfig } from "@cloudflare/config";
@@ -15,7 +16,9 @@ export async function prepareOpenNextConfig(mode?: string): Promise<string> {
     throw result.error;
   }
 
-  const config = convertToWranglerConfig(result.data);
+  const config = z
+    .looseObject({ assets: z.looseObject({}).optional() })
+    .parse(convertToWranglerConfig(result.data));
   config.assets = { ...config.assets, directory: assetsDirectory };
   // Keep the file beside .dev.vars so OpenNext's dev proxy loads local secrets.
   const configPath = resolve(".opennext-wrangler.json");

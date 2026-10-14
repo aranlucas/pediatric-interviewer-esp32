@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PEDIATRIC_TOPICS } from "../src/interview-content";
@@ -307,7 +308,7 @@ describe("Pediatric oral-board interviewer", () => {
         .sessionResumption,
     ).toEqual({ handle: "resume-token" });
 
-    const recoveryInstruction = String(
+    const recoveryInstruction = z.string().parse(
       geminiLiveConfig(PEDIATRIC_TOPICS[0], {
         recoveryContext: {
           casePresentation: "A four-year-old presents with pain.",
@@ -331,7 +332,9 @@ describe("Pediatric oral-board interviewer", () => {
       "Repeat the case only when the candidate explicitly asks",
     );
     expect(recoveryInstruction).toContain("when a RESUME_INTERVIEW command explicitly directs you");
-    expect(String(config.systemInstruction)).toContain("Never ask whether the candidate is ready");
+    expect(z.string().parse(config.systemInstruction)).toContain(
+      "Never ask whether the candidate is ready",
+    );
     expect(config.thinkingConfig).toEqual({
       thinkingLevel: "MINIMAL",
     });
@@ -354,12 +357,12 @@ describe("Pediatric oral-board interviewer", () => {
                 },
               },
               required: ["disposition"],
-            }),
+            }) as Record<string, unknown>,
           }),
         ],
       },
     ]);
-    const instruction = String(config.systemInstruction);
+    const instruction = z.string().parse(config.systemInstruction);
     expect(instruction).toContain("Topic: Behavior Guidance");
     expect(instruction).toContain("Temperament and cooperation potential");
     expect(instruction).toContain("WHAT AN EXAMINER LISTENS FOR");
@@ -467,9 +470,9 @@ describe("Pediatric oral-board interviewer", () => {
   it("configures a hard combo case for the requested question target", () => {
     const combo = buildInterviewTopic(["behavior_guidance", "pulp_therapy"]);
 
-    const instruction = String(
-      geminiLiveConfig(combo, { questionCount: 8, difficulty: "hard" }).systemInstruction,
-    );
+    const instruction = z
+      .string()
+      .parse(geminiLiveConfig(combo, { questionCount: 8, difficulty: "hard" }).systemInstruction);
 
     expect(instruction).toContain("Combo: Behavior Guidance + Pulp Therapy");
     expect(instruction).toContain("8-QUESTION PLAN");
@@ -514,13 +517,15 @@ describe("Pediatric oral-board interviewer", () => {
         exchanges: evaluation.exchanges.slice(0, 2),
       }).exchanges,
     ).toHaveLength(2);
-    expect(() => interviewEvaluationSchema.parse({ ...evaluation, exchanges: [] })).toThrow();
+    expect(() => interviewEvaluationSchema.parse({ ...evaluation, exchanges: [] })).toThrow(
+      /Too (?:small|big)/,
+    );
     expect(() =>
       interviewEvaluationSchema.parse({
         ...evaluation,
         exchanges: Array.from({ length: 11 }, () => evaluation.exchanges[0]),
       }),
-    ).toThrow();
+    ).toThrow(/Too (?:small|big)/);
   });
 
   it("accepts descriptive skillset labels longer than 120 characters", () => {
@@ -570,7 +575,7 @@ describe("Pediatric oral-board interviewer", () => {
     );
 
     expect(evaluation.exchanges).toHaveLength(3);
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const requestBody = parseGeminiRequest(fetchMock.mock.calls[0][1]?.body);
     // The model must not pad a short interview back up to the configured target.
     expect(requestBody.generationConfig.responseJsonSchema.properties.exchanges).toMatchObject({
       minItems: 3,
@@ -580,7 +585,10 @@ describe("Pediatric oral-board interviewer", () => {
       "This interview ended after 3 of 8 planned questions",
     );
     expect(requestBody.systemInstruction.parts[0].text).toContain("configured difficulty was hard");
-    expect(JSON.parse(requestBody.contents[0].parts[0].text).configuration).toEqual({
+    expect(
+      z.object({ configuration: z.json() }).parse(JSON.parse(requestBody.contents[0].parts[0].text))
+        .configuration,
+    ).toEqual({
       questionCount: 8,
       difficulty: "hard",
     });
@@ -618,12 +626,14 @@ describe("Pediatric oral-board interviewer", () => {
 
     expect(evaluation.exchanges[0]).toMatchObject(transcript[0]);
     const [requestUrl, requestInit] = fetchMock.mock.calls[0];
-    expect(String(requestUrl)).toContain("/models/gemini-3.5-flash-lite:generateContent");
+    expect(requestUrl instanceof Request ? requestUrl.url : requestUrl.toString()).toContain(
+      "/models/gemini-3.5-flash-lite:generateContent",
+    );
     expect(requestInit?.headers).toMatchObject({
       "x-goog-api-key": "test-gemini-key",
     });
     expect(requestInit?.signal).toBeInstanceOf(AbortSignal);
-    const requestBody = JSON.parse(String(requestInit?.body));
+    const requestBody = parseGeminiRequest(requestInit?.body);
     expect(requestBody.generationConfig).toMatchObject({
       responseMimeType: "application/json",
       maxOutputTokens: 8_192,
@@ -632,7 +642,9 @@ describe("Pediatric oral-board interviewer", () => {
       minItems: 6,
       maxItems: 6,
     });
-    const evaluationInput = JSON.parse(requestBody.contents[0].parts[0].text);
+    const evaluationInput = z
+      .object({ topic: z.object({ competencies: z.array(z.json()), blueprintWeight: z.number() }) })
+      .parse(JSON.parse(requestBody.contents[0].parts[0].text));
     expect(evaluationInput.topic.competencies).toHaveLength(6);
     expect(evaluationInput.topic.blueprintWeight).toBe(8);
   });
@@ -693,9 +705,11 @@ describe("Pediatric oral-board interviewer", () => {
     expect(evaluation.exchanges[0].followUps).toEqual(transcript[0].followUps);
     expect(evaluation.exchanges[1].followUps).toBeUndefined();
 
-    const requestBody = JSON.parse(String(vi.mocked(globalThis.fetch).mock.calls[0][1]?.body));
+    const requestBody = parseGeminiRequest(vi.mocked(globalThis.fetch).mock.calls[0][1]?.body);
 
-    const evaluationInput = JSON.parse(requestBody.contents[0].parts[0].text);
+    const evaluationInput = z
+      .object({ exchanges: z.array(z.object({ followUps: z.array(z.json()).optional() })) })
+      .parse(JSON.parse(requestBody.contents[0].parts[0].text));
     expect(evaluationInput.exchanges[0].followUps).toHaveLength(1);
     // Prompted content must be credited but must not score the same as
     // content the candidate volunteered.
@@ -727,8 +741,15 @@ describe("Pediatric oral-board interviewer", () => {
     );
 
     expect(built).toEqual(cheatsheet);
-    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-    const input = JSON.parse(requestBody.contents[0].parts[0].text);
+    const requestBody = parseGeminiRequest(fetchMock.mock.calls[0][1]?.body);
+    const input = z
+      .object({
+        probedExchangeCount: z.number(),
+        exchanges: z.array(
+          z.object({ probesNeeded: z.number(), probeQuestions: z.array(z.string()) }),
+        ),
+      })
+      .parse(JSON.parse(requestBody.contents[0].parts[0].text));
     expect(input.probedExchangeCount).toBe(1);
     expect(input.exchanges[0].probesNeeded).toBe(1);
     expect(input.exchanges[0].probeQuestions).toEqual(["What would change that plan?"]);
@@ -907,8 +928,7 @@ describe("Pediatric oral-board interviewer", () => {
       }),
     };
 
-    const retry = async <T>(operation: (attempt: number) => Promise<T>): Promise<T> =>
-      await operation(1);
+    const retry = <T>(operation: (attempt: number) => Promise<T>): Promise<T> => operation(1);
 
     const casePresentation =
       "Here is your case. A four-year-old presents with swelling around a restored molar.";
@@ -938,7 +958,9 @@ describe("Pediatric oral-board interviewer", () => {
       "pediatric-oral-boards/reports/report-snapshot-cheatsheet.md",
     ]);
 
-    const storedJson = JSON.parse(stored.find(({ key }) => key.endsWith(".json"))?.value ?? "{}");
+    const storedJson = z
+      .object({ casePresentation: z.string() })
+      .parse(JSON.parse(stored.find(({ key }) => key.endsWith(".json"))?.value ?? "{}"));
 
     expect(storedJson.casePresentation).toBe(casePresentation);
     const storedMarkdown = stored.find(({ key }) => key.endsWith(".md"))?.value ?? "";
@@ -1210,3 +1232,17 @@ describe("provider error retry boundary", () => {
 type ReportWrite = { key: string; value: string };
 
 type ReportWriteWithOptions = ReportWrite & { options: R2PutOptions };
+
+function parseGeminiRequest(body: RequestInit["body"]) {
+  const parts = z.object({ parts: z.array(z.object({ text: z.string() })) });
+
+  return z
+    .object({
+      generationConfig: z.looseObject({
+        responseJsonSchema: z.object({ properties: z.object({ exchanges: z.json().optional() }) }),
+      }),
+      systemInstruction: parts,
+      contents: z.array(parts),
+    })
+    .parse(JSON.parse(z.string().parse(body)));
+}

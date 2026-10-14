@@ -6,21 +6,34 @@ import path from "node:path";
 
 import { simulatePlaybackBuffer } from "./audio-buffer-model.mjs";
 import { interviewerSettings } from "./interviewer-settings.mjs";
+import { simulationCompleteSchema, storedReportSchema } from "./simulation-protocol.mjs";
+
+/** @typedef {import("./simulation-protocol.mjs").SimulationResult} SimulationResult */
+/** @typedef {import("./simulation-protocol.mjs").InterviewerSettings} InterviewerSettings */
 
 const toolDirectory = import.meta.dirname;
 
 const projectDirectory = path.dirname(toolDirectory);
 
+/**
+ * @param {unknown} condition
+ * @param {string} message
+ * @returns {asserts condition}
+ */
 function requireCondition(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+/** @param {string} value */
 function normalized(value) {
-  return String(value)
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, " ");
+  return value.toLowerCase().replaceAll(/[^a-z0-9]+/g, " ");
 }
 
+/**
+ * @param {string} name
+ * @param {string[]} arguments_
+ * @returns {Promise<SimulationResult>}
+ */
 function runLiveSimulation(name, arguments_) {
   return new Promise((resolve, reject) => {
     console.log(JSON.stringify({ event: "gate_started", gate: name }));
@@ -33,31 +46,42 @@ function runLiveSimulation(name, arguments_) {
 
     let pending = "";
     let stderr = "";
+    /** @type {SimulationResult | null} */
     let summary = null;
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      pending += chunk;
-      const lines = pending.split("\n");
-      pending = lines.pop() ?? "";
+    child.stdout.on(
+      "data",
+      /** @param {string} chunk */ (chunk) => {
+        pending += chunk;
+        const lines = pending.split("\n");
+        pending = lines.pop() ?? "";
 
-      for (const line of lines) {
-        try {
-          const message = JSON.parse(line);
+        for (const line of lines) {
+          try {
+            const parsed = simulationCompleteSchema.safeParse(JSON.parse(line));
 
-          if (message.event === "simulation_complete") summary = message;
-        } catch {
-          // Useful simulator output is JSON; ignore incomplete diagnostic text.
+            if (parsed.success) summary = parsed.data;
+          } catch {
+            // Useful simulator output is JSON; ignore incomplete diagnostic text.
+          }
         }
-      }
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
+      },
+    );
+    child.stderr.on(
+      "data",
+      /** @param {string} chunk */ (chunk) => {
+        stderr += chunk;
+      },
+    );
     child.on("error", reject);
     child.on("close", (code) => {
       if (code !== 0 || !summary) {
-        reject(new Error(`${name} simulator failed (${code}): ${stderr.trim() || pending.trim()}`));
+        reject(
+          new Error(
+            `${name} simulator failed (${code ?? "signal"}): ${stderr.trim() || pending.trim()}`,
+          ),
+        );
 
         return;
       }
@@ -67,6 +91,10 @@ function runLiveSimulation(name, arguments_) {
   });
 }
 
+/**
+ * @param {InterviewerSettings} connection
+ * @param {SimulationResult["report"]} report
+ */
 async function verifyStoredReport(connection, report) {
   requireCondition(report?.reportId, "full interview did not return a report id");
   const url = new URL(connection.baseUrl);
@@ -80,9 +108,14 @@ async function verifyStoredReport(connection, report) {
 
   requireCondition(response.ok, `stored report fetch returned ${response.status}`);
 
-  return response.json();
+  return storedReportSchema.parse(await response.json());
 }
 
+/**
+ * @template T
+ * @param {string} name
+ * @param {() => T | Promise<T>} operation
+ */
 async function runGate(name, operation) {
   const startedAt = Date.now();
 
@@ -104,7 +137,7 @@ async function runGate(name, operation) {
       gate: name,
       status: "failed",
       durationMs: Date.now() - startedAt,
-      error: error.message,
+      error: error instanceof Error ? error.message : String(error),
     };
 
     console.error(JSON.stringify({ event: "gate_complete", ...result }));
@@ -213,6 +246,7 @@ async function main() {
       );
       requireCondition(result.prematureStops === 0, "a candidate answer stopped prematurely");
       requireCondition(result.outputAudio.oddFrames === 0, "received malformed PCM frame");
+      requireCondition(result.report, "full interview did not return a report");
       const stored = await verifyStoredReport(connection, result.report);
       requireCondition(
         stored.evaluation?.exchanges?.length === 6,
@@ -250,7 +284,14 @@ async function main() {
   if (failed.length > 0) process.exitCode = 1;
 }
 
-main().catch((error) => {
-  console.error(JSON.stringify({ event: "suite_failed", message: error.message }));
-  process.exitCode = 1;
-});
+main().catch(
+  /** @param {unknown} error */ (error) => {
+    console.error(
+      JSON.stringify({
+        event: "suite_failed",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    process.exitCode = 1;
+  },
+);
