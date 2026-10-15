@@ -2,6 +2,7 @@
   "name": "angry-cat-pediatric-interviewer",
   "private": true,
   "scripts": {
+    "prepare": "husky",
     "typecheck": "pnpm --dir worker typecheck && pnpm --dir web typecheck",
     "lint": "pnpm --dir worker lint && pnpm --dir web lint",
     "dev": "pnpm --parallel --filter ./web --filter ./worker run dev",
@@ -12,10 +13,21 @@
   },
   "devDependencies": {
     "@aranlucas/oxforge": "^0.2.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
     "oxfmt": "^0.73.0",
     "oxlint": "^1.88.0",
     "oxlint-tsgolint": "^7.0.2004",
     "portless": "0.15.7"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}": [
+      "oxlint --fix",
+      "oxfmt --config oxfmt.config.ts --no-error-on-unmatched-pattern"
+    ],
+    "*.{json,jsonc,json5,css,scss,md,mdx,yml,yaml,html,toml,vue,graphql}": [
+      "oxfmt --config oxfmt.config.ts --no-error-on-unmatched-pattern"
+    ]
   },
   "packageManager": "pnpm@12.10.1"
 }
