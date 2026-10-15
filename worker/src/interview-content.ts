@@ -292,11 +292,3 @@ export const PEDIATRIC_TOPICS = [
 export type PediatricTopic = (typeof PEDIATRIC_TOPICS)[number];
 
 export type PediatricTopicId = PediatricTopic["id"];
-
-export function findTopic(value: string | null | undefined): PediatricTopic {
-  return PEDIATRIC_TOPICS.find((topic) => topic.id === value) ?? PEDIATRIC_TOPICS[0];
-}
-
-export function knownTopic(value: string | null | undefined): PediatricTopic | null {
-  return PEDIATRIC_TOPICS.find((topic) => topic.id === value) ?? null;
-}
