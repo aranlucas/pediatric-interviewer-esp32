@@ -49,10 +49,9 @@ and CI validation use `cf deploy --prebuilt`. The Wrangler dependency and
 `wrangler.config.ts` remain required for this bundler; the hand-maintained
 `wrangler.jsonc` has been removed.
 
-The pnpm patch in `patches/@opennextjs__cloudflare@1.20.9.patch` includes
-Next.js 16.4's required `preview-props.json` in OpenNext's manifest bundle,
-matching [the upstream fix](https://github.com/opennextjs/opennextjs-cloudflare/pull/1356).
-Remove the patch after upgrading to an adapter release that includes that fix.
+OpenNext 1.20.13 includes Next.js 16.4's required `server/preview-props.json`
+in its manifest bundle through [the upstream fix](https://github.com/opennextjs/opennextjs-cloudflare/pull/1356).
+The local pnpm patch is no longer needed.
 
 Provide the current Worker host while building or developing:
 

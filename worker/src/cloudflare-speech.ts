@@ -39,7 +39,7 @@ async function readBoundedAudio(response: Response): Promise<Uint8Array> {
       const value: unknown = result.value;
 
       if (!(value instanceof Uint8Array)) {
-        throw new Error("Response stream returned a non-binary chunk.");
+        throw new TypeError("Response stream returned a non-binary chunk.");
       }
 
       received += value.byteLength;

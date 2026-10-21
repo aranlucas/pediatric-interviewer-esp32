@@ -40,8 +40,8 @@ all: compile
 setup:
 	git submodule update --init --recursive
 	$(ARDUINO_CLI) core update-index
-	$(ARDUINO_CLI) core install esp32:esp32@3.3.11
-	$(ARDUINO_CLI) lib install "GFX Library for Arduino@1.6.7" "TCA9554@0.1.3" "ArduinoJson@7.4.3" "WiFiManager@2.0.17" "WebSockets@2.7.2"
+	$(ARDUINO_CLI) core install esp32:esp32@3.3.12
+	$(ARDUINO_CLI) lib install "GFX Library for Arduino@1.6.9" "TCA9554@0.1.3" "ArduinoJson@7.4.3" "WiFiManager@2.0.17" "WebSockets@2.7.2"
 
 pet-assets:
 	$(PYTHON) tools/generate_codex_pet.py --atlas "$(PET_ATLAS)" --output-dir $(SKETCH_DIR)/src/generated

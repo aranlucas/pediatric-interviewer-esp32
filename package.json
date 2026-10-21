@@ -15,10 +15,10 @@
     "@aranlucas/oxforge": "^0.2.2",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
-    "oxfmt": "^0.73.0",
-    "oxlint": "^1.88.0",
+    "oxfmt": "^0.74.0",
+    "oxlint": "^1.89.0",
     "oxlint-tsgolint": "^7.0.2004",
-    "portless": "0.15.7"
+    "portless": "0.15.8"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}": [
@@ -29,5 +29,5 @@
       "oxfmt --config oxfmt.config.ts --no-error-on-unmatched-pattern"
     ]
   },
-  "packageManager": "pnpm@12.10.1"
+  "packageManager": "pnpm@12.14.0"
 }
