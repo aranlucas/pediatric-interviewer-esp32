@@ -39,3 +39,9 @@ The firmware sketch and interview client live in firmware/angry_cat_pediatric_in
 The web client is in `web/`; the interviewer Worker is in `worker/`. Run `pnpm install` from the repository root, then `pnpm dev` to start both through [Portless](https://github.com/vercel-labs/portless) (a dev dependency); its first run may ask for `sudo` to bind port 443 and trust a local certificate. The web client is at `https://pediatric-interviewer-esp32.localhost` and the Worker at `https://api.pediatric-interviewer-esp32.localhost`. For a fully local pair, set `NEXT_PUBLIC_AGENT_HOST=api.pediatric-interviewer-esp32.localhost` in `web/.env.local` and `WEB_ORIGINS` in the Worker's local secrets to the web origin. The ESP32 keeps its configured, reachable Worker host.
 
 Keep device tokens, provider credentials, and private interview reports out of Git.
+
+## Workspace checks
+
+From the repository root, `pnpm test` runs the existing Worker and web Vitest
+suites. `pnpm build` builds both JavaScript packages; firmware still uses
+`make compile` and the native Arduino toolchain.

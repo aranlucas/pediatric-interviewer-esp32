@@ -9,7 +9,9 @@
     "lint:fix": "oxlint --fix",
     "format": "oxfmt --config oxfmt.config.ts --write .",
     "format:check": "oxfmt --config oxfmt.config.ts --check .",
-    "lint:oxforge": "oxlint"
+    "lint:oxforge": "oxlint",
+    "build": "pnpm -r build",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@aranlucas/oxforge": "^0.2.2",
@@ -18,7 +20,8 @@
     "oxfmt": "^0.74.0",
     "oxlint": "^1.89.0",
     "oxlint-tsgolint": "^7.0.2004",
-    "portless": "0.15.8"
+    "portless": "0.15.8",
+    "vitest": "^5.0.5"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}": [

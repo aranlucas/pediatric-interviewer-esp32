@@ -49,6 +49,14 @@ and CI validation use `cf deploy --prebuilt`. The Wrangler dependency and
 `wrangler.config.ts` remain required for this bundler; the hand-maintained
 `wrangler.jsonc` has been removed.
 
+The repository's no-direct-Wrangler practice remains unresolved for this web
+package: OpenNext 1.20.13 declares Wrangler as a required peer, and the existing
+build helper imports its bundler API. Cloudflare's current
+[OpenNext maintenance guide](https://developers.cloudflare.com/workers/framework-guides/web-apps/opennext/)
+still requires installing Wrangler. Removing it alone would break builds and
+preview. The standalone interviewer Worker uses the Cloudflare Vite plugin;
+resolving the web finding needs an adapter change or an explicit policy exception.
+
 OpenNext 1.20.13 includes Next.js 16.4's required `server/preview-props.json`
 in its manifest bundle through [the upstream fix](https://github.com/opennextjs/opennextjs-cloudflare/pull/1356).
 The local pnpm patch is no longer needed.

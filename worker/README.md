@@ -301,7 +301,8 @@ pnpm exec cf deploy --secrets-file .dev.vars.production
 
 `cf workers types` generates ignored `.cloudflare/types/index.d.ts` directly
 from `cloudflare.config.ts`; type checks generate it before running TypeScript.
-The Wrangler dependency and `wrangler.config.ts` supply the bundler used by `cf`.
+The Cloudflare Vite plugin builds the Worker for `cf` without a direct Wrangler
+dependency. `vite.config.ts` reads Portless's `PORT` for local development.
 Worker names, bindings, and Durable Object lifecycle live in `cloudflare.config.ts`.
 
 The `AI` binding is account-native and configured in `cloudflare.config.ts`; it does
