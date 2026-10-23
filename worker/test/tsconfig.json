@@ -9,7 +9,7 @@
     "./**/*.ts",
     "./**/*.mjs",
     "../cloudflare.config.ts",
-    "../wrangler.config.ts",
+    "../vite.config.ts",
     "../.cloudflare/types/**/*.d.ts"
   ]
 }
