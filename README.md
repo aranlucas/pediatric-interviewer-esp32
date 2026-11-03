@@ -1,42 +1,60 @@
 # A tiny cat. A full oral-boards grilling.
 
-[![Web and Worker CI](https://github.com/aranlucas/pediatric-interviewer-esp32/actions/workflows/web-worker-ci.yml/badge.svg?branch=main)](https://github.com/aranlucas/pediatric-interviewer-esp32/actions/workflows/web-worker-ci.yml)
-[![MIT License](https://img.shields.io/github/license/aranlucas/pediatric-interviewer-esp32)](LICENSE)
+[![CI](https://github.com/aranlucas/pediatric-interviewer-esp32/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aranlucas/pediatric-interviewer-esp32/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/aranlucas/pediatric-interviewer-esp32)](LICENSE)
 ![ESP32](https://img.shields.io/badge/ESP32-S3-E7352C?logo=espressif&logoColor=white)
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Worker-F38020?logo=cloudflare&logoColor=white)
 
 ![Angry Cat, the pediatric dentistry examiner mascot](web/public/angry-cat-examiner.png)
 
-**Six pediatric-dentistry questions. One grumpy cat. A handheld oral-boards practice session.**
+**Pediatric-dentistry oral-boards practice with a grumpy cat.**
 
-Angry Cat is a training project for the Waveshare ESP32-S3-Touch-LCD-3.5B. Set up a case in the web client, run the interview on the device, and finish with a bounded review. The connected Cloudflare Worker supports the web and device workflow.
+Practice in the browser or on a Waveshare ESP32-S3-Touch-LCD-3.5B. Both clients
+use the Cloudflare interviewer Worker and receive a review after the interview.
+The device uses six questions; the browser supports 3–10. Web-to-device case
+handoff is a [proposed feature](ROADMAP.md), not an existing workflow.
 
-_The orange cat is the existing project mascot; it is not a clinical examiner._
-
-## The practice loop
-
-1. Set up a pediatric dentistry case in the web client.
-2. Work through a six-question interview on the touch display.
-3. Review a concise summary of the session.
-
-The repository includes the Arduino firmware, a web client and Worker, and a Wokwi simulator project. The trainer is for study and practice, not diagnosis or treatment advice. Review clinical answers against the [AAPD Reference Manual](https://www.aapd.org/research/oral-health-policies--recommendations/).
+This is study and practice software, not diagnosis, treatment advice or a
+validated assessment. Use synthetic cases without patient or guardian
+identifiers, and review clinical answers against the
+[AAPD Reference Manual](https://www.aapd.org/research/oral-health-policies--recommendations/).
 
 ## Build the device
 
-The supported board is the Waveshare ESP32-S3-Touch-LCD-3.5B. With the device connected, use the repository Makefile:
+Install Arduino CLI, then run `make setup` to initialize vendor submodules and
+install the pinned board core and libraries. Copy
+[`interviewer_config.h.example`](firmware/angry_cat_pediatric_interviewer/interviewer_config.h.example)
+to `interviewer_config.h` beside it. Supply the reachable Worker WebSocket URL,
+matching `DEVICE_TOKEN`, and trusted root CA certificate; keep TLS verification
+enabled. Without configuration, the interview remains unavailable.
+
+With the board connected:
 
 ```sh
-make setup
 make compile
 make upload
 make monitor
 ```
 
-The firmware sketch and interview client live in firmware/angry_cat_pediatric_interviewer. Simulator files are in simulator/wokwi/.
+Override the Makefile's serial port with `PORT=/dev/cu.<your-device>` for upload
+and monitor. See the [Wokwi guide](simulator/wokwi/README.md) for hardware-free
+checks and their limits, and the [board vendor](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-3.5B)
+for hardware resources.
 
 ## Web and Worker development
 
-The web client is in `web/`; the interviewer Worker is in `worker/`. Run `pnpm install` from the repository root, then `pnpm dev` to start both through [Portless](https://github.com/vercel-labs/portless) (a dev dependency); its first run may ask for `sudo` to bind port 443 and trust a local certificate. The web client is at `https://pediatric-interviewer-esp32.localhost` and the Worker at `https://api.pediatric-interviewer-esp32.localhost`. For a fully local pair, set `NEXT_PUBLIC_AGENT_HOST=api.pediatric-interviewer-esp32.localhost` in `web/.env.local` and `WEB_ORIGINS` in the Worker's local secrets to the web origin. The ESP32 keeps its configured, reachable Worker host.
+Run `pnpm install --frozen-lockfile` at the repository root using the Node and
+pnpm versions in `.node-version` and `package.json`. Configure development
+secrets and bindings using the [Worker guide](worker/README.md#local-development)
+and [web guide](web/README.md#local-development), then run `pnpm dev` to start
+both through Portless. Its first run may request `sudo` to bind port 443 and
+trust a local certificate.
+
+The web origin is `https://pediatric-interviewer-esp32.localhost`; the Worker is
+`https://api.pediatric-interviewer-esp32.localhost`. Set
+`NEXT_PUBLIC_AGENT_HOST=api.pediatric-interviewer-esp32.localhost` in
+`web/.env.local` and include the web origin in the Worker's `WEB_ORIGINS`.
+The ESP32 needs its own reachable Worker host.
 
 Keep device tokens, provider credentials, and private interview reports out of Git.
 

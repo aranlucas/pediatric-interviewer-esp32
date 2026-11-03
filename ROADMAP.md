@@ -3,14 +3,6 @@
 Updated 2026-10-26. Proposed study features after Digits/MCP priorities. This is
 oral-board practice, not diagnosis, treatment advice or validated assessment.
 
-## Starting point
-
-Baseline `f59260acae9f614568d84ece9a3cb9d19818b74c`: the [project](README.md)
-includes a web case setup, a six-question interview, a concise review, a Worker
-and firmware for the Waveshare ESP32-S3-Touch-LCD-3.5B. Hardware, web and Worker
-delivery are separate surfaces; passing JavaScript tests does not validate the
-physical device or audio experience.
-
 ## Ordered releases
 
 1. **Get from case setup to a completed device session.** Guide the learner

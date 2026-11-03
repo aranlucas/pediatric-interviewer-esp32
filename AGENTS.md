@@ -1,32 +1,15 @@
-# ESP32 Hardware Workspace
+# Project conventions
 
-## Board
-
-The connected target is a **Waveshare ESP32-S3-Touch-LCD-3.5B**:
-
-## Build and device workflow
-
-```sh
-make setup
-make compile
-make upload
-make monitor
-```
-
-## Resources
-
-- https://github.com/waveshareteam/ESP32-S3-Touch-LCD-3.5/
-
-## Simulation
-
-Running wokwiki simulator if there is no physical hardware
+Firmware targets the Waveshare ESP32-S3-Touch-LCD-3.5B. Use the
+[README](README.md) for setup and the [Wokwi guide](simulator/wokwi/README.md)
+when hardware is unavailable; simulator success does not validate the physical board.
 
 ## Scripts: native first
 
-Before adding a script file (`scripts/`, `bin/`, `tools/`, root `*.sh|*.py|*.mjs`) or a package script that runs one, take the first rung that works:
+Before adding a script or a package command that invokes one, use the first viable rung:
 
-1. A flag or subcommand of a tool the repo already uses (`<tool> --help`).
-2. Declarative config for that tool (`Makefile`, `pnpm-workspace.yaml`, `worker/cloudflare.config.ts`, `web/next.config.mts`, `worker/vitest.config.ts`, `web/vitest.config.mts`, `oxfmt.config.ts`).
+1. A flag or subcommand of an existing tool (`<tool> --help`).
+2. Declarative configuration for that tool.
 3. A maintained plugin for that tool.
 4. A one-line Makefile target or package.json script that calls a native command.
 5. A test in the existing runner (Vitest in worker/ or web/), for anything that asserts.
@@ -34,7 +17,7 @@ Before adding a script file (`scripts/`, `bin/`, `tools/`, root `*.sh|*.py|*.mjs
 
 ## Code: libraries first
 
-Before hand-writing general-purpose code, use a well-maintained library: actively released, widely adopted, typed, and a fit for this stack. Reach for one already in the dependencies first. Write custom code for domain logic and for the glue no library covers. A PR that adds a dependency says why it was picked; a PR that hand-writes something a library covers names the library and why it didn't fit.
+Use an existing dependency first, then an actively maintained, widely used typed library that fits this stack. Reserve custom code for domain logic and uncovered glue. In PRs, justify new dependencies or name the relevant library and explain why it did not fit.
 
 - Interview message and report validation → `zod`.
 - Worker HTTP routing → `hono`.
