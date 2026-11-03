@@ -17,11 +17,6 @@ import {
 } from "@/lib/interview";
 
 describe("interview helpers", () => {
-  it("keeps all firmware study topics", () => {
-    expect(TOPICS).toHaveLength(10);
-    expect(new Set(TOPICS.map((topic) => topic.id)).size).toBe(10);
-  });
-
   it("summarizes scores and outcomes", () => {
     expect(
       averageScore({

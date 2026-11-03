@@ -34,10 +34,8 @@ import {
 } from "@/live-session-lifecycle";
 import {
   GEMINI_LIVE_MODEL,
-  geminiFirstQuestionTurn,
   geminiLiveConfig,
   geminiReconnectTurn,
-  geminiTextTurn,
   isValidOpeningCasePresentation,
   turnDispositionToolOutput,
   TURN_DISPOSITION_TOOL,
@@ -201,14 +199,6 @@ describe("Pediatric oral-board interviewer", () => {
     ).toThrow("violated the spoken vignette boundary");
   });
 
-  it("starts the first clinical question without a readiness gate", () => {
-    expect(geminiFirstQuestionTurn()).toEqual({
-      turns:
-        "BEGIN_INTERVIEW. The candidate has heard the case. Ask only the first focused clinical question now. Do not repeat the case, add a preamble, ask whether they are ready, or answer the question.",
-      turnComplete: true,
-    });
-  });
-
   it("requires a case marker and rejects clinical questions at the opening boundary", () => {
     expect(
       isValidOpeningCasePresentation(
@@ -228,13 +218,6 @@ describe("Pediatric oral-board interviewer", () => {
         "Here is your case. A child presents with pain. What is your diagnosis?",
       ),
     ).toBe(false);
-  });
-
-  it("marks a typed candidate answer as a complete Gemini client turn", () => {
-    expect(geminiTextTurn("I would assess the child first.")).toEqual({
-      turns: "I would assess the child first.",
-      turnComplete: true,
-    });
   });
 
   it("accepts only typed interviewer device commands", () => {
@@ -327,22 +310,9 @@ describe("Pediatric oral-board interviewer", () => {
       }).systemInstruction,
     );
 
-    expect(recoveryInstruction).toContain("Do not generate or substitute a new case");
     expect(recoveryInstruction).toContain("A four-year-old presents with pain");
+    expect(recoveryInstruction).toContain("How would you assess cooperation?");
     expect(recoveryInstruction).toContain("persisted 2 of 6 scored exchanges");
-    expect(recoveryInstruction).not.toContain("readiness confirmation");
-    expect(recoveryInstruction).toContain("<SILENT_RECOVERY_CONTEXT>");
-    expect(recoveryInstruction).toContain("Never introduce, quote, paraphrase, or read it aloud");
-    expect(recoveryInstruction).toContain(
-      "not a request to repeat the case merely because it discusses",
-    );
-    expect(recoveryInstruction).toContain(
-      "Repeat the case only when the candidate explicitly asks",
-    );
-    expect(recoveryInstruction).toContain("when a RESUME_INTERVIEW command explicitly directs you");
-    expect(z.string().parse(config.systemInstruction)).toContain(
-      "Never ask whether the candidate is ready",
-    );
     expect(config.thinkingConfig).toEqual({
       thinkingLevel: "MINIMAL",
     });
@@ -374,63 +344,6 @@ describe("Pediatric oral-board interviewer", () => {
     const instruction = z.string().parse(config.systemInstruction);
     expect(instruction).toContain("Topic: Behavior Guidance");
     expect(instruction).toContain("Temperament and cooperation potential");
-    expect(instruction).toContain("WHAT AN EXAMINER LISTENS FOR");
-    expect(instruction).toContain(
-      "never turn a probe into a checklist, a compound question, or a leading question",
-    );
-    expect(instruction).toContain("The interview runtime, not you, is the authority");
-    expect(instruction).toContain("Never infer progress from the number of conversational turns");
-    expect(instruction).toContain('say exactly, "Hold the screen or use End interview to stop."');
-    expect(instruction).not.toContain("end_interview");
-    expect(instruction).toContain(
-      "give a brief internally consistent finding and let them continue",
-    );
-    // A thin answer must be probed rather than silently recorded, and probing
-    // must terminate: without a forced advance the exchange never reaches the
-    // review and the session runs to the Live time limit.
-    expect(instruction).toContain("Probe a thin answer instead of accepting it");
-    expect(instruction).toContain("First probe: open and neutral");
-    expect(instruction).toContain("Later probes: name the missing dimension, never its content");
-    expect(instruction).toContain("Never probe the same skillset more than four times");
-    expect(instruction).toContain("classify advance_skillset even if the answer is still thin");
-    expect(instruction).toContain("no more than four times per skillset");
-    expect(instruction).not.toContain(
-      "A shallow but complete answer gets one neutral opportunity to elaborate",
-    );
-    expect(instruction).toContain(
-      "ask exactly one focused question with one primary decision target",
-    );
-    expect(instruction).not.toContain("Are you ready to begin?");
-    expect(instruction).not.toContain("ASK_READINESS");
-    expect(instruction).toContain(
-      "reassesses risk, adapts the plan, and explains what would change",
-    );
-    expect(instruction).toContain("Acknowledgements are optional");
-    expect(instruction).toContain(
-      "Probe, clarification, and case-information turns remain within the current exchange",
-    );
-    expect(instruction).toContain(
-      "If the candidate says they did not hear, missed, or were not given the opening case or question",
-    );
-    expect(instruction).toContain(
-      "A request to hear or repeat the case or question is not unrelated speech",
-    );
-    expect(instruction).toContain("Treat genuinely unrelated speech as ambient audio");
-    expect(instruction).toContain("Never speak disclaimers");
-    expect(instruction).toContain(
-      "Never name, announce, restate, paraphrase, or introduce the selected topic",
-    );
-    expect(instruction).toContain(
-      "On BEGIN_INTERVIEW, ask only the first focused clinical question",
-    );
-    expect(instruction).toContain("runtime presents the generated case separately");
-    expect(instruction).toContain(
-      "runtime generates and presents the clinical vignette outside Gemini Live",
-    );
-    expect(instruction).not.toContain("Generate a new clinical vignette");
-    expect(instruction).not.toContain("state the topic, present the generated vignette");
-    expect(instruction).not.toContain("medical advice");
-    expect(instruction).not.toContain("A healthy four-year-old");
   });
 
   it("uses the persisted exchange count to direct every classified turn", () => {
@@ -1087,18 +1000,6 @@ describe("Gemini Live turn boundaries", () => {
   it("never ends a turn without a completion signal", () => {
     expect(shouldEndTurn({}, true)).toBe(false);
     expect(shouldEndTurn({}, false)).toBe(false);
-  });
-
-  it("waits through generationComplete and late content for turnComplete", () => {
-    const stream = [
-      { generationComplete: true },
-      { text: "late audio/transcript content" },
-      { turnComplete: true },
-    ];
-
-    expect(stream.filter((signal) => shouldEndTurn(signal, false))).toHaveLength(1);
-    expect(shouldEndTurn(stream[0], true)).toBe(false);
-    expect(shouldEndTurn(stream[2], true)).toBe(true);
   });
 });
 

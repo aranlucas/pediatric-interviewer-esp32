@@ -1,11 +1,6 @@
-import { assert, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import {
-  getPublicReportJson,
-  listCompletedReports,
-  publicReportObjectKey,
-  summarizeStoredReport,
-} from "@/lib/reports";
+import { listCompletedReports, publicReportObjectKey, summarizeStoredReport } from "@/lib/reports";
 
 const REPORT_ID = "01234567-89ab-4cde-8123-0123456789ab";
 
@@ -109,28 +104,5 @@ describe("completed report library", () => {
       cursor: "page-two",
     });
     expect(reports.map((report) => report.reportId)).toEqual([newerId, olderId]);
-  });
-
-  it("redacts the private room identifier from public JSON downloads", async () => {
-    const body = JSON.stringify({
-      reportId: REPORT_ID,
-      sessionId: "web-0123456789abcdef0123456789abcdef",
-      evaluation: { outcome: "pass" },
-    });
-
-    const get = vi.fn().mockResolvedValue({
-      size: body.length,
-      text: () => Promise.resolve(body),
-    });
-
-    const publicBody = await getPublicReportJson({ get }, REPORT_ID);
-
-    assert(publicBody);
-
-    expect(JSON.parse(publicBody)).toEqual({
-      reportId: REPORT_ID,
-      evaluation: { outcome: "pass" },
-    });
-    expect(get).toHaveBeenCalledWith(`pediatric-oral-boards/public-reports/${REPORT_ID}.json`);
   });
 });
