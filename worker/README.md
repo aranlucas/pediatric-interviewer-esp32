@@ -1,157 +1,83 @@
 # Pediatric Interviewer Worker
 
-This directory contains the Cloudflare Worker backend for the pediatric
-dentistry oral-board interviewer. It uses one Cloudflare Agents Durable Object
-(`PediatricInterviewer`) per interview session. The Durable Object persists
-interview state and exchanges in SQLite, keeps the Gemini Live transport alive
-while provider work is running, and stores completed reviews in private R2. A
-typed Hono app owns the Worker's HTTP routing and delegates unmatched Agent SDK
-WebSocket requests to `routeAgentRequest`.
+The interviewer uses one Agents Durable Object per session, SQLite for saved
+exchanges, Gemini Live for voice, and private R2 objects for completed reviews.
 
-The Worker has two clients:
+## Local development
 
-- The ESP32 uses the device WebSocket protocol at
-  `/agents/pediatric-interviewer/esp32` or
-  `/agents/pediatric-interviewer/esp32-<8 lowercase hex>`. Device WebSocket
-  authentication uses the shared `DEVICE_TOKEN` (query token is supported;
-  the existing `X-Device-Token` WebSocket header remains accepted for device
-  compatibility).
-- The web service uses `/agents/pediatric-interviewer/web-<32 lowercase hex>`.
-  It obtains a short-lived signed connection token from its `/api/session`
-  route. The Worker requires the token to have `scope: "connect"`, a subject
-  exactly equal to the room name, and an `Origin` listed in `WEB_ORIGINS`.
+Install workspace dependencies from the [repository root](../README.md#web-and-worker-development).
+Create an ignored `worker/.dev.vars` with development values:
 
-Ordinary HTTP requests under `/agents/...` are rejected before they can wake a
-Durable Object. `GET /health` and `GET /interviewer/health` are public and
-return only the protocol version and capability flags.
+```text
+DEVICE_TOKEN=...
+GEMINI_API_KEY=...
+WEB_TOKEN_SECRET=...
+WEB_ORIGINS=https://pediatric-interviewer-esp32.localhost
+```
 
-## Interview and Gemini Live contract
+`DEVICE_TOKEN` authenticates devices; `GEMINI_API_KEY` stays server-side.
+`WEB_TOKEN_SECRET` must match the web service and be at least 32 characters.
+`WEB_ORIGINS` is a comma-separated list of exact serialized browser origins.
+Never expose these secrets through `NEXT_PUBLIC_*` variables.
 
-The default interview is six substantive questions. `start_call` may choose
-one or more pediatric domains, `question_count` from 3 through 10, and
-`difficulty` of `easy`, `standard`, or `hard`. The selected configuration is
-persisted in Durable Object state and in the report.
+From `worker/`:
 
-Only a substantive answer advances the persisted exchange count. Readiness,
-clarification, case-information, and probe turns remain inside the current
-exchange. The runtime exchange count—not model wording or raw conversation
-turns—owns completion. By default, the sixth persisted exchange triggers
-evaluation; an explicit stop or an unrecoverable transport interruption
-produces a partial review when at least one answer was saved. There is no local
-whole-interview cutoff. Individual provider turns have a bounded response
-deadline, while provider `GoAway` notices and resumable-session events drive
-session rotation.
+```sh
+pnpm dev
+pnpm test
+pnpm check
+pnpm build
+```
 
-Gemini Live uses `gemini-3.1-flash-live-preview` through `@google/genai`:
+`pnpm check` regenerates ignored Env types before linting and type checking.
+Bindings, Worker identity and Durable Object lifecycle are declared in
+[`cloudflare.config.ts`](cloudflare.config.ts). The Workers AI binding needs no secret.
 
-- native audio input and output with input/output transcription;
-- native 24 kHz PCM output, delivered to the device as ordered binary frames;
-- explicit `activityStart`/`activityEnd` from the device, with provider
-  automatic activity detection disabled;
-- a schema-constrained case authored by stable `gemini-3.5-flash-lite`,
-  semantically validated and persisted before playback; exact case audio is
-  prewarmed in parallel with the cold-session Live warm-up, followed directly
-  by the first focused clinical question;
-- post-setup scripted prompts and typed candidate turns sent through current
-  Live realtime text input rather than initial-history client content;
-- generation-scoped session resumption with the provider handle kept in
-  private Durable Object SQLite metadata, never in public interview state;
-  the Enterprise-only transparent-replay option is not sent to the Developer
-  API, so an unusable handle starts a fresh model context from the persisted
-  interview summary;
-- bounded client reconnect grace and provider reconnect attempts, with saved
-  exchanges salvaged into a report after an unexpected close;
-- a 45-second provider-response inactivity watchdog, refreshed by meaningful
-  transcription, audio, completion, or tool progress, that replaces a true
-  stalled Thinking state with generation-owned recovery, plus a 15-second Live
-  setup deadline;
-  committed candidate PCM is retained for at most 90 seconds (4,320,000 bytes)
-  and replayed into a fresh session with the original case and authoritative
-  unanswered-prompt context,
-  while uncommitted or oversized audio is explicitly requested again;
-- a 90-second ceiling on an uncommitted candidate turn, after which the Worker
-  commits the bounded audio already received instead of waiting forever;
-- a maximum accepted input PCM frame of 32 KiB, a 128 KiB/s input envelope,
-  4,800-byte output frames, 4,000-character transcript tails, and a 512 KiB
-  maximum provider audio field before base64 decoding.
+## Client and report contracts
 
-Provider message processing is exception-contained: a malformed Live payload
-or any SDK message/error/close callback failure enters the owned reconnect path
-instead of tearing down the candidate socket.
+WebSocket routes are `/agents/pediatric-interviewer/<room>`:
 
-The persisted case is spoken through bounded Cloudflare Workers AI using
-`@cf/deepgram/aura-2-en` as raw 24 kHz PCM16. The separately validated
-`gemini-3.1-flash-tts-preview` Interactions path is a provider fallback. Gemini
-Live then asks the first clinical question directly; there is no candidate
-readiness gate. Live system and recovery instructions declare that runtime-owned
-case boundary, so the Worker does not inject unsupported model-role history
-mid-session and Live cannot replace or repeat the case.
+- Device rooms are `esp32` or `esp32-<8 lowercase hex>`. Authenticate with
+  `?token=<DEVICE_TOKEN>` or the `X-Device-Token` header.
+- Browser rooms are `web-<32 lowercase hex>`. The web service creates the room
+  through its same-origin `/api/session` route. The Worker requires an allowed
+  `Origin` and a signed token with `scope: "connect"` and the exact room subject.
+  Ordinary HTTP requests cannot enter an interview object through these routes.
 
-The opening stage, exact presented case, and any partially completed
-question/answer/probe exchange are also persisted. On a Durable Object wake,
-the Worker invalidates process-bound provider handles and reconstructs the exact
-opening or unanswered active-probe context through the fresh session instruction.
-Silent recovery context is never a presentation command, and a fresh-session
-replay speaks only the authoritative pending clinical prompt. If
-the client disappears during opening playback, the durable stage and exact case
-are kept for replay after reconnect instead of resetting the interview to idle.
-If interruption ends the interview during a probe, that answered partial
-exchange is included exactly once in the recovery report and is cleared only
-after the report is saved successfully.
-
-The current PCM replay envelope remains process-local: a hard eviction during
-candidate speech asks the candidate to repeat that one answer rather than
-risk scoring partial or duplicated audio.
-
-Cloudflare speech requests have a 30-second deadline and a 2.4 MB response
-ceiling. The Worker requires even-length raw mono PCM16 and rejects an
-unexpected container before playback. If Cloudflare is unavailable, the Gemini
-fallback requests only the official audio response type, validates bounded raw
-PCM or RIFF metadata, and resamples to 24 kHz. Both paths are paced in realtime
-4,800-byte frames; readiness cannot begin unless the case was actually played.
-If both providers fail, the interview returns to a retryable idle state instead
-of asking the candidate to continue without hearing the case.
-
-The case author, evaluator, and cheatsheet generator use stable
-`gemini-3.5-flash-lite`; the Live voice session remains
-`gemini-3.1-flash-live-preview`. Structured provider requests have bounded
-response sizes and deadlines, and transient failures are retried. A cheatsheet
-failure does not discard the main report.
-
-## Authentication and report access
-
-### Required Worker bindings and secrets
-
-`worker/cloudflare.config.ts` declares the non-secret `AI` binding used for primary
-opening speech, the private `INTERVIEW_REPORTS` R2 bucket, the
-`PEDIATRIC_INTERVIEWER` Durable Object, and `CONNECTION_RATE_LIMITER`.
-
-`worker/cloudflare.config.ts` declares these required secrets and generated Env
-types:
-
-- `DEVICE_TOKEN`: shared ESP32 authentication secret.
-- `GEMINI_API_KEY`: server-only Gemini credential; it never reaches the ESP32
-  or browser.
-- `WEB_TOKEN_SECRET`: HMAC-SHA256 signing secret. The web service must use the
-  same value to mint connect and report tokens.
-- `WEB_ORIGINS`: comma-separated serialized origins, for example
-  `https://oral-boards.example,http://localhost:3000`. The Worker requires an
-  exact origin match for web WebSocket upgrades.
-
-Web tokens are compact HMAC-SHA256 values with this payload and format:
+Web tokens use HMAC-SHA256 over the base64url JSON payload:
 
 ```text
 { "v": 1, "sub": "web-<32 hex>", "exp": <unix seconds>, "scope": "connect" | "report" }
 <base64url-json>.<base64url-signature>
 ```
 
-The web `/api/session` route issues a two-hour, room-scoped `connect` token and sets a
-two-hour `report` token in an HttpOnly, Secure, SameSite cookie. The browser
-does not receive a global device secret. Web report downloads go through the
-web `/api/reports/:reportId` route; that route forwards the signed report token
-through the `INTERVIEWER_SERVICE` binding.
+The web service issues two-hour connection/report credentials and keeps the
+report capability in a Secure, HttpOnly cookie. See the
+[web session boundary](../web/README.md#session-and-privacy-boundary) for owner
+capabilities and token refresh. Browsers never receive the shared device secret.
 
-Direct Worker report access is also available for device/operator tooling:
+Clients exchange 24 kHz mono PCM16 audio and JSON control messages. The
+[message schema](src/interviewer-protocol.ts) defines controls and limits;
+[`start_call` configuration](src/interview-config.ts) defaults to six questions
+at standard difficulty. Only saved substantive answers advance the question
+count; clarification and probe turns remain in the current exchange.
+
+The runtime owns the presented case and completion boundary. It saves the case
+before playback, recovers the pending question/probe from durable state, and
+salvages answered work into a partial report after an unrecoverable interruption.
+Candidate audio replay is process-local: hard eviction can require repeating
+that answer. Opening-speech failure returns to retryable idle; an optional
+cheatsheet failure does not discard the main review.
+
+`GET /health` and `/interviewer/health` are public capability checks. Private
+artifacts are served from `/interviewer/reports/<report-id>.json`, `.md`, or
+`<report-id>-cheatsheet.md`. Device/operator HTTP access requires
+`X-Device-Token`; query-string device tokens work only for WebSocket upgrades.
+Signed `Authorization: Bearer <report-token>` access requires the R2 object's
+`sessionId` metadata to match the token subject. Invalid, expired, missing and
+wrong-session signed credentials return the same unauthorized result.
+
+For an authorized operator, download Markdown with:
 
 ```sh
 curl \
@@ -160,28 +86,15 @@ curl \
   "https://esp32-angry-cat.<account>.workers.dev/interviewer/reports/$REPORT_ID.md"
 ```
 
-The report and recovery HTTP routes accept static device authentication only
-through `X-Device-Token`; query-string device tokens are not accepted there.
-Signed `Authorization: Bearer <report-token>` access is limited to a token
-whose subject matches the R2 object's `sessionId` metadata. Invalid, expired,
-missing, or mismatched signed report credentials return the same unauthorized
-result without revealing whether an object exists.
+The bucket's `pediatric-oral-boards/reports/` prefix remains private. Reports
+are not published automatically; the web service has a separate, disabled-by-default
+[public collection](../web/README.md#publishing-a-reviewed-report-collection).
 
-The R2 bucket and these direct Worker routes remain private. The paired web
-application intentionally publishes completed feedback through its read-only
-`/reports` pages and `/api/report-library/:reportId` download routes.
+## Recover an interrupted report
 
-## R2 reports and recovery
-
-The private `pediatric-oral-boards-reports` bucket stores JSON and Markdown for
-each report, plus an optional Markdown cheatsheet. Every object includes
-`sessionId`, report configuration, outcome, and schema metadata. The report ID
-is returned to the client, but report bodies and provider credentials are never
-sent to the ESP32.
-
-Recovery is intentionally separate from starting a new interview. A device can
-send the `recover_report` WebSocket message after reconnecting, or an operator
-can call:
+Recovery evaluates already-saved answers without starting a new interview.
+Stop an active interview first. A connected device can send `recover_report`;
+an operator can use the HTTP route after the client and provider disconnect:
 
 ```sh
 curl -X POST \
@@ -190,149 +103,57 @@ curl -X POST \
   "https://esp32-angry-cat.<account>.workers.dev/interviewer/recover-report"
 ```
 
-`DURABLE_OBJECT_ID` must be the 64-hex ID of the interview object. Recovery
-re-evaluates the exchanges already persisted in that object; it does not reset
-or invent answers. A recovery attempt with no saved answers is rejected.
+`DURABLE_OBJECT_ID` is the interview object's 64-hex ID. The HTTP route returns
+`409` for an active interview or one without recoverable saved work. Successful
+recovery returns the report ID; it does not reset or invent answers. If saving
+fails, saved work remains available for another recovery attempt.
 
-The Worker also defines `CONNECTION_RATE_LIMITER` at 30 connection-attempt
-tokens per 60 seconds. It is keyed by Cloudflare client IP for attempts and by
-the signed web subject after successful web-token validation. The configured
-numeric namespace ID (`842176`) must remain unique to this Cloudflare account.
+## Live verification and hardware limits
 
-## Local setup and verification
-
-From this directory:
+These commands contact the configured service and providers and create private
+reports. They are separate from local tests. From `worker/` on macOS:
 
 ```sh
-pnpm install --frozen-lockfile
-pnpm run generate-types
-pnpm test
-pnpm run check
-pnpm run build
-pnpm exec cf deploy --prebuilt --dry-run
-pnpm run smoke:web
+pnpm simulate:interview --topic behavior_guidance
+pnpm simulate:interview --turns 1 --wait-report
+pnpm simulate:suite
 ```
 
-For local `cf dev`, create an untracked `worker/.dev.vars` containing
-test/development values for all required bindings:
+The simulator uses `say` and `afconvert`. It reads URL/token from the ignored
+firmware `interviewer_config.h` without printing them, or accepts both
+`INTERVIEWER_WS_URL` and `DEVICE_TOKEN` as environment overrides. Consult
+`pnpm simulate:interview --help` for individual timing/noise options.
+Full six-answer runs and partial runs with `--wait-report` fetch private R2
+JSON and check the saved exchanges. The suite adds pause, explicit-commit,
+noise and modeled playback-jitter checks, writing ignored `simulation-report.json`.
 
-```text
-DEVICE_TOKEN=...
-GEMINI_API_KEY=...
-WEB_TOKEN_SECRET=...
-WEB_ORIGINS=http://localhost:3000
-```
+`smoke:web` is also a live-service test. Its current fixture requests an
+existing room without an owner cookie, conflicting with the session ownership
+contract; it needs updating before it can serve as a rollout gate.
 
-Run the local Worker with:
+Host simulation does not validate the physical microphone, codec, Wi-Fi/RF,
+power or display. Use the [Wokwi guide](../simulator/wokwi/README.md) for simulated
+firmware boundaries and validate the board separately before a hardware release.
 
-```sh
-pnpm run dev
-```
+## Provisioning and rollout
 
-`pnpm test` covers the protocol, interview state, report contract, lifecycle
-guards, and signed web-token/origin helpers. `pnpm run check` regenerates no
-files; it verifies that Wrangler's generated Env types are current and then
-runs TypeScript. The dry run verifies the Durable Object, Workers AI, R2,
-required-secret, and RateLimit bindings without publishing a version.
-
-## Live simulator and hardware limits
-
-The macOS simulator exercises the deployed Worker, Gemini Live, Durable Object,
-transcripts, report evaluation, and private R2 path without using the ESP32
-microphone:
-
-```sh
-pnpm run simulate:interview --topic behavior_guidance
-pnpm run simulate:interview --turns 1 --pause-ms 2000
-pnpm run simulate:interview --turns 1 --wait-report
-pnpm run simulate:interview --help
-```
-
-It synthesizes 24 kHz mono PCM with the macOS `say` and `afconvert` tools,
-streams the device-default six answers, and reads the device URL/token from the
-local firmware interviewer configuration without printing them. To override
-that configuration, set both variables:
-
-```sh
-INTERVIEWER_WS_URL=wss://esp32-angry-cat.<account>.workers.dev/agents/pediatric-interviewer/esp32 \
-DEVICE_TOKEN=... \
-pnpm run simulate:interview --turns 6
-```
-
-`--wait-report` cleanly ends a partial run, waits for evaluation, authenticates
-to the private JSON report route, and verifies that R2 contains exactly the
-simulated scored exchanges. Full six-answer runs perform the same private
-report check automatically.
-
-Run the complete deployment regression suite with:
-
-```sh
-pnpm run simulate:suite
-```
-
-After both services are deployed, `pnpm run smoke:web` verifies the production
-web session endpoint, secure report cookie, cross-origin rejection, private
-report rejection, and a signed browser WebSocket handshake without printing
-either signed token. Override `WEB_ORIGIN` or `AGENT_HOST` only when testing a
-non-default deployment.
-
-The suite checks paused speech, explicit commit timing, noisy-room commit,
-350 ms ordered WebSocket playback jitter, and a complete six-answer interview
-whose report is fetched from private R2. It writes the ignored
-`simulation-report.json`. These are host/live service checks; microphone
-analog behavior, codec operation, Wi-Fi/RF stability, power, and physical
-display behavior still require the connected ESP32 and serial diagnostics.
-
-## Provisioning and deployment order
-
-Create the private bucket once:
+Create the private bucket once, if it does not exist:
 
 ```sh
 pnpm exec cf r2 buckets create --name pediatric-oral-boards-reports --location-hint wnam
 ```
 
-Put production values for `DEVICE_TOKEN`, `GEMINI_API_KEY`, `WEB_TOKEN_SECRET`,
-and `WEB_ORIGINS` in the gitignored `.dev.vars.production` file, using the same
-KEY=value format as the local example. Upload them with the deployment:
+Put production values for the four secrets above in ignored
+`worker/.dev.vars.production`. Connection rate-limit namespace IDs must remain
+unique within the Cloudflare account; preserve the separate web/session and
+Worker/connection namespaces in their configs.
 
-```sh
-pnpm exec cf deploy --secrets-file .dev.vars.production
-```
-
-`cf workers types` generates ignored `.cloudflare/types/index.d.ts` directly
-from `cloudflare.config.ts`; type checks generate it before running TypeScript.
-The Cloudflare Vite plugin builds the Worker for `cf` without a direct Wrangler
-dependency. `vite.config.ts` reads Portless's `PORT` for local development.
-Worker names, bindings, and Durable Object lifecycle live in `cloudflare.config.ts`.
-
-The `AI` binding is account-native and configured in `cloudflare.config.ts`; it does
-not require a secret.
-
-Deploy in this order:
-
-1. From `worker/`, run the frozen install, tests, type check, and dry run. Deploy
-   the Worker with `pnpm run deploy`, then verify `/health` and an authenticated
-   report/recovery path.
-2. In the `web/` deployment, configure the same `WEB_TOKEN_SECRET`, the public
-   web origin in the Worker `WEB_ORIGINS`, and the existing
-   `INTERVIEWER_SERVICE` service binding to `esp32-angry-cat`. The web Cloudflare
-   config also owns its `SESSION_RATE_LIMITER` binding.
-3. Build and deploy the web service only after the Worker service exists:
-
-   ```sh
-   cd ../web
-   pnpm install --frozen-lockfile
-   pnpm run check
-   pnpm test
-   pnpm run build
-   pnpm run deploy
-   ```
-
-4. Verify that `POST /api/session?room=web-<32 hex>` returns a scoped token,
-   the browser WebSocket origin is accepted, a reconnect can recover saved
-   answers, and `/api/reports/<reportId>?kind=report` and
-   `?kind=cheatsheet` return the authorized review.
-
-Never deploy a Worker version with missing required secrets, stale generated
-types, or a failing test/check gate. Do not treat the simulator's modeled
-transport results as physical-board validation.
+1. From `worker/`, run tests and `pnpm check`, then
+   `pnpm exec cf deploy --dry-run`. With those passing and all required secrets
+   supplied, deploy using `pnpm exec cf deploy --secrets-file .dev.vars.production`.
+2. Verify `/health` and an authenticated report/recovery path. Configure the
+   same `WEB_TOKEN_SECRET` on the web service, its public origin in Worker
+   `WEB_ORIGINS`, and its `INTERVIEWER_SERVICE` binding to this Worker.
+3. Follow the [web rollout procedure](../web/README.md#rollout) only after the
+   interviewer Worker exists. Verify the session ownership, reconnect and
+   private/public report boundaries there.
