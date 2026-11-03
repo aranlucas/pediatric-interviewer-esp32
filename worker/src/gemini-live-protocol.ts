@@ -48,10 +48,6 @@ export function turnDispositionToolOutput(
   return `Runtime count: ${answerCount} of ${questionCount} scored exchanges are persisted and this turn does not advance it. Provide only the requested case information or stop instruction, then let the candidate continue. Do not thank the candidate or conclude the interview.`;
 }
 
-export function geminiTextTurn(text: string) {
-  return { turns: text, turnComplete: true as const };
-}
-
 /**
  * Re-establishes an interview when the provider connection had to be rebuilt
  * without a resumable handle.  The durable exchange count remains the source

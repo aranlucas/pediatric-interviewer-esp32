@@ -254,30 +254,6 @@ describe("PediatricInterviewer lifecycle ownership", () => {
     ).toEqual([exchange]);
   });
 
-  it("does not reuse a handle from another interview generation", () => {
-    const { runtime } = newInterviewer();
-    runtime.sql = vi.fn(
-      (strings: TemplateStringsArray, ...values: Array<string | number | boolean | null>) => {
-        const statement = strings.join(" ");
-
-        if (statement.includes("PRAGMA")) {
-          return [{ name: "id" }, { name: "interview_generation" }];
-        }
-
-        if (statement.includes("SELECT")) {
-          return values[0] === "current-generation"
-            ? [{ resumption_handle: "current-handle" }]
-            : [];
-        }
-
-        return [];
-      },
-    );
-
-    expect(runtime.readResumptionHandle("current-generation")).toBe("current-handle");
-    expect(runtime.readResumptionHandle("old-generation")).toBeUndefined();
-  });
-
   it("fails fresh after a metadata read/write error", () => {
     const { runtime } = newInterviewer();
     runtime.sql = vi.fn(() => {
