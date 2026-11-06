@@ -189,6 +189,18 @@ describe("BrowserInterviewAudio microphone gating", () => {
 });
 
 describe("BrowserInterviewAudio startup resilience", () => {
+  it("returns false if stopped during final capture resume", async () => {
+    const { audio, context, send, track } = audioHarness();
+    const pending = Promise.withResolvers<void>();
+    context.resume.mockResolvedValueOnce(undefined).mockReturnValueOnce(pending.promise);
+    const starting = audio.start(send);
+    await vi.waitFor(() => expect(context.resume).toHaveBeenCalledTimes(2));
+    audio.stop();
+    pending.resolve();
+    await expect(starting).resolves.toBe(false);
+    expect(track.stop).toHaveBeenCalledOnce();
+  });
+
   it("keeps playback available when microphone acquisition fails and retries capture later", async () => {
     const { audio, acquireMedia, stream, gain, context, track, send } = audioHarness();
     acquireMedia
@@ -220,5 +232,41 @@ describe("BrowserInterviewAudio startup resilience", () => {
     await expect(starting).resolves.toBe(false);
     expect(track.stop).toHaveBeenCalledOnce();
     expect(context.close).toHaveBeenCalledOnce();
+  });
+});
+
+// A cancelled startup must not own the graph created by a later start.
+describe("BrowserInterviewAudio replacement startup", () => {
+  it("keeps replacement capture alive when an obsolete context resumes", async () => {
+    const { audio, context, track, capture, send } = audioHarness();
+    const pending = Promise.withResolvers<void>();
+    context.resume.mockReturnValueOnce(pending.promise);
+    const obsolete = audio.start(send);
+    audio.stop();
+    await expect(audio.start(send)).resolves.toBe(true);
+    pending.resolve();
+    await expect(obsolete).resolves.toBe(false);
+    audio.setListening(true);
+    capture.emit(0.03);
+    expect(send).toHaveBeenCalledOnce();
+    expect(context.close).toHaveBeenCalledOnce();
+    expect(track.stop).not.toHaveBeenCalled();
+  });
+
+  it("keeps replacement capture alive when obsolete acquisition rejects", async () => {
+    const { audio, acquireMedia, context, track, capture, send } = audioHarness();
+    const pending = Promise.withResolvers<CaptureStream>();
+    acquireMedia.mockReturnValueOnce(pending.promise);
+    const obsolete = audio.start(send);
+    await vi.waitFor(() => expect(acquireMedia).toHaveBeenCalledOnce());
+    audio.stop();
+    await expect(audio.start(send)).resolves.toBe(true);
+    pending.reject(new Error("old permission request failed"));
+    await expect(obsolete).resolves.toBe(false);
+    audio.setListening(true);
+    capture.emit(0.03);
+    expect(send).toHaveBeenCalledOnce();
+    expect(context.close).toHaveBeenCalledOnce();
+    expect(track.stop).not.toHaveBeenCalled();
   });
 });
