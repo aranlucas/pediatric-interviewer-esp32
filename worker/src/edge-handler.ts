@@ -1,3 +1,4 @@
+import { reportObjectKeys } from "./report-artifacts";
 import { Hono } from "hono";
 
 import { interviewerLobbyKind, isAllowedWebOrigin, verifyWebToken } from "./web-token";
@@ -221,7 +222,8 @@ export function createWorker<E extends WorkerEnv>(routeAgentRequest: AgentRouter
     }
 
     const suffix = cheatsheetSuffix ? "-cheatsheet" : "";
-    const key = `pediatric-oral-boards/reports/${reportId}${suffix}.${format}`;
+    const keys = reportObjectKeys(reportId);
+    const key = cheatsheetSuffix ? keys.cheatsheet : format === "json" ? keys.json : keys.markdown;
     const access = await authorizedReport(context.req.raw, context.env, key);
 
     if (!access) {

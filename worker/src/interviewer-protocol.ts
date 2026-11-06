@@ -28,14 +28,7 @@ const deviceMessageSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-export type DeviceStatus =
-  | "idle"
-  | "thinking"
-  | "listening"
-  | "evaluating"
-  | "speaking"
-  | "error"
-  | "complete";
+export type { InterviewStatus as DeviceStatus } from "../../shared/interview-contract";
 
 export function parseInterviewerDeviceMessage(message: string) {
   try {

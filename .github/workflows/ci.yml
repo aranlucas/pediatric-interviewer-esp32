@@ -34,6 +34,9 @@ jobs:
           cache: true
           require-lockfile: true
 
+      - name: Lint shared interview contract
+        run: pnpm exec oxlint shared
+
       - parallel:
           - name: Formatting
             run: pnpm format:check

@@ -8,7 +8,6 @@ export function encodeBase64(value: ArrayBuffer): string {
   return Buffer.from(value).toString("base64");
 }
 
-/** Collects arbitrary PCM chunks into fixed-size frames without concatenation. */
 export class PcmFramer {
   private frame: Uint8Array<ArrayBuffer>;
   private length = 0;

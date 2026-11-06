@@ -504,6 +504,14 @@ describe("Pediatric oral-board interviewer", () => {
     expect(requestBody.generationConfig.responseJsonSchema.properties.exchanges).toMatchObject({
       minItems: 3,
       maxItems: 3,
+      items: {
+        required: ["question", "answer", "feedback", "idealResponse", "skillset", "skill", "score"],
+        additionalProperties: false,
+        properties: {
+          score: { type: "integer", minimum: 1, maximum: 3 },
+          skill: { enum: ["remember", "understand_apply", "analyze_evaluate"] },
+        },
+      },
     });
     expect(requestBody.systemInstruction.parts[0].text).toContain(
       "This interview ended after 3 of 8 planned questions",
@@ -707,8 +715,8 @@ describe("Pediatric oral-board interviewer", () => {
     const stored = await storeInterviewReport(bucket, withoutCheatsheet);
 
     expect(puts).toEqual([
-      reportObjectKeys(withoutCheatsheet).json,
-      reportObjectKeys(withoutCheatsheet).markdown,
+      reportObjectKeys(withoutCheatsheet.reportId).json,
+      reportObjectKeys(withoutCheatsheet.reportId).markdown,
     ]);
     expect(stored.cheatsheetKey).toBeUndefined();
   });
@@ -773,8 +781,8 @@ describe("Pediatric oral-board interviewer", () => {
     });
     expect(puts).toHaveLength(2);
     expect(puts.map(({ key }) => key)).toEqual([
-      reportObjectKeys(report).json,
-      reportObjectKeys(report).markdown,
+      reportObjectKeys(report.reportId).json,
+      reportObjectKeys(report.reportId).markdown,
     ]);
     expect(puts[0].options.customMetadata).toMatchObject({
       reportId: "report-123",
@@ -983,23 +991,11 @@ describe("Gemini Live turn boundaries", () => {
     expect(isResponseComplete({ generationComplete: false, turnComplete: false })).toBe(false);
   });
 
-  it("ignores generationComplete during the opening sequence", () => {
-    // Gemini emits generationComplete before the turn's audio has finished
-    // arriving. Ending the turn there truncated the spoken case presentation
-    // and let one response advance the sequence twice.
-    expect(shouldEndTurn({ generationComplete: true }, true)).toBe(false);
-    expect(shouldEndTurn({ generationComplete: true, turnComplete: true }, true)).toBe(true);
-    expect(shouldEndTurn({ turnComplete: true }, true)).toBe(true);
-  });
-
-  it("accepts generationComplete once the interview is under way", () => {
-    expect(shouldEndTurn({ generationComplete: true }, false)).toBe(false);
-    expect(shouldEndTurn({ turnComplete: true }, false)).toBe(true);
-  });
-
-  it("never ends a turn without a completion signal", () => {
-    expect(shouldEndTurn({}, true)).toBe(false);
-    expect(shouldEndTurn({}, false)).toBe(false);
+  it("waits for turnComplete so trailing audio is retained in every phase", () => {
+    expect(shouldEndTurn({ generationComplete: true })).toBe(false);
+    expect(shouldEndTurn({ generationComplete: true, turnComplete: true })).toBe(true);
+    expect(shouldEndTurn({ turnComplete: true })).toBe(true);
+    expect(shouldEndTurn({})).toBe(false);
   });
 });
 

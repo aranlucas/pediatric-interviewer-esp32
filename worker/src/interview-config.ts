@@ -1,21 +1,27 @@
 import {
+  DEFAULT_INTERVIEW_QUESTION_COUNT,
+  MIN_INTERVIEW_QUESTION_COUNT,
+  MAX_INTERVIEW_QUESTION_COUNT,
+  INTERVIEW_DIFFICULTIES,
+  DEFAULT_INTERVIEW_DIFFICULTY,
+  type InterviewDifficulty,
+} from "../../shared/interview-contract";
+
+export {
+  DEFAULT_INTERVIEW_QUESTION_COUNT,
+  MIN_INTERVIEW_QUESTION_COUNT,
+  MAX_INTERVIEW_QUESTION_COUNT,
+  INTERVIEW_DIFFICULTIES,
+  DEFAULT_INTERVIEW_DIFFICULTY,
+  type InterviewDifficulty,
+} from "../../shared/interview-contract";
+
+import {
   PEDIATRIC_TOPICS,
   type InterviewTopic,
   type PediatricTopic,
   type PediatricTopicId,
 } from "./interview-content";
-
-export const DEFAULT_INTERVIEW_QUESTION_COUNT = 6;
-
-export const MIN_INTERVIEW_QUESTION_COUNT = 3;
-
-export const MAX_INTERVIEW_QUESTION_COUNT = 10;
-
-export const INTERVIEW_DIFFICULTIES = ["easy", "standard", "hard"] as const;
-
-export type InterviewDifficulty = (typeof INTERVIEW_DIFFICULTIES)[number];
-
-export const DEFAULT_INTERVIEW_DIFFICULTY: InterviewDifficulty = "standard";
 
 export type InterviewConfiguration = {
   topicIds: PediatricTopicId[];

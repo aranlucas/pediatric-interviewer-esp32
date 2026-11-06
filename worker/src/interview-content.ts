@@ -1,3 +1,5 @@
+import { TOPIC_IDS, type TopicId } from "../../shared/interview-contract";
+
 export const ABPD_OCE_BLUEPRINT_URL =
   "https://www.abpd.org/become-certified/oral-clinical-examination/oce-blueprint";
 
@@ -18,9 +20,8 @@ export type InterviewTopic = {
   competencies: readonly Competency[];
 };
 
-export const PEDIATRIC_TOPICS = [
-  {
-    id: "behavior_guidance",
+const clinicalTopics = {
+  behavior_guidance: {
     label: "Behavior Guidance",
     blueprintWeight: 14,
     studyMaterial: "AAPD Behavior Guidance for the Pediatric Dental Patient",
@@ -52,8 +53,7 @@ export const PEDIATRIC_TOPICS = [
       },
     ],
   },
-  {
-    id: "growth_development",
+  growth_development: {
     label: "Growth & Development",
     blueprintWeight: 8,
     studyMaterial: "AAPD Management of the Developing Dentition and Occlusion",
@@ -85,8 +85,7 @@ export const PEDIATRIC_TOPICS = [
       },
     ],
   },
-  {
-    id: "facial_injury_emergency_surgery",
+  facial_injury_emergency_surgery: {
     label: "Oral Facial Injury, Emergency Care & Oral Surgery",
     blueprintWeight: 16,
     studyMaterial: "AAPD acute pediatric dental trauma and oral surgery guidance",
@@ -109,8 +108,7 @@ export const PEDIATRIC_TOPICS = [
       },
     ],
   },
-  {
-    id: "diagnosis_pathology_radiology_medicine",
+  diagnosis_pathology_radiology_medicine: {
     label: "Diagnosis, Oral Pathology, Oral Radiology, and Oral Medicine",
     blueprintWeight: 10,
     studyMaterial:
@@ -134,8 +132,7 @@ export const PEDIATRIC_TOPICS = [
       { skillset: "Referral, communication, and follow-up", cognitiveLevel: "understand_apply" },
     ],
   },
-  {
-    id: "prevention_health_promotion",
+  prevention_health_promotion: {
     label: "Prevention & Health Promotion",
     blueprintWeight: 10,
     studyMaterial:
@@ -162,8 +159,7 @@ export const PEDIATRIC_TOPICS = [
       { skillset: "Needs-based recall and reassessment", cognitiveLevel: "understand_apply" },
     ],
   },
-  {
-    id: "caries_management_restorative",
+  caries_management_restorative: {
     label: "Dental Caries Diagnosis, Non-Restorative Caries Management and Restorative Treatment",
     blueprintWeight: 17,
     studyMaterial:
@@ -190,8 +186,7 @@ export const PEDIATRIC_TOPICS = [
       { skillset: "Follow-up, reassessment, and prognosis", cognitiveLevel: "analyze_evaluate" },
     ],
   },
-  {
-    id: "pulp_therapy",
+  pulp_therapy: {
     label: "Pulp Therapy",
     blueprintWeight: 8,
     studyMaterial: "AAPD Pulp Therapy for Primary and Immature Permanent Teeth",
@@ -214,8 +209,7 @@ export const PEDIATRIC_TOPICS = [
       },
     ],
   },
-  {
-    id: "special_health_care_needs",
+  special_health_care_needs: {
     label: "Special Health Care Needs",
     blueprintWeight: 8,
     studyMaterial: "AAPD Management of Dental Patients with Special Health Care Needs",
@@ -235,8 +229,7 @@ export const PEDIATRIC_TOPICS = [
       },
     ],
   },
-  {
-    id: "advocacy_education",
+  advocacy_education: {
     label: "Advocacy and Education",
     blueprintWeight: 4,
     studyMaterial: "ABPD OCE blueprint and current AAPD oral-health policy resources",
@@ -262,8 +255,7 @@ export const PEDIATRIC_TOPICS = [
       },
     ],
   },
-  {
-    id: "pediatric_dental_practice",
+  pediatric_dental_practice: {
     label: "Elements of Pediatric Dental Practice",
     blueprintWeight: 5,
     studyMaterial:
@@ -287,7 +279,9 @@ export const PEDIATRIC_TOPICS = [
       },
     ],
   },
-] as const satisfies readonly InterviewTopic[];
+} as const satisfies Record<TopicId, Omit<InterviewTopic, "id">>;
+
+export const PEDIATRIC_TOPICS = TOPIC_IDS.map((id) => ({ id, ...clinicalTopics[id] }));
 
 export type PediatricTopic = (typeof PEDIATRIC_TOPICS)[number];
 
