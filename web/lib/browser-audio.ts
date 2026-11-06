@@ -108,12 +108,12 @@ export class BrowserInterviewAudio {
         await context.resume();
 
         if (generation !== this.lifecycleGeneration) {
-          this.cleanup();
-
           return false;
         }
       } catch (error) {
-        this.cleanup();
+        if (generation === this.lifecycleGeneration) {
+          this.cleanup();
+        }
         throw error;
       }
     }
@@ -170,13 +170,20 @@ export class BrowserInterviewAudio {
       };
 
       await context.resume();
+
+      if (generation !== this.lifecycleGeneration || context !== this.context) {
+        return false;
+      }
+
       this.syncCaptureState();
 
       return true;
     } catch {
       // Microphone permission/device failures must not discard an already-unlocked
       // playback graph: the examiner can still speak while the candidate types.
-      this.cleanupCapture();
+      if (generation === this.lifecycleGeneration && context === this.context) {
+        this.cleanupCapture();
+      }
 
       return false;
     }
