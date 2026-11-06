@@ -84,3 +84,11 @@ PR: https://github.com/aranlucas/pediatric-interviewer-esp32/pull/76.
 Initial CI run: https://github.com/aranlucas/pediatric-interviewer-esp32/actions/runs/42304151498.
 Validation remains pending; the PR watcher will resume this audit for failures
 and merge eligibility. No tests or builds have run locally.
+
+CI run 42304247166 established that fixed audio regressions pass and both
+replacement-startup assertions fail against baseline (`audio-regression-proof`
+succeeded). All 82 web tests and Worker tests/check/dry-run passed. The initial
+full gate stopped on a missing lint blank line; e2e stopped on an ambiguous
+unscoped alert locator. Both are corrected without weakening assertions; the
+e2e alert is scoped to the named connection-error main region. Revalidation
+remains in CI.

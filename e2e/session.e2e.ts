@@ -23,7 +23,9 @@ test("secure setup failure can be retried into a configurable interview", async 
   // The fixture host is loopback; no production agent or model is contacted.
   await app.open("/");
   await expect(screen.getByRole("heading", "Secure connection unavailable")).toBeVisible();
-  await expect(screen.getByRole("alert")).toContainText("Secure interviewer setup is unavailable");
+  await expect(
+    screen.getByRole("main", "Angry Cat connection error").getByRole("alert"),
+  ).toContainText("Secure interviewer setup is unavailable");
   available = true;
   await screen.getByRole("button", "Retry connection").click();
   await expect(screen.getByRole("complementary", "Study topics")).toBeVisible();

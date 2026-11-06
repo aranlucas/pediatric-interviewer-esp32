@@ -114,6 +114,7 @@ export class BrowserInterviewAudio {
         if (generation === this.lifecycleGeneration) {
           this.cleanup();
         }
+
         throw error;
       }
     }
