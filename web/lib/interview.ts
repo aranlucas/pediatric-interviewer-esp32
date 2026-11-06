@@ -1,71 +1,71 @@
-export const TOTAL_QUESTIONS = 6;
+import {
+  DEFAULT_INTERVIEW_QUESTION_COUNT as TOTAL_QUESTIONS,
+  MIN_INTERVIEW_QUESTION_COUNT as MIN_QUESTIONS,
+  MAX_INTERVIEW_QUESTION_COUNT as MAX_QUESTIONS,
+  TOPIC_IDS,
+  INTERVIEW_DIFFICULTIES,
+  type TopicId,
+  type InterviewDifficulty,
+  type InterviewStatus,
+} from "../../shared/interview-contract";
+export {
+  DEFAULT_INTERVIEW_QUESTION_COUNT as TOTAL_QUESTIONS,
+  MIN_INTERVIEW_QUESTION_COUNT as MIN_QUESTIONS,
+  MAX_INTERVIEW_QUESTION_COUNT as MAX_QUESTIONS,
+  DEFAULT_INTERVIEW_DIFFICULTY as DEFAULT_DIFFICULTY,
+  type TopicId,
+  type InterviewDifficulty,
+  type InterviewStatus,
+} from "../../shared/interview-contract";
 
-export const MIN_QUESTIONS = 3;
+const topicCopy = {
+  behavior_guidance: { label: "Behavior Guidance", short: "Behavior Guidance" },
+  growth_development: { label: "Growth & Development", short: "Growth & Development" },
+  facial_injury_emergency_surgery: {
+    label: "Oral Facial Injury, Emergency Care & Oral Surgery",
+    short: "Oral Facial Injury",
+  },
+  diagnosis_pathology_radiology_medicine: {
+    label: "Diagnosis, Oral Pathology, Oral Radiology & Oral Medicine",
+    short: "Diagnosis & Pathology",
+  },
+  prevention_health_promotion: {
+    label: "Prevention & Health Promotion",
+    short: "Prevention",
+  },
+  caries_management_restorative: {
+    label: "Caries Diagnosis, Management & Restorative Treatment",
+    short: "Caries & Restorative",
+  },
+  pulp_therapy: { label: "Pulp Therapy", short: "Pulp Therapy" },
+  special_health_care_needs: {
+    label: "Special Health Care Needs",
+    short: "Special Health Care Needs",
+  },
+  advocacy_education: { label: "Advocacy & Education", short: "Advocacy & Education" },
+  pediatric_dental_practice: {
+    label: "Elements of Pediatric Dental Practice",
+    short: "Pediatric Dental Practice",
+  },
+} as const satisfies Record<TopicId, { label: string; short: string }>;
 
-export const MAX_QUESTIONS = 10;
+export const TOPICS = TOPIC_IDS.map((id) => ({ id, ...topicCopy[id] }));
 
 export const QUESTION_COUNT_OPTIONS = Array.from(
   { length: MAX_QUESTIONS - MIN_QUESTIONS + 1 },
   (_, index) => MIN_QUESTIONS + index,
 );
 
-export const DIFFICULTY_OPTIONS = [
-  { id: "easy", label: "Easy", detail: "Clear findings and core decisions" },
-  { id: "standard", label: "Standard", detail: "Realistic board-style uncertainty" },
-  { id: "hard", label: "Hard", detail: "Complex trade-offs and evolving findings" },
-] as const;
+const difficultyCopy = {
+  easy: { label: "Easy", detail: "Clear findings and core decisions" },
+  standard: { label: "Standard", detail: "Realistic board-style uncertainty" },
+  hard: { label: "Hard", detail: "Complex trade-offs and evolving findings" },
+} as const satisfies Record<InterviewDifficulty, { label: string; detail: string }>;
 
-export type InterviewDifficulty = (typeof DIFFICULTY_OPTIONS)[number]["id"];
-
-export const DEFAULT_DIFFICULTY: InterviewDifficulty = "standard";
-
-export const TOPICS = [
-  { id: "behavior_guidance", label: "Behavior Guidance", short: "Behavior Guidance" },
-  { id: "growth_development", label: "Growth & Development", short: "Growth & Development" },
-  {
-    id: "facial_injury_emergency_surgery",
-    label: "Oral Facial Injury, Emergency Care & Oral Surgery",
-    short: "Oral Facial Injury",
-  },
-  {
-    id: "diagnosis_pathology_radiology_medicine",
-    label: "Diagnosis, Oral Pathology, Oral Radiology & Oral Medicine",
-    short: "Diagnosis & Pathology",
-  },
-  {
-    id: "prevention_health_promotion",
-    label: "Prevention & Health Promotion",
-    short: "Prevention",
-  },
-  {
-    id: "caries_management_restorative",
-    label: "Caries Diagnosis, Management & Restorative Treatment",
-    short: "Caries & Restorative",
-  },
-  { id: "pulp_therapy", label: "Pulp Therapy", short: "Pulp Therapy" },
-  {
-    id: "special_health_care_needs",
-    label: "Special Health Care Needs",
-    short: "Special Health Care Needs",
-  },
-  { id: "advocacy_education", label: "Advocacy & Education", short: "Advocacy & Education" },
-  {
-    id: "pediatric_dental_practice",
-    label: "Elements of Pediatric Dental Practice",
-    short: "Pediatric Dental Practice",
-  },
-] as const;
-
-export type TopicId = (typeof TOPICS)[number]["id"];
-
-export type InterviewStatus =
-  | "idle"
-  | "thinking"
-  | "listening"
-  | "evaluating"
-  | "speaking"
-  | "complete"
-  | "error";
+export const DIFFICULTY_OPTIONS = INTERVIEW_DIFFICULTIES.map((id) => ({
+  id,
+  ...difficultyCopy[id],
+}));
 
 export type Score = {
   skillset: string;

@@ -189,7 +189,6 @@ function decodePcmWav(bytes: Uint8Array): OpeningSpeech {
   return { pcm, sampleRate: format.sampleRate };
 }
 
-/** Validates bounded raw PCM or WAV Gemini TTS output. */
 export function decodeOpeningSpeech(audio: OpeningSpeechAudio | undefined): OpeningSpeech {
   if (!audio?.data) {
     throw new Error("Gemini TTS returned no audio data.");

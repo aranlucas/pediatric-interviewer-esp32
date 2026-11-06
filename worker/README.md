@@ -124,12 +124,12 @@ firmware `interviewer_config.h` without printing them, or accepts both
 `INTERVIEWER_WS_URL` and `DEVICE_TOKEN` as environment overrides. Consult
 `pnpm simulate:interview --help` for individual timing/noise options.
 Full six-answer runs and partial runs with `--wait-report` fetch private R2
-JSON and check the saved exchanges. The suite adds pause, explicit-commit,
-noise and modeled playback-jitter checks, writing ignored `simulation-report.json`.
+JSON and check the saved exchanges. The suite adds pause, explicit-commit and
+noise checks, writing ignored `simulation-report.json`.
 
-`smoke:web` is also a live-service test. Its current fixture requests an
-existing room without an owner cookie, conflicting with the session ownership
-contract; it needs updating before it can serve as a rollout gate.
+`smoke:web` is also a live-service test. It checks server-created rooms,
+owner-authorized session refresh, private cookies, HTTP guards and the signed
+WebSocket handshake. Run it explicitly against a configured deployment.
 
 Host simulation does not validate the physical microphone, codec, Wi-Fi/RF,
 power or display. Use the [Wokwi guide](../simulator/wokwi/README.md) for simulated

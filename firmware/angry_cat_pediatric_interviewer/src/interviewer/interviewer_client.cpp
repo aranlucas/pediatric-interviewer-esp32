@@ -22,11 +22,6 @@ constexpr char kPediatricInterviewerDeviceToken[] = "";
 constexpr char kPediatricInterviewerRootCa[] = "";
 #elif __has_include("interviewer_config.h")
 #include "interviewer_config.h"
-#elif __has_include("../../../../../waveshare_touch_demo/cloudflare_config.h")
-#include "../../../../../waveshare_touch_demo/cloudflare_config.h"
-#define kPediatricInterviewerWebSocketUrl kAngryCatWebSocketUrl
-#define kPediatricInterviewerDeviceToken kAngryCatDeviceToken
-#define kPediatricInterviewerRootCa kAngryCatRootCa
 #else
 constexpr char kPediatricInterviewerWebSocketUrl[] = "";
 constexpr char kPediatricInterviewerDeviceToken[] = "";

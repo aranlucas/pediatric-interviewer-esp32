@@ -1479,7 +1479,6 @@ void loop() {
   if (released)
     longPressHandled = false;
 
-  // Clear the overlay once it expires; renderScreen redraws without it.
   if (volumeOverlayShown && now >= volumeOverlayUntilMs) {
     volumeOverlayShown = false;
     screenDirty = true;
@@ -1488,8 +1487,6 @@ void loop() {
   if (screenDirty) {
     renderScreen();
     if (now < volumeOverlayUntilMs) {
-      // renderScreen has already flushed; paint over the canvas and flush the
-      // overlay on top of it.
       volumeOverlayShown = true;
       drawVolumeOverlay();
       flushDisplay();

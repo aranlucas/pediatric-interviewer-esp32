@@ -1,16 +1,9 @@
+import { INTERVIEW_STATUSES } from "../../shared/interview-contract";
 import { z } from "zod";
 
 const messageSchema = z.record(z.string(), z.json());
 
-const statusSchema = z.enum([
-  "idle",
-  "thinking",
-  "listening",
-  "evaluating",
-  "speaking",
-  "complete",
-  "error",
-]);
+const statusSchema = z.enum(INTERVIEW_STATUSES);
 
 export function parseInterviewMessage(text: string) {
   return messageSchema.parse(JSON.parse(text));

@@ -2465,7 +2465,7 @@ export class InterviewerCore {
       return;
     }
 
-    if (!shouldEndTurn(content, this.openingSequenceInProgress)) {
+    if (!shouldEndTurn(content)) {
       return;
     }
 

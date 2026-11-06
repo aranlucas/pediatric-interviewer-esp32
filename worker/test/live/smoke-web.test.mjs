@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import { z } from "zod";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import { WebSocket } from "ws";
 
@@ -27,13 +27,8 @@ function assert(condition, message) {
   }
 }
 
-function roomName() {
-  return `web-${randomBytes(16).toString("hex")}`;
-}
-
-/** @param {string} room */
-async function fetchSession(room) {
-  const response = await fetch(`${WEB_ORIGIN}/api/session?room=${room}`, {
+async function fetchSession() {
+  const response = await fetch(`${WEB_ORIGIN}/api/session`, {
     method: "POST",
     headers: { Origin: WEB_ORIGIN },
   });
@@ -48,7 +43,7 @@ async function fetchSession(room) {
     })
     .parse(await response.json());
 
-  assert(payload.room === room, "session endpoint returned the wrong room");
+  assert(/^web-[0-9a-f]{32}$/.test(payload.room), "session endpoint returned an invalid room");
   assert(Number.isSafeInteger(payload.expiresAt), "missing token expiry");
 
   const remainingMs = payload.expiresAt - Date.now();
@@ -58,14 +53,37 @@ async function fetchSession(room) {
     "connect token does not have the expected two-hour lifetime",
   );
 
-  const cookie = response.headers.get("set-cookie") ?? "";
-  assert(cookie.startsWith("__Host-angry-cat-report="), "missing host-scoped report cookie");
+  const cookies = response.headers.getSetCookie();
+  const reportCookie = cookies.find((cookie) => cookie.startsWith("__Host-angry-cat-report="));
+  const ownerName = `__Host-angry-cat-owner-${payload.room.slice(4)}`;
+  const ownerCookie = cookies.find((cookie) => cookie.startsWith(`${ownerName}=`));
+  assert(reportCookie, "missing host-scoped report cookie");
+  assert(ownerCookie, "missing room owner cookie");
 
-  for (const attribute of ["Secure", "HttpOnly", "SameSite=Strict", "Path=/"]) {
-    assert(cookie.includes(attribute), `report cookie is missing ${attribute}`);
+  for (const cookie of [reportCookie, ownerCookie]) {
+    for (const attribute of ["Secure", "HttpOnly", "SameSite=Strict", "Path=/"]) {
+      assert(cookie.includes(attribute), `cookie is missing ${attribute}`);
+    }
   }
 
-  return payload.token;
+  const refreshUrl = `${WEB_ORIGIN}/api/session?room=${payload.room}`;
+  const unauthorized = await fetch(refreshUrl, {
+    method: "POST",
+    headers: { Origin: WEB_ORIGIN },
+  });
+  assert(unauthorized.status === 401, "room refresh did not require ownership");
+
+  const refreshed = await fetch(refreshUrl, {
+    method: "POST",
+    headers: { Origin: WEB_ORIGIN, Cookie: ownerCookie.split(";")[0] },
+  });
+  assert(refreshed.status === 200, `owner refresh returned ${refreshed.status}`);
+  const refreshedPayload = z
+    .object({ room: z.string(), token: z.string().min(41) })
+    .parse(await refreshed.json());
+  assert(refreshedPayload.room === payload.room, "owner refresh changed rooms");
+
+  return { room: payload.room, token: refreshedPayload.token };
 }
 
 /** @param {string} room */
@@ -162,8 +180,7 @@ async function main() {
     "AGENT_HOST must be a hostname and optional port",
   );
 
-  const room = roomName();
-  const token = await fetchSession(room);
+  const { room, token } = await fetchSession();
   await assertHttpGuards(room);
   await assertWebSocket(room, token);
   console.log("Production web smoke passed: session, cookie, HTTP guards, and signed WebSocket.");

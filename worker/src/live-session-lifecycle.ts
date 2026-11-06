@@ -1,6 +1,3 @@
-/** Pure guards and timing helpers for the Gemini Live/DO transport boundary. */
-
-/** Maximum PCM payload accepted from one device WebSocket frame. */
 export const MAX_INPUT_PCM_BYTES = 32 * 1024;
 
 export const MAX_INPUT_PCM_BYTES_PER_SECOND = 128 * 1024;
@@ -9,7 +6,6 @@ export const MAX_TRANSCRIPT_CHARACTERS = 4_000;
 
 export const MAX_PROVIDER_AUDIO_BASE64_CHARACTERS = 512 * 1024;
 
-/** Keeps incremental provider transcription bounded before turn normalization. */
 export function appendBoundedTranscript(
   current: string,
   fragment: string,
@@ -33,7 +29,6 @@ export function appendBoundedTranscript(
   return `${current}${needsWordBoundary ? " " : ""}${fragment}`.slice(0, limit);
 }
 
-/** Rejects implausibly large provider PCM chunks before base64 decoding. */
 export function isBoundedProviderAudio(value: string): boolean {
   return value.length > 0 && value.length <= MAX_PROVIDER_AUDIO_BASE64_CHARACTERS;
 }
@@ -49,7 +44,6 @@ export function isValidPcm16Input(audio: ArrayBuffer): boolean {
   );
 }
 
-/** Small bounded backoff for a provider transport reconnect. */
 export function liveReconnectDelayMs(attempt: number, baseDelayMs: number): number {
   const boundedAttempt = Math.max(1, Math.min(4, Math.trunc(attempt)));
 

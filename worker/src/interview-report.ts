@@ -1,3 +1,5 @@
+import { reportObjectKeys } from "./report-artifacts";
+export { reportObjectKeys } from "./report-artifacts";
 import { z } from "zod";
 
 import {
@@ -179,73 +181,30 @@ export type StoredInterviewReport = {
   cheatsheet?: InterviewCheatsheet;
 };
 
-/**
- * The response schema is built per interview: an exam ended early has fewer
- * exchanges, and the model must be told the exact count so it cannot pad the
- * transcript back up to the configured target with invented questions.
- */
-export function interviewEvaluationJsonSchemaFor(exchangeCount: number) {
-  return {
-    ...interviewEvaluationJsonSchema,
-    properties: {
-      ...interviewEvaluationJsonSchema.properties,
-      scoreSummary: {
-        ...interviewEvaluationJsonSchema.properties.scoreSummary,
-        maxItems: exchangeCount,
-      },
-      exchanges: {
-        ...interviewEvaluationJsonSchema.properties.exchanges,
-        minItems: exchangeCount,
-        maxItems: exchangeCount,
-      },
+// Gemini's schema subset omits string lengths; local Zod validation still
+// enforces them. Follow-ups come from the saved transcript, never the evaluator.
+function geminiResponseSchema(schema: z.ZodType) {
+  const result = z.toJSONSchema(schema, {
+    override: ({ jsonSchema }) => {
+      delete jsonSchema.minLength;
+      delete jsonSchema.maxLength;
     },
-  };
+  });
+  delete result.$schema;
+
+  return result;
 }
 
-export const interviewEvaluationJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    outcome: { type: "string", enum: outcomeSchema.options },
-    examinerSummary: { type: "string" },
-    scoreSummary: {
-      type: "array",
-      minItems: 1,
-      maxItems: MAX_INTERVIEW_QUESTION_COUNT,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          skillset: { type: "string" },
-          skill: { type: "string", enum: skillSchema.options },
-          score: { type: "integer", minimum: 1, maximum: 3 },
-          rationale: { type: "string" },
-        },
-        required: ["skillset", "skill", "score", "rationale"],
-      },
-    },
-    exchanges: {
-      type: "array",
-      minItems: 1,
-      maxItems: MAX_INTERVIEW_QUESTION_COUNT,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          question: { type: "string" },
-          answer: { type: "string" },
-          feedback: { type: "string" },
-          idealResponse: { type: "string" },
-          skillset: { type: "string" },
-          skill: { type: "string", enum: skillSchema.options },
-          score: { type: "integer", minimum: 1, maximum: 3 },
-        },
-        required: ["question", "answer", "feedback", "idealResponse", "skillset", "skill", "score"],
-      },
-    },
-  },
-  required: ["outcome", "examinerSummary", "scoreSummary", "exchanges"],
-} as const;
+const providerEvaluatedExchangeSchema = evaluatedExchangeSchema.omit({ followUps: true });
+
+export function interviewEvaluationJsonSchemaFor(exchangeCount: number) {
+  return geminiResponseSchema(
+    interviewEvaluationSchema.extend({
+      scoreSummary: interviewEvaluationSchema.shape.scoreSummary.max(exchangeCount),
+      exchanges: z.array(providerEvaluatedExchangeSchema).length(exchangeCount),
+    }),
+  );
+}
 
 function clean(value: string, maximum: number): string {
   return value.replaceAll(/\s+/g, " ").trim().slice(0, maximum);
@@ -483,59 +442,7 @@ export async function evaluateInterview(
   return evaluation;
 }
 
-export const interviewCheatsheetJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    headline: { type: "string" },
-    answerSpine: {
-      type: "array",
-      minItems: 3,
-      maxItems: 6,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          move: { type: "string" },
-          whatToSay: { type: "string" },
-        },
-        required: ["move", "whatToSay"],
-      },
-    },
-    questionPatterns: {
-      type: "array",
-      minItems: 1,
-      maxItems: MAX_INTERVIEW_QUESTION_COUNT,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          questionType: { type: "string" },
-          howToOpen: { type: "string" },
-          mustCover: { type: "array", minItems: 2, maxItems: 6, items: { type: "string" } },
-          commonPitfall: { type: "string" },
-        },
-        required: ["questionType", "howToOpen", "mustCover", "commonPitfall"],
-      },
-    },
-    phrasesToBorrow: {
-      type: "array",
-      minItems: 2,
-      maxItems: 8,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          dimension: { type: "string" },
-          phrase: { type: "string" },
-        },
-        required: ["dimension", "phrase"],
-      },
-    },
-    drills: { type: "array", minItems: 2, maxItems: 5, items: { type: "string" } },
-  },
-  required: ["headline", "answerSpine", "questionPatterns", "phrasesToBorrow", "drills"],
-} as const;
+export const interviewCheatsheetJsonSchema = geminiResponseSchema(interviewCheatsheetSchema);
 
 /**
  * Builds the post-exam cheat sheet from the finished evaluation. This is a
@@ -823,16 +730,6 @@ export function buildCheatsheetMarkdown(report: StoredInterviewReport): string {
   return `${lines.join("\n").trim()}\n`;
 }
 
-export function reportObjectKeys(report: StoredInterviewReport) {
-  const prefix = `pediatric-oral-boards/reports/${report.reportId}`;
-
-  return {
-    json: `${prefix}.json`,
-    markdown: `${prefix}.md`,
-    cheatsheet: `${prefix}-cheatsheet.md`,
-  };
-}
-
 export interface ReportStore {
   put(
     key: string,
@@ -847,7 +744,7 @@ export async function storeInterviewReport(
   bucket: ReportStore,
   report: StoredInterviewReport,
 ): Promise<StoredReportKeys> {
-  const keys = reportObjectKeys(report);
+  const keys = reportObjectKeys(report.reportId);
 
   const metadata = {
     reportId: report.reportId,

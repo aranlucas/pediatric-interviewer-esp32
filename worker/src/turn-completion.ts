@@ -15,7 +15,6 @@ export interface CompletionSignal {
   turnComplete?: boolean;
 }
 
-/** Whether a serverContent message reports any kind of response completion. */
 export function isResponseComplete(signal: CompletionSignal): boolean {
   return signal.generationComplete === true || signal.turnComplete === true;
 }
@@ -28,8 +27,6 @@ export function isResponseComplete(signal: CompletionSignal): boolean {
  * definitive `turnComplete` boundary so normal turns and opening turns have
  * identical ordering semantics.
  */
-export function shouldEndTurn(signal: CompletionSignal, openingInProgress: boolean): boolean {
-  void openingInProgress;
-
+export function shouldEndTurn(signal: CompletionSignal): boolean {
   return Boolean(signal.turnComplete);
 }

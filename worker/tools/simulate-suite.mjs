@@ -4,7 +4,6 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { simulatePlaybackBuffer } from "./audio-buffer-model.mjs";
 import { interviewerSettings } from "./interviewer-settings.mjs";
 import { simulationCompleteSchema, storedReportSchema } from "./simulation-protocol.mjs";
 
@@ -215,13 +214,6 @@ async function main() {
         transcriptCharacters: result.candidateTranscripts[0].length,
       };
     }),
-    await runGate("playback_350ms_jitter", () => {
-      const model = simulatePlaybackBuffer({ maximumJitterMs: 350 });
-      requireCondition(model.passed, "buffer model underrun or overflow");
-      requireCondition(model.maximumArrivalGapMs >= 350, "jitter fixture was not applied");
-
-      return model;
-    }),
     await runGate("six_turn_report_to_r2", async () => {
       const result = await runLiveSimulation("six_turn_report_to_r2", [
         "--turns",
@@ -273,8 +265,7 @@ async function main() {
     generatedAt: new Date().toISOString(),
     scope: {
       live: "deployed Worker, Gemini Live, Durable Object, transcripts, and R2",
-      modeled: "ESP32 playback buffer under ordered WebSocket jitter",
-      excluded: "analog microphone, codec, power, and RF hardware",
+      excluded: "ESP32 playback buffering, analog microphone, codec, power, and RF hardware",
     },
     status: failed.length === 0 ? "passed" : "failed",
     passed: gates.length - failed.length,

@@ -121,7 +121,6 @@ export function parseOpeningCaseResponse(outputText: string | undefined): string
   return casePresentation;
 }
 
-/** Generates and semantically validates a synthetic case before Live connects. */
 export async function generateOpeningCase(
   apiKey: string,
   topic: InterviewTopic,
