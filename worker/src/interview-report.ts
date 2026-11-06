@@ -1,5 +1,4 @@
 import { reportObjectKeys } from "./report-artifacts";
-export { reportObjectKeys } from "./report-artifacts";
 import { z } from "zod";
 
 import {
@@ -15,6 +14,8 @@ import {
   type PediatricTopicId,
 } from "./interview-content";
 import { workerLog } from "./log";
+
+export { reportObjectKeys } from "./report-artifacts";
 
 /** Legacy/device default. Individual web sessions can override this value. */
 export const INTERVIEW_QUESTION_COUNT = DEFAULT_INTERVIEW_QUESTION_COUNT;
@@ -190,6 +191,7 @@ function geminiResponseSchema(schema: z.ZodType) {
       delete jsonSchema.maxLength;
     },
   });
+
   delete result.$schema;
 
   return result;
@@ -264,9 +266,7 @@ type GenerateContentBody = {
   generationConfig: {
     maxOutputTokens: number;
     responseMimeType: string;
-    responseJsonSchema:
-      | ReturnType<typeof interviewEvaluationJsonSchemaFor>
-      | typeof interviewCheatsheetJsonSchema;
+    responseJsonSchema: ReturnType<typeof geminiResponseSchema>;
   };
 };
 

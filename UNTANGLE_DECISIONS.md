@@ -99,3 +99,10 @@ items are addressed or retained with reasons above. Local shared-contract lint
 identified spacing only; fixed before submission. Behavioral suites, package
 checks and deployment dry runs remain CI-only. No live service or board validation
 is claimed. PR delivery now proceeds under the user's authorized merge policy.
+
+## CI follow-up
+
+Run 42262390909 passed all 114 Worker and 79 web tests, then failed lint on
+introduced spacing, inline presentation types and a redundant schema type union.
+These are corrected without altering runtime behavior or weakening tests. Tests
+remain CI-only; the next head must pass the complete CI pipeline before merge.

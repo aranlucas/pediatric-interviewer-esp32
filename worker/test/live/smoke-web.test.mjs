@@ -67,20 +67,25 @@ async function fetchSession() {
   }
 
   const refreshUrl = `${WEB_ORIGIN}/api/session?room=${payload.room}`;
+
   const unauthorized = await fetch(refreshUrl, {
     method: "POST",
     headers: { Origin: WEB_ORIGIN },
   });
+
   assert(unauthorized.status === 401, "room refresh did not require ownership");
 
   const refreshed = await fetch(refreshUrl, {
     method: "POST",
     headers: { Origin: WEB_ORIGIN, Cookie: ownerCookie.split(";")[0] },
   });
+
   assert(refreshed.status === 200, `owner refresh returned ${refreshed.status}`);
+
   const refreshedPayload = z
     .object({ room: z.string(), token: z.string().min(41) })
     .parse(await refreshed.json());
+
   assert(refreshedPayload.room === payload.room, "owner refresh changed rooms");
 
   return { room: payload.room, token: refreshedPayload.token };

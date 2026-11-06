@@ -8,6 +8,7 @@ import {
   type InterviewDifficulty,
   type InterviewStatus,
 } from "../../shared/interview-contract";
+
 export {
   DEFAULT_INTERVIEW_QUESTION_COUNT as TOTAL_QUESTIONS,
   MIN_INTERVIEW_QUESTION_COUNT as MIN_QUESTIONS,
@@ -17,6 +18,8 @@ export {
   type InterviewDifficulty,
   type InterviewStatus,
 } from "../../shared/interview-contract";
+
+type TopicCopy = { label: string; short: string };
 
 const topicCopy = {
   behavior_guidance: { label: "Behavior Guidance", short: "Behavior Guidance" },
@@ -47,7 +50,7 @@ const topicCopy = {
     label: "Elements of Pediatric Dental Practice",
     short: "Pediatric Dental Practice",
   },
-} as const satisfies Record<TopicId, { label: string; short: string }>;
+} as const satisfies Record<TopicId, TopicCopy>;
 
 export const TOPICS = TOPIC_IDS.map((id) => ({ id, ...topicCopy[id] }));
 
@@ -56,11 +59,13 @@ export const QUESTION_COUNT_OPTIONS = Array.from(
   (_, index) => MIN_QUESTIONS + index,
 );
 
+type DifficultyCopy = { label: string; detail: string };
+
 const difficultyCopy = {
   easy: { label: "Easy", detail: "Clear findings and core decisions" },
   standard: { label: "Standard", detail: "Realistic board-style uncertainty" },
   hard: { label: "Hard", detail: "Complex trade-offs and evolving findings" },
-} as const satisfies Record<InterviewDifficulty, { label: string; detail: string }>;
+} as const satisfies Record<InterviewDifficulty, DifficultyCopy>;
 
 export const DIFFICULTY_OPTIONS = INTERVIEW_DIFFICULTIES.map((id) => ({
   id,
