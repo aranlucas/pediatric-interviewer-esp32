@@ -66,3 +66,21 @@ engine does not execute ESP32 firmware. No provider/model credentials are needed
 CI will run regressions against fixed sources and the same regression file against
 baseline audio source, requiring the baseline run to fail for the intended tests.
 Independent review and CI outcomes will be recorded before merge.
+
+## Independent review and remaining limits
+
+Independent reviewer `/root/independent_review` challenged Worker isolation,
+provider lifecycle, report retries, firmware connection timing, and the authored
+fix/tests/config. No blocking objection to the changes. It confirmed documented
+hard-eviction loss of uncommitted audio is not a new finding. A third regression
+also checks cancellation during final capture resume returns false.
+
+Firmware readiness uses a 20-second deadline including connection time, while
+provider startup permits longer operations. This is a timing concern requiring
+physical/network measurement before selecting a replacement deadline; browser
+or Wokwi success cannot establish safe board timing. No firmware change is made.
+
+PR: https://github.com/aranlucas/pediatric-interviewer-esp32/pull/76.
+Initial CI run: https://github.com/aranlucas/pediatric-interviewer-esp32/actions/runs/42304151498.
+Validation remains pending; the PR watcher will resume this audit for failures
+and merge eligibility. No tests or builds have run locally.
