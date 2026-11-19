@@ -29,7 +29,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/config": "0.32.1",
+    "@cloudflare/config": "1.0.0-rc.1",
     "@opennextjs/cloudflare": "^1.20.13",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
@@ -37,12 +37,12 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
-    "cf": "1.0.0-beta.32",
+    "cf": "1.0.0-rc.2",
     "jsdom": "^31.0.0",
     "oxfmt": "^0.79.0",
     "oxlint": "^1.89.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5",
-    "wrangler": "^4.151.3"
+    "wrangler": "^4.163.0"
   }
 }

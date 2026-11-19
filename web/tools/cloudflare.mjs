@@ -19,8 +19,8 @@ const [command, ...args] = process.argv.slice(2);
 
 switch (command) {
   case "build": {
-    // cf beta.13 detects Next.js and runs next build, which produces no cf
-    // Build Output. Build OpenNext first, then use cf's own bundler delegate.
+    // OpenNext builds the Worker and assets. Wrangler then bundles them into
+    // the Cloudflare Build Output consumed by cf deploy --prebuilt.
     const options = parseCfWranglerBuildArgs(args);
     const configPath = await prepareOpenNextConfig(options.mode);
     run(["opennextjs-cloudflare", "build", "--config", configPath]);
