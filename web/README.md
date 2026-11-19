@@ -25,7 +25,8 @@ serves that artifact locally.
 OpenNext's dev proxy and build use the derived, ignored
 `.opennext-wrangler.json`; edit the source config rather than that file.
 The build helper uses OpenNext plus Wrangler's bundler delegate to produce
-`.cloudflare/output/v0/`. Wrangler remains required by this adapter.
+`.cloudflare/output/v1/` for `cf deploy --prebuilt`. The delegate requires
+Wrangler 4.163.0 or newer to write v1 output.
 
 The `INTERVIEW_REPORTS` binding has `dev: { remote: true }`: local report-library
 routes can read the real R2 bucket. `PUBLIC_REPORTS_ENABLED=false` keeps the
