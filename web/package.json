@@ -19,7 +19,7 @@
     "build:worker": "pnpm cf-typegen && node tools/cloudflare.mjs build"
   },
   "dependencies": {
-    "agents": "^0.33.0",
+    "agents": "^0.34.0",
     "lucide-react": "^1.61.0",
     "next": "^16.4.2",
     "react": "^19.3.1",
@@ -29,7 +29,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/config": "1.0.0-rc.1",
+    "@cloudflare/config": "1.0.0-rc.3",
     "@opennextjs/cloudflare": "^1.20.13",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
@@ -37,7 +37,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
-    "cf": "1.0.0-rc.2",
+    "cf": "1.0.0-rc.3",
     "jsdom": "^31.0.0",
     "oxfmt": "^0.79.0",
     "oxlint": "^1.89.0",
